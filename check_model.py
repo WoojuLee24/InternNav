@@ -1,6 +1,7 @@
 from internnav.configs.agent import AgentCfg
 from internnav.utils import AgentClient
 
+# initialize agent
 agent=AgentCfg(
       server_host='localhost',
       server_port=8087,
@@ -31,3 +32,19 @@ agent=AgentCfg(
       vis_debug=True
 )
 agent = AgentClient(agent)
+
+# Load a capture from saved D455 camera:
+from scripts.iros_challenge.onsite_competition.sdk.save_obs import load_obs_from_meta
+rs_meta_path = '/home/gdr/gd_vln/workspace/src/InternNav/scripts/iros_challenge/onsite_competition/captures/rs_meta.json'
+
+fake_obs_640 = load_obs_from_meta(rs_meta_path)
+fake_obs_640['instruction'] = 'go to the red car'
+print(fake_obs_640['rgb'].shape, fake_obs_640['depth'].shape)
+
+
+# Test model inference
+action = agent.step([fake_obs_640])[0]['action'][0]
+print(f"Action taken: {action}")
+
+
+

@@ -16,7 +16,7 @@ eval_cfg = EvalCfg(
         model_settings={
             'env_num': 1,
             'sim_num': 1,
-            'model_path': "checkpoints/InternVLA-N1-DualVLN",
+            'model_path': "checkpoints/InternVLA-N1", # "checkpoints/InternVLA-N1-DualVLN",
             'camera_intrinsic': [[585.0, 0.0, 320.0], [0.0, 585.0, 240.0], [0.0, 0.0, 1.0]],
             'width': 640,
             'height': 480,
@@ -32,7 +32,7 @@ eval_cfg = EvalCfg(
             'continuous_traj': True,
             'infer_mode': 'partial_async',  # You can choose "sync" or "partial_async", but for this model, "partial_async" is better.
             # debug
-            'vis_debug': True,  # If vis_debug=True, you can get visualization results
+            'vis_debug': False,  # If vis_debug=True, you can get visualization results
             'vis_debug_path': './logs/test_n1/vis_debug',
         },
     ),

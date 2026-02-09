@@ -8,6 +8,7 @@ import argparse
 import importlib
 import importlib.util
 import sys
+import debugpy
 
 # Import for agent registry side effects — do not remove
 from internnav.agent import Agent  # noqa: F401
@@ -24,6 +25,8 @@ def load_eval_cfg(config_path, attr_name='eval_cfg'):
 
 if __name__ == '__main__':
     print("Starting Agent Server...")
+    # debugpy.listen(("0.0.0.0", 5678))
+    # print("Waiting for debugger on port 5678...")
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', type=str, default='localhost')
