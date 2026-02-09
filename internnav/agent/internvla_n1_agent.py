@@ -2,6 +2,7 @@ import copy
 import os
 import threading
 import time
+import atexit
 
 import cv2
 import imageio
@@ -83,6 +84,9 @@ class InternVLAN1Agent(Agent):
             self.fps_writer = imageio.get_writer(f"{self.debug_path}/fps_{self.episode_idx}.mp4", fps=5)
             self.fps_writer2 = imageio.get_writer(f"{self.debug_path}/fps_{self.episode_idx}_dp.mp4", fps=5)
             self.output_pixel = None
+            # Patch: 
+            atexit.register(lambda: self.fps_writer.close() if self.fps_writer else None)
+            atexit.register(lambda: self.fps_writer2.close() if self.fps_writer2 else None)
 
     def reset(self, reset_index=None):
         '''reset_index: [0]'''
@@ -305,6 +309,12 @@ class InternVLAN1Agent(Agent):
                 self.output_pixel = copy.deepcopy(self.s2_output.output_pixel)
                 print(self.output_pixel)
 
+                #  Patch: Ensure 3D array (C, H, W) for NumPy inputs
+                if self.s2_output.depth_memory.ndim == 2:
+                    self.s2_output.depth_memory = self.s2_output.depth_memory[..., np.newaxis]
+                if depth.ndim == 2:
+                    depth = depth[..., np.newaxis]
+
                 if mode != 'sync':
                     processed_pixel_rgb = (
                         np.array(Image.fromarray(self.s2_output.rgb_memory).resize((224, 224))) / 255.0
@@ -317,7 +327,7 @@ class InternVLAN1Agent(Agent):
                     processed_rgb = np.array(Image.fromarray(rgb).resize((224, 224))) / 255.0
                     processed_depth = (
                         np.array(Image.fromarray(depth[:, :, 0]).resize((224, 224))) * 10.0
-                    )  # should be 0-10m
+                    )  # should be 0-10m (TODO: why 10.0?)
                     processed_depth[processed_depth > self.sys1_depth_threshold] = self.sys1_depth_threshold
 
                     rgbs = (
