@@ -63,7 +63,7 @@ setuptools.setup(
     description='InternNav: A benchmark evaluation framework for navigation tasks',
     long_description=long_description,
     long_description_content_type='text/markdown',
-    python_requires='>=3.8, <=3.12',
+    python_requires='>=3.8, <=3.12.3',
     classifiers=[
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
