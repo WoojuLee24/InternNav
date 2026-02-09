@@ -72,8 +72,15 @@ class NextDiTCrossAttn(PreTrainedModel):
             cross_attention_dim=config.latent_embedding_size,
         )
 
-        if self._gradient_checkpointing:
+        # if self._gradient_checkpointing:
+        #     self.model.enable_gradient_checkpointing()
+
+        # Patch for diffusers version compatibility
+        if hasattr(self.model, "_set_gradient_checkpointing"):
+            self.model._set_gradient_checkpointing(True)
+        else:
             self.model.enable_gradient_checkpointing()
+
 
         # self.model.requires_grad_(False)
 
