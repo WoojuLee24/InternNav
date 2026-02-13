@@ -11,6 +11,7 @@ import numpy as np
 import torch
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
+ROOT = Path(__file__).resolve().parents[2]
 
 from collections import OrderedDict
 
@@ -26,7 +27,9 @@ DEFAULT_IMAGE_TOKEN = "<image>"
 class InternVLAN1AsyncAgent:
     def __init__(self, args):
         self.device = torch.device(args.device)
-        self.save_dir = "test_data/" + datetime.now().strftime("%Y%m%d_%H%M%S")
+        # self.save_dir = "test_data/" + datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.save_dir = ROOT / "test_data" / datetime.now().strftime("%Y%m%d_%H%M%S")
+        os.makedirs(self.save_dir, exist_ok=True)
         print(f"args.model_path{args.model_path}")
         self.model = InternVLAN1ForCausalLM.from_pretrained(
             args.model_path,
@@ -99,7 +102,8 @@ class InternVLAN1AsyncAgent:
         self.pixel_goal_rgb = None
         self.pixel_goal_depth = None
 
-        self.save_dir = "test_data/" + datetime.now().strftime("%Y%m%d_%H%M%S")
+        # self.save_dir = "test_data/" + datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.save_dir = ROOT / "test_data" / datetime.now().strftime("%Y%m%d_%H%M%S")
         os.makedirs(self.save_dir, exist_ok=True)
 
     def parse_actions(self, output):
@@ -168,9 +172,9 @@ class InternVLAN1AsyncAgent:
         if not look_down:
             image = image.resize((self.resize_w, self.resize_h))
             self.rgb_list.append(image)
-            image.save(f"{self.save_dir}/debug_raw_{self.episode_idx: 04d}.jpg")
+            image.save(f"{self.save_dir}/debug_raw_{self.episode_idx:04d}.jpg")
         else:
-            image.save(f"{self.save_dir}/debug_raw_{self.episode_idx: 04d}_look_down.jpg")
+            image.save(f"{self.save_dir}/debug_raw_{self.episode_idx:04d}_look_down.jpg")
         if not look_down:
             self.conversation_history = []
             self.past_key_values = None
