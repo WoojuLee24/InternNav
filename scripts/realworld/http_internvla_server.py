@@ -3,10 +3,17 @@ import json
 import os
 import time
 from datetime import datetime
+import sys
+from pathlib import Path
 
 import numpy as np
 from flask import Flask, jsonify, request
 from PIL import Image
+
+# Add project path
+project_root = Path("/home/gdr/gd_vln/workspace/src/InternNav")
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root / 'src/diffusion-policy'))
 
 from internnav.agent.internvla_n1_agent_realworld import InternVLAN1AsyncAgent
 
@@ -65,6 +72,7 @@ def eval_dual():
     json_output = {}
     if dual_sys_output.output_action is not None:
         json_output['discrete_action'] = dual_sys_output.output_action
+
     else:
         json_output['trajectory'] = dual_sys_output.output_trajectory.tolist()
         if dual_sys_output.output_pixel is not None:
@@ -85,17 +93,27 @@ if __name__ == '__main__':
     parser.add_argument("--resize_w", type=int, default=384)
     parser.add_argument("--resize_h", type=int, default=384)
     parser.add_argument("--num_history", type=int, default=8)
+    parser.add_argument("--plan_step_gap", type=int, default=4)
     args = parser.parse_args()
 
     args.camera_intrinsic = np.array(
         [[386.5, 0.0, 328.9, 0.0], [0.0, 386.5, 244, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
     )
     agent = InternVLAN1AsyncAgent(args)
+    # agent.step(
+    #     np.zeros((480, 640, 3)),
+    #     np.zeros((480, 640)),
+    #     np.eye(4),
+    #     "hello",
+    #     args.camera_intrinsic,
+    # )
+    # Patch: type error fix for first call
     agent.step(
-        np.zeros((480, 640, 3)),
+        np.zeros((480, 640, 3), dtype=np.uint8),
         np.zeros((480, 640)),
         np.eye(4),
         "hello",
+        args.camera_intrinsic,
     )
     agent.reset()
 
