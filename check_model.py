@@ -12,7 +12,7 @@ agent=AgentCfg(
             'state_encoder': None,
             'env_num': 1,
             'sim_num': 1,
-            'model_path': "checkpoints/InternVLA-N1",
+            'model_path': "checkpoints/InternVLA-N1-w-NavDP",
             'camera_intrinsic': [[585.0, 0.0, 320.0], [0.0, 585.0, 240.0], [0.0, 0.0, 1.0]],
             'width': 640,
             'height': 480,
@@ -35,7 +35,7 @@ agent = AgentClient(agent)
 
 # Load a capture from saved D455 camera:
 from scripts.iros_challenge.onsite_competition.sdk.save_obs import load_obs_from_meta
-rs_meta_path = '/home/gdr/gd_vln/workspace/src/InternNav/scripts/iros_challenge/onsite_competition/captures/rs_meta.json'
+rs_meta_path = 'rs_meta.json'
 
 fake_obs_640 = load_obs_from_meta(rs_meta_path)
 fake_obs_640['instruction'] = 'go to the red car'
