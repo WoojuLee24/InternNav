@@ -1,0 +1,51 @@
+# 1. Base Image
+FROM nvcr.io/nvidia/isaac/ros:noble-ros2_jazzy_d3e84470d576702a380478a513fb3fc6-amd64
+
+# 2. 시스템 패키지 설치
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    vim \
+    build-essential \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# 3. RTX 3080 Ti (sm_86) 및 환경 설정
+ENV TRITON_OVERRIDE_ARCH="sm_86"
+ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
+ENV MAX_JOBS=4
+
+# 4. Constraints 파일 복사
+# 패키지 설치 단계 이전에 복사하여 가이드라인으로 사용합니다.
+COPY constraints.txt /tmp/constraints.txt
+
+# 5. 공통 Python 라이브러리 설치
+# -c 옵션을 통해 이미 설치된 torch/numpy 버전을 강제로 준수하게 합니다.
+RUN pip install --no-cache-dir --break-system-packages -c /tmp/constraints.txt \
+    "transformers==4.51.0" \
+    "huggingface-hub>=0.34.0" \
+    "diffusers>=0.34.0" \
+    "accelerate>=1.11.0" \
+    setuptools_scm \
+    opencv-python \
+    "imageio[ffmpeg]" \
+    fastapi \
+    gym \
+    uvicorn \
+    ftfy \ 
+    "simpy > 1.13.3" 
+
+# 6. 작업 디렉토리 설정
+ARG WORKDIR_PATH=/workspace/InternNav
+WORKDIR ${WORKDIR_PATH}
+
+# 7. 코드 복사 및 내부 프로젝트 설치
+# --no-build-isolation을 사용하여 시스템의 torch/numpy 환경을 빌드 시 참조하게 합니다.
+COPY . .
+RUN pip install -e .[model] --no-build-isolation --break-system-packages -c /tmp/constraints.txt
+
+# 8. 버전 민감 패키지 (Triton & Flash Attention)
+# 최하단에 배치하여 빌드 실패 가능성을 최소화하고 캐시 효율을 높입니다.
+RUN pip install --no-cache-dir --break-system-packages triton==3.6.0 -c /tmp/constraints.txt && \
+    # pip install --no-cache-dir --break-system-packages flash-attn --no-build-isolation -c /tmp/constraints.txt
+    pip install --no-cache-dir --break-system-packages  https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.8.3%2Bcu130torch2.9-cp312-cp312-linux_x86_64.whl --no-build-isolation -c /tmp/constraints.txt
+CMD ["bash"]
