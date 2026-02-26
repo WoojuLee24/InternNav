@@ -132,6 +132,7 @@ class InternVLAN1AsyncAgent:
         dual_sys_output = S2Output()
         no_output_flag = self.output_action is None and self.output_latent is None
         if (self.episode_idx - self.last_s2_idx > self.PLAN_STEP_GAP) or look_down or no_output_flag:
+            t_s2_start = time.time()
             self.output_action, self.output_latent, self.output_pixel = self.step_s2(
                 rgb, depth, pose, instruction, intrinsic, look_down
             )
@@ -139,6 +140,8 @@ class InternVLAN1AsyncAgent:
             dual_sys_output.output_pixel = self.output_pixel
             self.pixel_goal_rgb = copy.deepcopy(rgb)
             self.pixel_goal_depth = copy.deepcopy(depth)
+            t_s2_end = time.time()
+            print(f"[System 2] inference time: {t_s2_end - t_s2_start:.4f}s")
         else:
             self.step_no_infer(rgb, depth, pose)
 
@@ -146,6 +149,7 @@ class InternVLAN1AsyncAgent:
             dual_sys_output.output_action = copy.deepcopy(self.output_action)
             self.output_action = None
         elif self.output_latent is not None:
+            t_s1_start = time.time()
             processed_pixel_rgb = np.array(Image.fromarray(self.pixel_goal_rgb).resize((224, 224))) / 255
             processed_pixel_depth = np.array(Image.fromarray(self.pixel_goal_depth).resize((224, 224)))
             processed_rgb = np.array(Image.fromarray(rgb).resize((224, 224))) / 255
@@ -164,6 +168,8 @@ class InternVLAN1AsyncAgent:
             trajectories = self.step_s1(self.output_latent, rgbs, depths)
 
             dual_sys_output.output_trajectory = traj_to_actions(trajectories, use_discrate_action=False)
+            t_s1_end = time.time()
+            print(f"[System 1] inference time: {t_s1_end - t_s1_start:.4f}s")
 
         return dual_sys_output
 
@@ -172,9 +178,10 @@ class InternVLAN1AsyncAgent:
         if not look_down:
             image = image.resize((self.resize_w, self.resize_h))
             self.rgb_list.append(image)
-            image.save(f"{self.save_dir}/debug_raw_{self.episode_idx:04d}.jpg")
+            # image.save(f"{self.save_dir}/debug_raw_{self.episode_idx:04d}.jpg")
         else:
-            image.save(f"{self.save_dir}/debug_raw_{self.episode_idx:04d}_look_down.jpg")
+            # image.save(f"{self.save_dir}/debug_raw_{self.episode_idx:04d}_look_down.jpg")
+            pass
         if not look_down:
             self.conversation_history = []
             self.past_key_values = None

@@ -24,6 +24,8 @@ idx = 0
 start_time = time.time()
 output_dir = ''
 save_dir = 'vis_debug/http_internvla_server_debug'
+os.makedirs(save_dir, exist_ok=True)
+
 
 @app.route("/eval_dual", methods=['POST'])
 def eval_dual():
@@ -46,7 +48,9 @@ def eval_dual():
     print(f"read http data cost {time.time() - start_time}")
 
     camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
-    instruction = "Turn around and walk out of this office. Turn towards your slight right at the chair. Move forward to the walkway and go near the red bin. You can see an open door on your right side, go inside the open door. Stop at the computer monitor"
+    #instruction = "Turn around and walk out of this office. Turn towards your slight right at the chair. Move forward to the walkway and go near the red bin. You can see an open door on your right side, go inside the open door. Stop at the computer monitor"
+    #instruction = "Turn around and walk out of this office. Turn towards your slight right at the chair. Move forward to the walkway and go near the red bin. You can see an open door on your right side, go inside the open door. Stop at the computer monitor"
+    instruction = "Stop. Just stop. Move forward one step. Move forward two step. Turn right and stop."
     policy_init = data['reset']
     if policy_init:
         start_time = time.time()
@@ -71,7 +75,10 @@ def eval_dual():
             image, depth, camera_pose, instruction, intrinsic=args.camera_intrinsic, look_down=look_down
         )
 
-
+    t1 = time.time()
+    generate_time = t1 - t0
+    print(f"dual sys step time: {generate_time}")
+    
     # 서버의 라우트 함수 내부
     json_data = request.form['json']
     data = json.loads(json_data)
@@ -86,22 +93,19 @@ def eval_dual():
     json_output = {}
     if dual_sys_output.output_action is not None:
         json_output['discrete_action'] = dual_sys_output.output_action
-        annotate_image(image_id, image, agent.llm_output, dual_sys_output.output_trajectory, dual_sys_output.output_pixel, save_dir, filename)
+        # annotate_image(image_id, image, agent.llm_output, dual_sys_output.output_trajectory, dual_sys_output.output_pixel, save_dir, filename)
 
     else:
         json_output['trajectory'] = dual_sys_output.output_trajectory.tolist()
         if dual_sys_output.output_pixel is not None:
             json_output['pixel_goal'] = dual_sys_output.output_pixel
-            annotate_image(image_id, image, 'traj', dual_sys_output.output_trajectory.tolist(), dual_sys_output.output_pixel, save_dir, filename)
+            # annotate_image(image_id, image, 'traj', dual_sys_output.output_trajectory.tolist(), dual_sys_output.output_pixel, save_dir, filename)
         else:
-            annotate_image(image_id, image, 'traj_cached_latent', dual_sys_output.output_trajectory.tolist(), dual_sys_output.output_pixel, save_dir, filename)
+            # annotate_image(image_id, image, 'traj_cached_latent', dual_sys_output.output_trajectory.tolist(), dual_sys_output.output_pixel, save_dir, filename)
+            pass
+        
 
-
-
-    t1 = time.time()
-    generate_time = t1 - t0
-    print(f"dual sys step {generate_time}")
-    print(f"json_output {json_output}")
+    # print(f"json_output {json_output}")
     return jsonify(json_output)
 
 
