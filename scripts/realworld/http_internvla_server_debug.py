@@ -13,11 +13,15 @@ import cv2
 
 
 # Add project path
-project_root = Path("/home/gdr/gd_vln/workspace/src/InternNav")
+# project_root = Path("/home/gdr/gd_vln/workspace/src/InternNav")
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / 'src/diffusion-policy'))
 
 from internnav.agent.internvla_n1_agent_realworld import InternVLAN1AsyncAgent
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from transformation import Calibration
 
 app = Flask(__name__)
 idx = 0
@@ -50,7 +54,9 @@ def eval_dual():
     camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
     #instruction = "Turn around and walk out of this office. Turn towards your slight right at the chair. Move forward to the walkway and go near the red bin. You can see an open door on your right side, go inside the open door. Stop at the computer monitor"
     #instruction = "Turn around and walk out of this office. Turn towards your slight right at the chair. Move forward to the walkway and go near the red bin. You can see an open door on your right side, go inside the open door. Stop at the computer monitor"
-    instruction = "Stop. Just stop. Move forward one step. Move forward two step. Turn right and stop."
+    # instruction = "Stop. Just stop. Move forward one step. Move forward two step. Turn right and stop."
+    # instruction = "Go straight along the walkway and turn right at the crosswalk. Go straight to the end of the crosswalk and stop."
+    instruction = "Go straight along the walkway until you see a crosswalk. Go straight again until you see a second crosswalk. Turn right at the second crosswalk and go straight to the end of the crosswalk. Stop at the end of the crosswalk."
     policy_init = data['reset']
     if policy_init:
         start_time = time.time()
@@ -247,16 +253,24 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--model_path", type=str, default="checkpoints/InternVLA-N1")
+    parser.add_argument("--model_path", type=str, default="checkpoints/InternVLA-N1-w-NavDP")
     parser.add_argument("--resize_w", type=int, default=384)
     parser.add_argument("--resize_h", type=int, default=384)
     parser.add_argument("--num_history", type=int, default=8)
     parser.add_argument("--plan_step_gap", type=int, default=4)
+    parser.add_argument("--calib", type=str, default="calib/calib_scout.txt",
+                        help="Path to calibration file (e.g. calib/calib_scout.txt)")
     args = parser.parse_args()
 
-    args.camera_intrinsic = np.array(
-        [[386.5, 0.0, 328.9, 0.0], [0.0, 386.5, 244, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
-    )
+    calib = Calibration(args.calib)
+    args.camera_intrinsic = np.array([
+        [calib.f_u, 0.0,      calib.c_u, 0.0],
+        [0.0,       calib.f_v, calib.c_v, 0.0],
+        [0.0,       0.0,      1.0,       0.0],
+        [0.0,       0.0,      0.0,       1.0],
+    ])
+    print(f"[Server] Loaded calib: {args.calib}")
+    print(f"[Server] camera_intrinsic fx={calib.f_u:.2f} fy={calib.f_v:.2f} cx={calib.c_u:.2f} cy={calib.c_v:.2f}")
     agent = InternVLAN1AsyncAgent(args)
     # agent.step(
     #     np.zeros((480, 640, 3)),
@@ -275,4 +289,4 @@ if __name__ == '__main__':
     )
     agent.reset()
 
-    app.run(host='0.0.0.0', port=5801)
+    app.run(host='0.0.0.0', port=5802)

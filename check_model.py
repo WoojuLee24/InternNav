@@ -35,7 +35,7 @@ agent = AgentClient(agent)
 
 # Load a capture from saved D455 camera:
 from scripts.iros_challenge.onsite_competition.sdk.save_obs import load_obs_from_meta
-rs_meta_path = 'rs_meta.json'
+rs_meta_path = '/gd_vln/src/InternNav/scripts/iros_challenge/onsite_competition/captures/rs_meta.json'
 
 fake_obs_640 = load_obs_from_meta(rs_meta_path)
 fake_obs_640['instruction'] = 'go to the red car'

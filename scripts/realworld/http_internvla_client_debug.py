@@ -1,3 +1,4 @@
+import argparse
 import copy
 import io
 import json
@@ -10,10 +11,11 @@ from enum import Enum
 import numpy as np
 import rclpy
 import requests
-from geometry_msgs.msg import Twist
-from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Pose, PoseStamped, PointStamped, Twist
+from nav_msgs.msg import Odometry, OccupancyGrid, Path
 from PIL import Image as PIL_Image
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CameraInfo, Image
+from std_msgs.msg import Header
 
 frame_data = {}
 frame_idx = 0
@@ -24,6 +26,7 @@ from message_filters import ApproximateTimeSynchronizer, Subscriber
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from thread_utils import ReadWriteLock
+from transformation import Calibration
 
 
 class ControlMode(Enum):
@@ -42,6 +45,7 @@ last_s2_step = -1
 manager = None
 current_control_mode = ControlMode.MPC_Mode
 trajs_in_world = None
+calib = None
 
 desired_v, desired_w = 0.0, 0.0
 rgb_depth_rw_lock = ReadWriteLock()
@@ -49,7 +53,7 @@ odom_rw_lock = ReadWriteLock()
 mpc_rw_lock = ReadWriteLock()
 
 
-def dual_sys_eval(image_bytes, depth_bytes, front_image_bytes, url='http://127.0.0.1:5801/eval_dual'):
+def dual_sys_eval(image_bytes, depth_bytes, front_image_bytes, url='http://127.0.0.1:5802/eval_dual'):
     global policy_init, http_idx, first_running_time
     
     # [LOG] HTTP 요청 준비
@@ -236,6 +240,8 @@ def planning_thread():
                 manager.get_logger().info(f"[Plan] Updated Trajs in World. Time: {time.time()}")
 
                 manager.last_trajs_in_world = trajs_in_world
+                if 'pixel_goal' in response:
+                    manager.last_pixel_goal = response['pixel_goal']  # [row, col]
                 mpc_rw_lock.acquire_write()
                 global mpc
                 if mpc is None:
@@ -266,32 +272,245 @@ def planning_thread():
         time.sleep(max(0, DESIRED_TIME - (time.time() - start_time)))
 
 
+def build_occupancy_grid(pcloud_xy, stamp, frame_id, resolution=0.1, grid_size=100, center_x=0.0, center_y=0.0):
+    """Build a ROS2 OccupancyGrid message from (N, 2) XY points.
+
+    All points are treated as occupied (100). Unknown cells remain -1.
+    Origin is set to the grid's bottom-left corner.
+    """
+    half = (grid_size * resolution) / 2.0
+    xmin = center_x - half
+    ymin = center_y - half
+
+    grid = -np.ones((grid_size, grid_size), dtype=np.int16)
+
+    if len(pcloud_xy) > 0:
+        pts = np.asarray(pcloud_xy, dtype=np.float64)
+        finite = np.isfinite(pts).all(axis=1)
+        pts = pts[finite]
+        if len(pts) > 0:
+            cx = np.floor((pts[:, 0] - xmin) / resolution).astype(np.int32)
+            cy = np.floor((pts[:, 1] - ymin) / resolution).astype(np.int32)
+            valid = (cx >= 0) & (cx < grid_size) & (cy >= 0) & (cy < grid_size)
+            grid[cy[valid], cx[valid]] = 100
+
+    msg = OccupancyGrid()
+    msg.header = Header(stamp=stamp, frame_id=frame_id)
+    msg.info.resolution = float(resolution)
+    msg.info.width = int(grid_size)
+    msg.info.height = int(grid_size)
+    msg.info.origin = Pose()
+    msg.info.origin.position.x = float(xmin)
+    msg.info.origin.position.y = float(ymin)
+    msg.info.origin.position.z = 0.0
+    msg.info.origin.orientation.w = 1.0
+    msg.data = grid.reshape(-1).astype(np.int8).tolist()
+    return msg
+
+
+def visualize_thread():
+    global manager, calib
+
+    while manager is None or calib is None:
+        time.sleep(0.1)
+
+    manager.get_logger().info("[Thread] Visualize Thread Started successfully.")
+
+    u_grid = None
+    v_grid = None
+
+    while True:
+        start_time = time.time()
+        DESIRED_TIME = 0.1  # 10 Hz
+
+        if not manager.new_vis_image_arrived:
+            time.sleep(0.01)
+            continue
+        manager.new_vis_image_arrived = False
+
+        # ── depth 복사 ────────────────────────────────────────
+        rgb_depth_rw_lock.acquire_read()
+        depth_image = copy.deepcopy(manager.depth_image)
+        rgb_depth_rw_lock.release_read()
+
+        if depth_image is None:
+            time.sleep(0.05)
+            continue
+
+        # ── odom 확인 (frame 선택) ────────────────────────────
+        odom_rw_lock.acquire_read()
+        odom = manager.odom.copy() if manager.odom else None
+        odom_rw_lock.release_read()
+
+        # ── Depth → 3D (camera rect frame, meters) ───────────
+        h, w = depth_image.shape
+        if u_grid is None or u_grid.size != h * w:
+            vg, ug = np.mgrid[0:h, 0:w]
+            u_grid = ug.flatten()
+            v_grid = vg.flatten()
+
+        z = depth_image.flatten()
+        valid = (z > 0.1) & (z < 10.0)
+        z_v = z[valid]
+        u_v = u_grid[valid]
+        v_v = v_grid[valid]
+
+        fx, fy = calib.f_u, calib.f_v
+        cx_cam, cy_cam = calib.c_u, calib.c_v
+        x_cam = (u_v - cx_cam) * z_v / fx
+        y_cam = (v_v - cy_cam) * z_v / fy
+        pcloud_cam = np.stack([x_cam, y_cam, z_v], axis=-1)  # (N, 3) camera rect coords
+
+        # ── Camera rect → robot/velodyne frame ───────────────
+        # project_rect_to_velo: camera(right,down,fwd) → robot(fwd,left,up)
+        pcloud_robot = calib.project_rect_to_velo(pcloud_cam)  # (N, 3)
+
+        # ── 높이 필터 (로봇 frame Z: 위쪽이 +) ───────────────
+        z_r = pcloud_robot[:, 2]
+        height_mask = (z_r > 0.05) & (z_r < 2.0)
+        pcloud_filtered = pcloud_robot[height_mask]
+
+        if len(pcloud_filtered) == 0:
+            manager.get_logger().debug("[Vis] No valid obstacle points after height filter.", throttle_duration_sec=3.0)
+            time.sleep(max(0.0, DESIRED_TIME - (time.time() - start_time)))
+            continue
+
+        # ── 좌표계 및 center 결정 ─────────────────────────────
+        if odom is not None:
+            frame_id = "camera_init"
+            x_, y_, yaw_ = odom
+            cos_y, sin_y = np.cos(yaw_), np.sin(yaw_)
+            R2 = np.array([[cos_y, -sin_y], [sin_y, cos_y]])
+            xy_world = (R2 @ pcloud_filtered[:, :2].T).T + np.array([x_, y_])
+            center_x, center_y = x_, y_
+        else:
+            frame_id = "os_sensor"
+            xy_world = pcloud_filtered[:, :2]
+            center_x, center_y = 0.0, 0.0
+
+        stamp = manager.get_clock().now().to_msg()
+
+        # ── OccupancyGrid 빌드 및 발행 ────────────────────────
+        occ_msg = build_occupancy_grid(
+            xy_world, stamp, frame_id,
+            resolution=0.1, grid_size=100,
+            center_x=center_x, center_y=center_y,
+        )
+        manager.occ_grid_pub.publish(occ_msg)
+
+        manager.get_logger().debug(
+            f"[Vis] OccGrid published. Frame: {frame_id} | Points: {len(xy_world)}",
+            throttle_duration_sec=2.0,
+        )
+
+        # ── Dummy Path (os_sensor frame, /internav/dummy_path) ──
+        dummy_path = Path()
+        dummy_path.header = Header(stamp=stamp, frame_id="os_sensor")
+        for i in range(10):
+            ps = PoseStamped()
+            ps.header = Header(stamp=stamp, frame_id="os_sensor")
+            ps.pose.position.x = float(i) * 0.2
+            ps.pose.position.y = 0.0
+            ps.pose.position.z = 0.0
+            ps.pose.orientation.w = 1.0
+            dummy_path.poses.append(ps)
+        manager.dummy_path_pub.publish(dummy_path)
+        manager.get_logger().info(
+            f"[Vis][DummyPath] frame={dummy_path.header.frame_id} "
+            f"pts={len(dummy_path.poses)} "
+            f"x=[{dummy_path.poses[0].pose.position.x:.2f} ~ {dummy_path.poses[-1].pose.position.x:.2f}] "
+            f"y=[{dummy_path.poses[0].pose.position.y:.2f} ~ {dummy_path.poses[-1].pose.position.y:.2f}]",
+            throttle_duration_sec=2.0,
+        )
+
+        # ── Trajectory (nav_msgs/Path, /internav/trajectory) ──
+        trajs = manager.last_trajs_in_world
+        if trajs is not None and len(trajs) > 0:
+            traj_arr = np.array(trajs)
+            traj_frame = frame_id if odom is not None else "os_sensor"
+            path_msg = Path()
+            path_msg.header = Header(stamp=stamp, frame_id=traj_frame)
+            for pt in traj_arr:
+                ps = PoseStamped()
+                ps.header = Header(stamp=stamp, frame_id=traj_frame)
+                ps.pose.position.x = float(pt[0])
+                ps.pose.position.y = float(pt[1])
+                ps.pose.position.z = 0.0
+                ps.pose.orientation.w = 1.0
+                path_msg.poses.append(ps)
+            manager.traj_pub.publish(path_msg)
+            manager.get_logger().info(
+                f"[Vis][Traj]      frame={traj_frame} "
+                f"pts={len(traj_arr)} "
+                f"x=[{traj_arr[0,0]:.2f} ~ {traj_arr[-1,0]:.2f}] "
+                f"y=[{traj_arr[0,1]:.2f} ~ {traj_arr[-1,1]:.2f}]",
+                throttle_duration_sec=2.0,
+            )
+        else:
+            manager.get_logger().info(
+                "[Vis][Traj]      None",
+                throttle_duration_sec=2.0,
+            )
+
+        # ── Subgoal (pixel_goal → 3D → PointStamped) 발행 ───
+        pixel_goal = manager.last_pixel_goal
+        if pixel_goal is not None:
+            row, col = int(pixel_goal[0]), int(pixel_goal[1])
+            if 0 <= row < h and 0 <= col < w:
+                z_sub = depth_image[row, col]
+                if z_sub > 0.1:
+                    x_sub_cam = (col - cx_cam) * z_sub / fx
+                    y_sub_cam = (row - cy_cam) * z_sub / fy
+                    pcloud_sub_cam = np.array([[x_sub_cam, y_sub_cam, z_sub]])
+                    pcloud_sub_robot = calib.project_rect_to_velo(pcloud_sub_cam)[0]  # (3,)
+
+                    if odom is not None:
+                        x_, y_, yaw_ = odom
+                        cos_y, sin_y = np.cos(yaw_), np.sin(yaw_)
+                        R2 = np.array([[cos_y, -sin_y], [sin_y, cos_y]])
+                        xy_sub = (R2 @ pcloud_sub_robot[:2]) + np.array([x_, y_])
+                        sub_x, sub_y = float(xy_sub[0]), float(xy_sub[1])
+                        sub_frame = "camera_init" # "odom"
+                    else:
+                        sub_x, sub_y = float(pcloud_sub_robot[0]), float(pcloud_sub_robot[1])
+                        sub_frame = "os_sensor"
+
+                    sub_msg = PointStamped()
+                    sub_msg.header = Header(stamp=stamp, frame_id=sub_frame)
+                    sub_msg.point.x = sub_x
+                    sub_msg.point.y = sub_y
+                    sub_msg.point.z = float(pcloud_sub_robot[2])
+                    manager.subgoal_pub.publish(sub_msg)
+                    manager.get_logger().debug(
+                        f"[Vis] Subgoal published. ({sub_x:.2f}, {sub_y:.2f}) Frame: {sub_frame}",
+                        throttle_duration_sec=2.0,
+                    )
+
+        time.sleep(max(0.0, DESIRED_TIME - (time.time() - start_time)))
+
+
 class Go2Manager(Node):
-    def __init__(self):
+    def __init__(self, odom_topic='/odom_bridge'):
         super().__init__('go2_manager')
         
         # [LOG] 노드 시작 알림
         self.get_logger().info("Initializing Go2Manager Node...")
 
-
-        # qos_profile = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=10)
         qos_profile = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST, depth=10)
         rgb_down_sub = Subscriber(self, Image, "/camera/camera/color/image_raw")
         depth_down_sub = Subscriber(self, Image, "/camera/camera/aligned_depth_to_color/image_raw")
 
-        self.test_sub = self.create_subscription(
-                Image, 
-                "/camera/camera/color/image_raw", 
-                lambda msg: self.get_logger().info("RAW RGB RECEIVED!", throttle_duration_sec=1.0), 
-                qos_profile
-            )
-
         self.syncronizer = ApproximateTimeSynchronizer([rgb_down_sub, depth_down_sub], 30, 0.5)
         self.syncronizer.registerCallback(self.rgb_depth_down_callback)
-        self.odom_sub = self.create_subscription(Odometry, "/odom_bridge", self.odom_callback, qos_profile)
+        self.odom_sub = self.create_subscription(Odometry, odom_topic, self.odom_callback, qos_profile)
+        self.get_logger().info(f"Subscribing to odometry topic: {odom_topic}")
 
         # publisher
         self.control_pub = self.create_publisher(Twist, '/cmd_vel_bridge', 5)
+        self.occ_grid_pub = self.create_publisher(OccupancyGrid, '/internav/occupancy_grid', 5)
+        self.traj_pub = self.create_publisher(Path, '/internav/trajectory', 5)
+        self.dummy_path_pub = self.create_publisher(Path, '/internav/dummy_path', 5)
+        self.subgoal_pub = self.create_publisher(PointStamped, '/internav/subgoal', 5)
 
         # class member variable
         self.cv_bridge = CvBridge()
@@ -316,6 +535,7 @@ class Go2Manager(Node):
         self.last_s2_step = -1
         self.last_trajs_in_world = None
         self.last_all_trajs_in_world = None
+        self.last_pixel_goal = None
         self.homo_odom = None
         self.homo_goal = None
         self.vel = None
@@ -444,18 +664,29 @@ class Go2Manager(Node):
 
 
 if __name__ == '__main__':
-    dummy_odom = [0.0, 0.0, 0.0 ]
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--odom_topic', type=str, default='/odom_bridge', help='ROS2 odometry topic name')
+    parser.add_argument('--calib', type=str, required=True,
+                        help='Path to calibration file (e.g. calib/calib_r64.txt)')
+    args = parser.parse_args()
+
+    calib = Calibration(args.calib)
+
+    dummy_odom = [0.0, 0.0, 0.0]
     control_thread_instance = threading.Thread(target=control_thread)
     planning_thread_instance = threading.Thread(target=planning_thread)
+    visualize_thread_instance = threading.Thread(target=visualize_thread)
     control_thread_instance.daemon = True
     planning_thread_instance.daemon = True
+    visualize_thread_instance.daemon = True
     rclpy.init()
 
     try:
-        manager = Go2Manager()
+        manager = Go2Manager(odom_topic=args.odom_topic)
 
         control_thread_instance.start()
         planning_thread_instance.start()
+        visualize_thread_instance.start()
 
         rclpy.spin(manager)
     except KeyboardInterrupt:
