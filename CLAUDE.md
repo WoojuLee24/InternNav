@@ -124,9 +124,12 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-04 04:39_
+_Last updated: 2026-03-04 04:50_
 
-### [0241464a] 2026-03-04 — chore(claude): add agents, commands, and permissions settings
+### [5736c51d] 2026-03-04 — chore(claude): rename commit command to gc and add confirm/push steps
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### [942174e9] 2026-03-04 — chore(claude): add agents, commands, and permissions settings
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 ### [91340cf3] 2026-02-26 — Merge branch 'v0.1' of https://github.com/WoojuLee24/InternNav into v0.1
@@ -138,5 +141,3 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ### [31a7bc7b] 2026-02-16 — Dockerfile-torch2.9.0-cuda13.0-issac-ros2-jazzy-3080ti
 
 ### [1d55b55b] 2026-02-13 — realworld: debug original code and develop _debug code for visualization
-
-### [f9a8a1c6] 2026-02-09 — Check ROS2 with realsense
