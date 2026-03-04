@@ -124,9 +124,12 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-04 07:30_
+_Last updated: 2026-03-04 07:35_
 
-### [4f9f24bf] 2026-03-04 — feat(realworld): add calibration support and depth-based visualization thread
+### [0bd9db80] 2026-03-04 — chore(docker): add dockerignore and Dockerfile for RTX 5090 with CUDA 13.0
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### [8587eae5] 2026-03-04 — feat(realworld): add calibration support and depth-based visualization thread
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 ### [c66c3fe6] 2026-03-04 — chore(claude): rename commit command to gc and add confirm/push steps
@@ -140,5 +143,3 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ### [6824082a] 2026-02-26 — debugging, visualizing
 
 ### [ad98d74a] 2026-02-19 — edit dockere install and start
-
-### [31a7bc7b] 2026-02-16 — Dockerfile-torch2.9.0-cuda13.0-issac-ros2-jazzy-3080ti

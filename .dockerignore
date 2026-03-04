@@ -1,0 +1,6 @@
+# .dockerignore
+data/
+checkpoints/
+**/__pycache__
+**/.git
+*.egg-info/
