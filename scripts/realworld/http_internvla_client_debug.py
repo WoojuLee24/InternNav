@@ -11,7 +11,8 @@ from enum import Enum
 import numpy as np
 import rclpy
 import requests
-from geometry_msgs.msg import Pose, PoseStamped, PointStamped, Twist
+from geometry_msgs.msg import Pose, PoseStamped, PointStamped, Twist, TransformStamped
+from tf2_ros import StaticTransformBroadcaster
 from nav_msgs.msg import Odometry, OccupancyGrid, Path
 from PIL import Image as PIL_Image
 from sensor_msgs.msg import CameraInfo, Image
@@ -240,8 +241,51 @@ def planning_thread():
                 manager.get_logger().info(f"[Plan] Updated Trajs in World. Time: {time.time()}")
 
                 manager.last_trajs_in_world = trajs_in_world
+
+                # ── Trajectory 즉시 퍼블리시 (real-time, planning_thread) ──
+                _stamp = manager.get_clock().now().to_msg()
+                _path_msg = Path()
+                _path_msg.header = Header(stamp=_stamp, frame_id="camera_init")
+                for _pt in trajs_in_world:
+                    _ps = PoseStamped()
+                    _ps.header = Header(stamp=_stamp, frame_id="camera_init")
+                    _ps.pose.position.x = float(_pt[0])
+                    _ps.pose.position.y = float(_pt[1])
+                    _ps.pose.position.z = 0.0
+                    _ps.pose.orientation.w = 1.0
+                    _path_msg.poses.append(_ps)
+                manager.traj_pub.publish(_path_msg)
+                manager.get_logger().info(
+                    f"[Plan][Traj] Published {len(trajs_in_world)} pts in camera_init",
+                    throttle_duration_sec=1.0,
+                )
+
                 if 'pixel_goal' in response:
                     manager.last_pixel_goal = response['pixel_goal']  # [row, col]
+                    # ── Subgoal 즉시 퍼블리시 (real-time, planning_thread) ──
+                    if calib is not None and infer_depth is not None:
+                        _row, _col = int(response['pixel_goal'][0]), int(response['pixel_goal'][1])
+                        _dh, _dw = infer_depth.shape
+                        if 0 <= _row < _dh and 0 <= _col < _dw:
+                            _z_sub = infer_depth[_row, _col]
+                            if _z_sub > 0.1:
+                                _fx, _fy = calib.f_u, calib.f_v
+                                _cx, _cy = calib.c_u, calib.c_v
+                                _x_cam = (_col - _cx) * _z_sub / _fx
+                                _y_cam = (_row - _cy) * _z_sub / _fy
+                                _pc_robot = calib.project_rect_to_velo(
+                                    np.array([[_x_cam, _y_cam, _z_sub]]))[0]
+                                _ox, _oy, _oyaw = odom_infer
+                                _R2 = np.array([[np.cos(_oyaw), -np.sin(_oyaw)],
+                                                [np.sin(_oyaw),  np.cos(_oyaw)]])
+                                _xy_sub = _R2 @ _pc_robot[:2] + np.array([_ox, _oy])
+                                _sub_msg = PointStamped()
+                                _sub_msg.header = Header(stamp=_stamp, frame_id="camera_init")
+                                _sub_msg.point.x = float(_xy_sub[0])
+                                _sub_msg.point.y = float(_xy_sub[1])
+                                _sub_msg.point.z = float(_pc_robot[2])
+                                manager.subgoal_pub.publish(_sub_msg)
+
                 mpc_rw_lock.acquire_write()
                 global mpc
                 if mpc is None:
@@ -253,11 +297,20 @@ def planning_thread():
                 mpc_rw_lock.release_write()
                 current_control_mode = ControlMode.MPC_Mode
                 
-            elif 'discrete_action' in response:
+            else:
+                # trajectory가 새로 생성되지 않으면 초기화
+                manager.last_trajs_in_world = None
+                manager.last_pixel_goal = None
+                _stamp = manager.get_clock().now().to_msg()
+                manager.traj_pub.publish(Path(header=Header(stamp=_stamp, frame_id="camera_init")))
+                manager.subgoal_pub.publish(PointStamped(header=Header(stamp=_stamp, frame_id="camera_init")))
+                manager.get_logger().info("[Plan] No trajectory in response. Cleared.", throttle_duration_sec=2.0)
+
+            if 'discrete_action' in response:
                 actions = response['discrete_action']
                 # [LOG] Discrete Action 수신
                 manager.get_logger().info(f"[Plan] Received Discrete Actions: {actions}")
-                
+
                 if actions != [5] and actions != [9]:
                     manager.incremental_change_goal(actions)
                     current_control_mode = ControlMode.PID_Mode
@@ -403,88 +456,25 @@ def visualize_thread():
             throttle_duration_sec=2.0,
         )
 
-        # ── Dummy Path (os_sensor frame, /internav/dummy_path) ──
-        dummy_path = Path()
-        dummy_path.header = Header(stamp=stamp, frame_id="os_sensor")
-        for i in range(10):
-            ps = PoseStamped()
-            ps.header = Header(stamp=stamp, frame_id="os_sensor")
-            ps.pose.position.x = float(i) * 0.2
-            ps.pose.position.y = 0.0
-            ps.pose.position.z = 0.0
-            ps.pose.orientation.w = 1.0
-            dummy_path.poses.append(ps)
-        manager.dummy_path_pub.publish(dummy_path)
-        manager.get_logger().info(
-            f"[Vis][DummyPath] frame={dummy_path.header.frame_id} "
-            f"pts={len(dummy_path.poses)} "
-            f"x=[{dummy_path.poses[0].pose.position.x:.2f} ~ {dummy_path.poses[-1].pose.position.x:.2f}] "
-            f"y=[{dummy_path.poses[0].pose.position.y:.2f} ~ {dummy_path.poses[-1].pose.position.y:.2f}]",
-            throttle_duration_sec=2.0,
-        )
-
-        # ── Trajectory (nav_msgs/Path, /internav/trajectory) ──
-        trajs = manager.last_trajs_in_world
-        if trajs is not None and len(trajs) > 0:
-            traj_arr = np.array(trajs)
-            traj_frame = frame_id if odom is not None else "os_sensor"
-            path_msg = Path()
-            path_msg.header = Header(stamp=stamp, frame_id=traj_frame)
-            for pt in traj_arr:
-                ps = PoseStamped()
-                ps.header = Header(stamp=stamp, frame_id=traj_frame)
-                ps.pose.position.x = float(pt[0])
-                ps.pose.position.y = float(pt[1])
-                ps.pose.position.z = 0.0
-                ps.pose.orientation.w = 1.0
-                path_msg.poses.append(ps)
-            manager.traj_pub.publish(path_msg)
-            manager.get_logger().info(
-                f"[Vis][Traj]      frame={traj_frame} "
-                f"pts={len(traj_arr)} "
-                f"x=[{traj_arr[0,0]:.2f} ~ {traj_arr[-1,0]:.2f}] "
-                f"y=[{traj_arr[0,1]:.2f} ~ {traj_arr[-1,1]:.2f}]",
-                throttle_duration_sec=2.0,
-            )
-        else:
-            manager.get_logger().info(
-                "[Vis][Traj]      None",
-                throttle_duration_sec=2.0,
-            )
-
-        # ── Subgoal (pixel_goal → 3D → PointStamped) 발행 ───
-        pixel_goal = manager.last_pixel_goal
-        if pixel_goal is not None:
-            row, col = int(pixel_goal[0]), int(pixel_goal[1])
-            if 0 <= row < h and 0 <= col < w:
-                z_sub = depth_image[row, col]
-                if z_sub > 0.1:
-                    x_sub_cam = (col - cx_cam) * z_sub / fx
-                    y_sub_cam = (row - cy_cam) * z_sub / fy
-                    pcloud_sub_cam = np.array([[x_sub_cam, y_sub_cam, z_sub]])
-                    pcloud_sub_robot = calib.project_rect_to_velo(pcloud_sub_cam)[0]  # (3,)
-
-                    if odom is not None:
-                        x_, y_, yaw_ = odom
-                        cos_y, sin_y = np.cos(yaw_), np.sin(yaw_)
-                        R2 = np.array([[cos_y, -sin_y], [sin_y, cos_y]])
-                        xy_sub = (R2 @ pcloud_sub_robot[:2]) + np.array([x_, y_])
-                        sub_x, sub_y = float(xy_sub[0]), float(xy_sub[1])
-                        sub_frame = "camera_init" # "odom"
-                    else:
-                        sub_x, sub_y = float(pcloud_sub_robot[0]), float(pcloud_sub_robot[1])
-                        sub_frame = "os_sensor"
-
-                    sub_msg = PointStamped()
-                    sub_msg.header = Header(stamp=stamp, frame_id=sub_frame)
-                    sub_msg.point.x = sub_x
-                    sub_msg.point.y = sub_y
-                    sub_msg.point.z = float(pcloud_sub_robot[2])
-                    manager.subgoal_pub.publish(sub_msg)
-                    manager.get_logger().debug(
-                        f"[Vis] Subgoal published. ({sub_x:.2f}, {sub_y:.2f}) Frame: {sub_frame}",
-                        throttle_duration_sec=2.0,
-                    )
+        # # ── Dummy Path (os_sensor frame, /internav/dummy_path) ──
+        # dummy_path = Path()
+        # dummy_path.header = Header(stamp=stamp, frame_id="os_sensor")
+        # for i in range(10):
+        #     ps = PoseStamped()
+        #     ps.header = Header(stamp=stamp, frame_id="os_sensor")
+        #     ps.pose.position.x = float(i) * 0.2
+        #     ps.pose.position.y = 0.0
+        #     ps.pose.position.z = 0.0
+        #     ps.pose.orientation.w = 1.0
+        #     dummy_path.poses.append(ps)
+        # manager.dummy_path_pub.publish(dummy_path)
+        # manager.get_logger().info(
+        #     f"[Vis][DummyPath] frame={dummy_path.header.frame_id} "
+        #     f"pts={len(dummy_path.poses)} "
+        #     f"x=[{dummy_path.poses[0].pose.position.x:.2f} ~ {dummy_path.poses[-1].pose.position.x:.2f}] "
+        #     f"y=[{dummy_path.poses[0].pose.position.y:.2f} ~ {dummy_path.poses[-1].pose.position.y:.2f}]",
+        #     throttle_duration_sec=2.0,
+        # )
 
         time.sleep(max(0.0, DESIRED_TIME - (time.time() - start_time)))
 
@@ -504,6 +494,16 @@ class Go2Manager(Node):
         self.syncronizer.registerCallback(self.rgb_depth_down_callback)
         self.odom_sub = self.create_subscription(Odometry, odom_topic, self.odom_callback, qos_profile)
         self.get_logger().info(f"Subscribing to odometry topic: {odom_topic}")
+
+        # static transform: map → camera_init (identity)
+        self._static_tf_broadcaster = StaticTransformBroadcaster(self)
+        _tf = TransformStamped()
+        _tf.header.stamp = self.get_clock().now().to_msg()
+        _tf.header.frame_id = 'map'
+        _tf.child_frame_id = 'camera_init'
+        _tf.transform.rotation.w = 1.0
+        self._static_tf_broadcaster.sendTransform(_tf)
+        self.get_logger().info("[TF] Published static transform: map -> camera_init (identity)")
 
         # publisher
         self.control_pub = self.create_publisher(Twist, '/cmd_vel_bridge', 5)
@@ -602,7 +602,8 @@ class Go2Manager(Node):
         ww = msg.pose.pose.orientation.w
         yaw = math.atan2(2 * zz * ww, 1 - 2 * zz * zz)
         self.odom = [msg.pose.pose.position.x, msg.pose.pose.position.y, yaw]
-        self.odom_queue.append((time.time(), copy.deepcopy(self.odom)))
+        odom_stamp = msg.header.stamp.sec + msg.header.stamp.nanosec / 1.0e9
+        self.odom_queue.append((odom_stamp, copy.deepcopy(self.odom)))
         self.odom_timestamp = time.time()
         self.linear_vel = msg.twist.twist.linear.x
         self.angular_vel = msg.twist.twist.angular.z
@@ -668,6 +669,8 @@ if __name__ == '__main__':
     parser.add_argument('--odom_topic', type=str, default='/odom_bridge', help='ROS2 odometry topic name')
     parser.add_argument('--calib', type=str, required=True,
                         help='Path to calibration file (e.g. calib/calib_r64.txt)')
+    parser.add_argument('--visualize', action='store_true', default=False,
+                        help='Enable visualize_thread (OccupancyGrid)')
     args = parser.parse_args()
 
     calib = Calibration(args.calib)
@@ -675,10 +678,11 @@ if __name__ == '__main__':
     dummy_odom = [0.0, 0.0, 0.0]
     control_thread_instance = threading.Thread(target=control_thread)
     planning_thread_instance = threading.Thread(target=planning_thread)
-    visualize_thread_instance = threading.Thread(target=visualize_thread)
     control_thread_instance.daemon = True
     planning_thread_instance.daemon = True
-    visualize_thread_instance.daemon = True
+    if args.visualize:
+        visualize_thread_instance = threading.Thread(target=visualize_thread)
+        visualize_thread_instance.daemon = True
     rclpy.init()
 
     try:
@@ -686,7 +690,8 @@ if __name__ == '__main__':
 
         control_thread_instance.start()
         planning_thread_instance.start()
-        visualize_thread_instance.start()
+        if args.visualize:
+            visualize_thread_instance.start()
 
         rclpy.spin(manager)
     except KeyboardInterrupt:
