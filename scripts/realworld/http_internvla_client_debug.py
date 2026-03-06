@@ -666,8 +666,8 @@ class Go2Manager(Node):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--odom_topic', type=str, default='/odom_bridge', help='ROS2 odometry topic name')
-    parser.add_argument('--calib', type=str, required=True,
+    parser.add_argument('--odom_topic', type=str, default='/gdq/msg/gdq_odom', help='ROS2 odometry topic name')
+    parser.add_argument('--calib', type=str, default='/home/gdr/gd_vln/workspace/src/InternNav/scripts/realworld/calib/calib_scout.txt',
                         help='Path to calibration file (e.g. calib/calib_r64.txt)')
     parser.add_argument('--visualize', action='store_true', default=False,
                         help='Enable visualize_thread (OccupancyGrid)')

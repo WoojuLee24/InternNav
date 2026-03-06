@@ -56,7 +56,8 @@ def eval_dual():
     #instruction = "Turn around and walk out of this office. Turn towards your slight right at the chair. Move forward to the walkway and go near the red bin. You can see an open door on your right side, go inside the open door. Stop at the computer monitor"
     # instruction = "Stop. Just stop. Move forward one step. Move forward two step. Turn right and stop."
     # instruction = "Go straight along the walkway and turn right at the crosswalk. Go straight to the end of the crosswalk and stop."
-    instruction = "Go straight along the walkway until you see a crosswalk. Go straight again until you see a second crosswalk. Turn right at the second crosswalk and go straight to the end of the crosswalk. Stop at the end of the crosswalk."
+    # instruction = "Go straight along the walkway until you see a crosswalk. Go straight again until you see a second crosswalk. Turn right at the second crosswalk and go straight to the end of the crosswalk. Stop at the end of the crosswalk."
+    instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
     policy_init = data['reset']
     if policy_init:
         start_time = time.time()
@@ -258,7 +259,7 @@ if __name__ == '__main__':
     parser.add_argument("--resize_h", type=int, default=384)
     parser.add_argument("--num_history", type=int, default=8)
     parser.add_argument("--plan_step_gap", type=int, default=4)
-    parser.add_argument("--calib", type=str, default="calib/calib_scout.txt",
+    parser.add_argument("--calib", type=str, default="/home/gdr/gd_vln/workspace/src/InternNav/scripts/realworld/calib/calib_scout.txt",
                         help="Path to calibration file (e.g. calib/calib_scout.txt)")
     args = parser.parse_args()
 
