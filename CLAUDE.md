@@ -124,9 +124,12 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-07 06:16_
+_Last updated: 2026-03-07 06:32_
 
-### [8663129a] 2026-03-07 — feat(realworld): support configurable frame_id for traj/subgoal visualization
+### [1cae8b42] 2026-03-07 — feat(realworld): use Marker for traj/subgoal with configurable scale
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### [538329ff] 2026-03-07 — feat(realworld): support configurable frame_id for traj/subgoal visualization
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 ### [72a5a0c5] 2026-03-06 — Set up thor on the scout: default path and odom topic
@@ -141,7 +144,4 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 ### [c66c3fe6] 2026-03-04 — chore(claude): rename commit command to gc and add confirm/push steps
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
-### [942174e9] 2026-03-04 — chore(claude): add agents, commands, and permissions settings
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>

@@ -11,9 +11,10 @@ from enum import Enum
 import numpy as np
 import rclpy
 import requests
-from geometry_msgs.msg import Pose, PoseStamped, PointStamped, Twist, TransformStamped
+from geometry_msgs.msg import Point, Pose, PoseStamped, PointStamped, Twist, TransformStamped
 from tf2_ros import StaticTransformBroadcaster
 from nav_msgs.msg import Odometry, OccupancyGrid, Path
+from visualization_msgs.msg import Marker
 from PIL import Image as PIL_Image
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import Header
@@ -152,7 +153,7 @@ def control_thread():
         time.sleep(0.1)
 
 
-def planning_thread(frame_id="os_sensor"):
+def planning_thread(frame_id="os_sensor", traj_width=0.05, subgoal_radius=0.2):
     global trajs_in_world, manager
     
     # Manager 초기화 대기
@@ -244,8 +245,17 @@ def planning_thread(frame_id="os_sensor"):
 
                 # ── Trajectory 즉시 퍼블리시 (real-time, planning_thread) ──
                 _stamp = manager.get_clock().now().to_msg()
-                _path_msg = Path()
-                _path_msg.header = Header(stamp=_stamp, frame_id=frame_id)
+                _traj_marker = Marker()
+                _traj_marker.header = Header(stamp=_stamp, frame_id=frame_id)
+                _traj_marker.ns = "trajectory"
+                _traj_marker.id = 0
+                _traj_marker.type = Marker.LINE_STRIP
+                _traj_marker.action = Marker.ADD
+                _traj_marker.scale.x = traj_width
+                _traj_marker.color.r = 0.0
+                _traj_marker.color.g = 1.0
+                _traj_marker.color.b = 0.0
+                _traj_marker.color.a = 1.0
                 if frame_id == "os_sensor":
                     # body frame: raw model output (i >= 3 skip)
                     _traj_pts = [[float(t[0]), float(t[1])] for i, t in enumerate(trajectory) if i >= 3]
@@ -253,14 +263,12 @@ def planning_thread(frame_id="os_sensor"):
                     # world frame: w_T_b 변환 적용된 trajs_in_world
                     _traj_pts = [[float(pt[0]), float(pt[1])] for pt in trajs_in_world]
                 for _x, _y in _traj_pts:
-                    _ps = PoseStamped()
-                    _ps.header = Header(stamp=_stamp, frame_id=frame_id)
-                    _ps.pose.position.x = _x
-                    _ps.pose.position.y = _y
-                    _ps.pose.position.z = 0.0
-                    _ps.pose.orientation.w = 1.0
-                    _path_msg.poses.append(_ps)
-                manager.traj_pub.publish(_path_msg)
+                    _p = Point()
+                    _p.x = _x
+                    _p.y = _y
+                    _p.z = 0.0
+                    _traj_marker.points.append(_p)
+                manager.traj_pub.publish(_traj_marker)
                 manager.get_logger().info(
                     f"[Plan][Traj] Published {len(_traj_pts)} pts in {frame_id}",
                     throttle_duration_sec=1.0,
@@ -289,11 +297,23 @@ def planning_thread(frame_id="os_sensor"):
                                                     [np.sin(_oyaw),  np.cos(_oyaw)]])
                                     _xy_sub = _R2 @ _pc_robot[:2] + np.array([_ox, _oy])
                                     _sub_x, _sub_y = float(_xy_sub[0]), float(_xy_sub[1])
-                                _sub_msg = PointStamped()
+                                _sub_msg = Marker()
                                 _sub_msg.header = Header(stamp=_stamp, frame_id=frame_id)
-                                _sub_msg.point.x = _sub_x
-                                _sub_msg.point.y = _sub_y
-                                _sub_msg.point.z = float(_pc_robot[2])
+                                _sub_msg.ns = "subgoal"
+                                _sub_msg.id = 0
+                                _sub_msg.type = Marker.SPHERE
+                                _sub_msg.action = Marker.ADD
+                                _sub_msg.pose.position.x = _sub_x
+                                _sub_msg.pose.position.y = _sub_y
+                                _sub_msg.pose.position.z = float(_pc_robot[2])
+                                _sub_msg.pose.orientation.w = 1.0
+                                _sub_msg.scale.x = subgoal_radius
+                                _sub_msg.scale.y = subgoal_radius
+                                _sub_msg.scale.z = subgoal_radius
+                                _sub_msg.color.r = 1.0
+                                _sub_msg.color.g = 0.5
+                                _sub_msg.color.b = 0.0
+                                _sub_msg.color.a = 1.0
                                 manager.subgoal_pub.publish(_sub_msg)
 
                 mpc_rw_lock.acquire_write()
@@ -312,8 +332,18 @@ def planning_thread(frame_id="os_sensor"):
                 manager.last_trajs_in_world = None
                 manager.last_pixel_goal = None
                 _stamp = manager.get_clock().now().to_msg()
-                manager.traj_pub.publish(Path(header=Header(stamp=_stamp, frame_id=frame_id)))
-                manager.subgoal_pub.publish(PointStamped(header=Header(stamp=_stamp, frame_id=frame_id)))
+                _del_traj = Marker()
+                _del_traj.header = Header(stamp=_stamp, frame_id=frame_id)
+                _del_traj.ns = "trajectory"
+                _del_traj.id = 0
+                _del_traj.action = Marker.DELETE
+                manager.traj_pub.publish(_del_traj)
+                _del_sub = Marker()
+                _del_sub.header = Header(stamp=_stamp, frame_id=frame_id)
+                _del_sub.ns = "subgoal"
+                _del_sub.id = 0
+                _del_sub.action = Marker.DELETE
+                manager.subgoal_pub.publish(_del_sub)
                 manager.get_logger().info("[Plan] No trajectory in response. Cleared.", throttle_duration_sec=2.0)
 
             if 'discrete_action' in response:
@@ -516,9 +546,9 @@ class Go2Manager(Node):
         # publisher
         self.control_pub = self.create_publisher(Twist, '/cmd_vel_bridge', 5)
         self.occ_grid_pub = self.create_publisher(OccupancyGrid, '/internav/occupancy_grid', 5)
-        self.traj_pub = self.create_publisher(Path, '/internav/trajectory', 5)
+        self.traj_pub = self.create_publisher(Marker, '/internav/trajectory', 5)
         self.dummy_path_pub = self.create_publisher(Path, '/internav/dummy_path', 5)
-        self.subgoal_pub = self.create_publisher(PointStamped, '/internav/subgoal', 5)
+        self.subgoal_pub = self.create_publisher(Marker, '/internav/subgoal', 5)
 
         # class member variable
         self.cv_bridge = CvBridge()
@@ -681,13 +711,17 @@ if __name__ == '__main__':
                         help='Enable visualize_thread (OccupancyGrid)')
     parser.add_argument('--frame_id', type=str, default='os_sensor',
                         help='Frame ID for OccupancyGrid (e.g. os_sensor, camera_init)')
+    parser.add_argument('--traj_width', type=float, default=0.1,
+                        help='Trajectory marker line width in meters (default: 0.1)')
+    parser.add_argument('--subgoal_radius', type=float, default=0.3,
+                        help='Subgoal marker sphere radius in meters (default: 0.3)')
     args = parser.parse_args()
 
     calib = Calibration(args.calib)
 
     dummy_odom = [0.0, 0.0, 0.0]
     control_thread_instance = threading.Thread(target=control_thread)
-    planning_thread_instance = threading.Thread(target=planning_thread, args=(args.frame_id,))
+    planning_thread_instance = threading.Thread(target=planning_thread, args=(args.frame_id, args.traj_width, args.subgoal_radius))
     control_thread_instance.daemon = True
     planning_thread_instance.daemon = True
     if args.visualize:
