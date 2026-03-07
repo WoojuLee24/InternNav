@@ -6,7 +6,6 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
-        - /Map1
       Splitter Ratio: 0.5
     Tree Height: 272
   - Class: rviz_common/Selection
@@ -102,7 +101,7 @@ Visualization Manager:
     - Alpha: 1
       Class: rviz_default_plugins/PointStamped
       Color: 204; 41; 204
-      Enabled: true
+      Enabled: false
       History Length: 1
       Name: PointStamped
       Radius: 0.20000000298023224
@@ -113,12 +112,12 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /internav/subgoal
-      Value: true
+      Value: false
     - Alpha: 1
       Buffer Length: 1
       Class: rviz_default_plugins/Path
       Color: 25; 255; 0
-      Enabled: true
+      Enabled: false
       Head Diameter: 0.30000001192092896
       Head Length: 0.20000000298023224
       Length: 0.30000001192092896
@@ -134,6 +133,32 @@ Visualization Manager:
       Radius: 0.029999999329447746
       Shaft Diameter: 0.10000000149011612
       Shaft Length: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /internav/trajectory
+      Value: false
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Marker
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /internav/subgoal
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Marker
+      Namespaces:
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -188,16 +213,16 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 17.60896110534668
+      Distance: 14.861050605773926
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 0.2870137691497803
-        Y: 0.7760332226753235
-        Z: 0.7065393924713135
+        X: 0.4460911750793457
+        Y: 0.5822808146476746
+        Z: 0.7456929087638855
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false

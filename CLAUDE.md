@@ -124,9 +124,12 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-07 06:32_
+_Last updated: 2026-03-07 06:45_
 
-### [1cae8b42] 2026-03-07 — feat(realworld): use Marker for traj/subgoal with configurable scale
+### [92cf80eb] 2026-03-07 — feat(mapping): add standalone occgrid_publisher node and update rviz config
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### [215fc8a6] 2026-03-07 — feat(realworld): use Marker for traj/subgoal with configurable scale
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 ### [538329ff] 2026-03-07 — feat(realworld): support configurable frame_id for traj/subgoal visualization
@@ -141,7 +144,4 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 ### [8587eae5] 2026-03-04 — feat(realworld): add calibration support and depth-based visualization thread
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
-### [c66c3fe6] 2026-03-04 — chore(claude): rename commit command to gc and add confirm/push steps
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
