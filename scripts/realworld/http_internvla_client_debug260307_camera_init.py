@@ -152,7 +152,7 @@ def control_thread():
         time.sleep(0.1)
 
 
-def planning_thread(frame_id="os_sensor"):
+def planning_thread():
     global trajs_in_world, manager
     
     # Manager 초기화 대기
@@ -245,24 +245,18 @@ def planning_thread(frame_id="os_sensor"):
                 # ── Trajectory 즉시 퍼블리시 (real-time, planning_thread) ──
                 _stamp = manager.get_clock().now().to_msg()
                 _path_msg = Path()
-                _path_msg.header = Header(stamp=_stamp, frame_id=frame_id)
-                if frame_id == "os_sensor":
-                    # body frame: raw model output (i >= 3 skip)
-                    _traj_pts = [[float(t[0]), float(t[1])] for i, t in enumerate(trajectory) if i >= 3]
-                else:
-                    # world frame: w_T_b 변환 적용된 trajs_in_world
-                    _traj_pts = [[float(pt[0]), float(pt[1])] for pt in trajs_in_world]
-                for _x, _y in _traj_pts:
+                _path_msg.header = Header(stamp=_stamp, frame_id="camera_init")
+                for _pt in trajs_in_world:
                     _ps = PoseStamped()
-                    _ps.header = Header(stamp=_stamp, frame_id=frame_id)
-                    _ps.pose.position.x = _x
-                    _ps.pose.position.y = _y
+                    _ps.header = Header(stamp=_stamp, frame_id="camera_init")
+                    _ps.pose.position.x = float(_pt[0])
+                    _ps.pose.position.y = float(_pt[1])
                     _ps.pose.position.z = 0.0
                     _ps.pose.orientation.w = 1.0
                     _path_msg.poses.append(_ps)
                 manager.traj_pub.publish(_path_msg)
                 manager.get_logger().info(
-                    f"[Plan][Traj] Published {len(_traj_pts)} pts in {frame_id}",
+                    f"[Plan][Traj] Published {len(trajs_in_world)} pts in camera_init",
                     throttle_duration_sec=1.0,
                 )
 
@@ -281,18 +275,14 @@ def planning_thread(frame_id="os_sensor"):
                                 _y_cam = (_row - _cy) * _z_sub / _fy
                                 _pc_robot = calib.project_rect_to_velo(
                                     np.array([[_x_cam, _y_cam, _z_sub]]))[0]
-                                if frame_id == "os_sensor":
-                                    _sub_x, _sub_y = float(_pc_robot[0]), float(_pc_robot[1])
-                                else:
-                                    _ox, _oy, _oyaw = odom_infer
-                                    _R2 = np.array([[np.cos(_oyaw), -np.sin(_oyaw)],
-                                                    [np.sin(_oyaw),  np.cos(_oyaw)]])
-                                    _xy_sub = _R2 @ _pc_robot[:2] + np.array([_ox, _oy])
-                                    _sub_x, _sub_y = float(_xy_sub[0]), float(_xy_sub[1])
+                                _ox, _oy, _oyaw = odom_infer
+                                _R2 = np.array([[np.cos(_oyaw), -np.sin(_oyaw)],
+                                                [np.sin(_oyaw),  np.cos(_oyaw)]])
+                                _xy_sub = _R2 @ _pc_robot[:2] + np.array([_ox, _oy])
                                 _sub_msg = PointStamped()
-                                _sub_msg.header = Header(stamp=_stamp, frame_id=frame_id)
-                                _sub_msg.point.x = _sub_x
-                                _sub_msg.point.y = _sub_y
+                                _sub_msg.header = Header(stamp=_stamp, frame_id="camera_init")
+                                _sub_msg.point.x = float(_xy_sub[0])
+                                _sub_msg.point.y = float(_xy_sub[1])
                                 _sub_msg.point.z = float(_pc_robot[2])
                                 manager.subgoal_pub.publish(_sub_msg)
 
@@ -312,8 +302,8 @@ def planning_thread(frame_id="os_sensor"):
                 manager.last_trajs_in_world = None
                 manager.last_pixel_goal = None
                 _stamp = manager.get_clock().now().to_msg()
-                manager.traj_pub.publish(Path(header=Header(stamp=_stamp, frame_id=frame_id)))
-                manager.subgoal_pub.publish(PointStamped(header=Header(stamp=_stamp, frame_id=frame_id)))
+                manager.traj_pub.publish(Path(header=Header(stamp=_stamp, frame_id="camera_init")))
+                manager.subgoal_pub.publish(PointStamped(header=Header(stamp=_stamp, frame_id="camera_init")))
                 manager.get_logger().info("[Plan] No trajectory in response. Cleared.", throttle_duration_sec=2.0)
 
             if 'discrete_action' in response:
@@ -371,13 +361,13 @@ def build_occupancy_grid(pcloud_xy, stamp, frame_id, resolution=0.1, grid_size=1
     return msg
 
 
-def visualize_thread(frame_id="os_sensor"):
+def visualize_thread():
     global manager, calib
 
     while manager is None or calib is None:
         time.sleep(0.1)
 
-    manager.get_logger().info(f"[Thread] Visualize Thread Started successfully. OccGrid frame: {frame_id}")
+    manager.get_logger().info("[Thread] Visualize Thread Started successfully.")
 
     u_grid = None
     v_grid = None
@@ -439,13 +429,15 @@ def visualize_thread(frame_id="os_sensor"):
             continue
 
         # ── 좌표계 및 center 결정 ─────────────────────────────
-        if frame_id == "camera_init" and odom is not None:
+        if odom is not None:
+            frame_id = "camera_init"
             x_, y_, yaw_ = odom
             cos_y, sin_y = np.cos(yaw_), np.sin(yaw_)
             R2 = np.array([[cos_y, -sin_y], [sin_y, cos_y]])
             xy_world = (R2 @ pcloud_filtered[:, :2].T).T + np.array([x_, y_])
             center_x, center_y = x_, y_
         else:
+            frame_id = "os_sensor"
             xy_world = pcloud_filtered[:, :2]
             center_x, center_y = 0.0, 0.0
 
@@ -674,24 +666,22 @@ class Go2Manager(Node):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--odom_topic', type=str, default='/gdq/msg/gdq_odom', help='ROS2 odometry topic name')
-    parser.add_argument('--calib', type=str, default='/home/gdr/gd_vln/workspace/src/InternNav/scripts/realworld/calib/calib_scout.txt',
+    parser.add_argument('--odom_topic', type=str, default='/odom_bridge', help='ROS2 odometry topic name')
+    parser.add_argument('--calib', type=str, required=True,
                         help='Path to calibration file (e.g. calib/calib_r64.txt)')
     parser.add_argument('--visualize', action='store_true', default=False,
                         help='Enable visualize_thread (OccupancyGrid)')
-    parser.add_argument('--frame_id', type=str, default='os_sensor',
-                        help='Frame ID for OccupancyGrid (e.g. os_sensor, camera_init)')
     args = parser.parse_args()
 
     calib = Calibration(args.calib)
 
     dummy_odom = [0.0, 0.0, 0.0]
     control_thread_instance = threading.Thread(target=control_thread)
-    planning_thread_instance = threading.Thread(target=planning_thread, args=(args.frame_id,))
+    planning_thread_instance = threading.Thread(target=planning_thread)
     control_thread_instance.daemon = True
     planning_thread_instance.daemon = True
     if args.visualize:
-        visualize_thread_instance = threading.Thread(target=visualize_thread, args=(args.frame_id,))
+        visualize_thread_instance = threading.Thread(target=visualize_thread)
         visualize_thread_instance.daemon = True
     rclpy.init()
 

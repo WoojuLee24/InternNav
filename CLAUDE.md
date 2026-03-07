@@ -124,9 +124,14 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-06 06:36_
+_Last updated: 2026-03-07 06:16_
 
-### [db54a59c] 2026-03-06 — feat(realworld): publish traj/subgoal in real-time from planning_thread
+### [8663129a] 2026-03-07 — feat(realworld): support configurable frame_id for traj/subgoal visualization
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### [72a5a0c5] 2026-03-06 — Set up thor on the scout: default path and odom topic
+
+### [33cee891] 2026-03-06 — feat(realworld): publish traj/subgoal in real-time from planning_thread
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 ### [ed53d6d0] 2026-03-04 — chore(docker): add dockerignore and Dockerfile for RTX 5090 with CUDA 13.0
@@ -140,7 +145,3 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 ### [942174e9] 2026-03-04 — chore(claude): add agents, commands, and permissions settings
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
-### [91340cf3] 2026-02-26 — Merge branch 'v0.1' of https://github.com/WoojuLee24/InternNav into v0.1
-
-### [6824082a] 2026-02-26 — debugging, visualizing
