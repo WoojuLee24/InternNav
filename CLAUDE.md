@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-07 06:45_
+_Last updated: 2026-03-19 12:08_
 
-### [92cf80eb] 2026-03-07 — feat(mapping): add standalone occgrid_publisher node and update rviz config
+### [ed7e8ce6] 2026-03-19 — fix(dataloader): disable torchcodec if runtime error occurs
+
+### [f5e835d4] 2026-03-07 — feat(mapping): add standalone occgrid_publisher node and update rviz config
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 ### [215fc8a6] 2026-03-07 — feat(realworld): use Marker for traj/subgoal with configurable scale
@@ -141,7 +143,4 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 ### [ed53d6d0] 2026-03-04 — chore(docker): add dockerignore and Dockerfile for RTX 5090 with CUDA 13.0
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
-### [8587eae5] 2026-03-04 — feat(realworld): add calibration support and depth-based visualization thread
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
