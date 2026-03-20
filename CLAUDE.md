@@ -124,9 +124,13 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-19 12:08_
+_Last updated: 2026-03-20 11:36_
 
-### [ed7e8ce6] 2026-03-19 — fix(dataloader): disable torchcodec if runtime error occurs
+### [7041942b] 2026-03-20 — fix: correct submodule path to src/diffusion-policy
+
+### [7fb1cca6] 2026-03-19 — Merge remote-tracking branch 'upstream/release/v0.3.1' into v0.3.1
+
+### [f7b70372] 2026-03-19 — fix(dataloader): disable torchcodec if runtime error occurs
 
 ### [f5e835d4] 2026-03-07 — feat(mapping): add standalone occgrid_publisher node and update rviz config
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
@@ -138,9 +142,3 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 ### [72a5a0c5] 2026-03-06 — Set up thor on the scout: default path and odom topic
-
-### [33cee891] 2026-03-06 — feat(realworld): publish traj/subgoal in real-time from planning_thread
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
-### [ed53d6d0] 2026-03-04 — chore(docker): add dockerignore and Dockerfile for RTX 5090 with CUDA 13.0
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
