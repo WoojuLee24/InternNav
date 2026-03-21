@@ -28,6 +28,7 @@ class DataArguments:
     video_max_frame_pixels: int = field(default=32 * 28 * 28)
     video_min_frame_pixels: int = field(default=4 * 28 * 28)
 
+    data_root: Optional[str] = field(default=None, metadata={"help": "Root directory prepended to all dataset data_path entries."})
     vln_dataset_use: str = field(default="")
     iign_dataset_use: str = field(default="")
     sample_step: int = field(default=4)

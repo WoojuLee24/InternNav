@@ -124,9 +124,12 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-20 11:36_
+_Last updated: 2026-03-21 08:06_
 
-### [7041942b] 2026-03-20 — fix: correct submodule path to src/diffusion-policy
+### [d95bd87d] 2026-03-21 — feat(train): add data_root arg and node-scale training scripts
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### [adbc572b] 2026-03-20 — fix: correct submodule path to src/diffusion-policy
 
 ### [7fb1cca6] 2026-03-19 — Merge remote-tracking branch 'upstream/release/v0.3.1' into v0.3.1
 
@@ -140,5 +143,3 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 ### [538329ff] 2026-03-07 — feat(realworld): support configurable frame_id for traj/subgoal visualization
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
-### [72a5a0c5] 2026-03-06 — Set up thor on the scout: default path and odom topic
