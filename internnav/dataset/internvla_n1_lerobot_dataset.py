@@ -852,6 +852,8 @@ class NavPixelGoalDataset(Dataset):
             pitch_2 = data.get("pitch_2", None)
 
             data_path = data['data_path']
+            if getattr(data_args, 'data_root', None):
+                data_path = os.path.join(data_args.data_root, data_path)
             setting = f'{height}cm_{pitch_2}deg'
             annotations = get_annotations_from_lerobot_data(data_path, setting)
 
