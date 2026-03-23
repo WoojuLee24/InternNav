@@ -124,9 +124,13 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-21 08:06_
+_Last updated: 2026-03-23 06:02_
 
-### [d95bd87d] 2026-03-21 — feat(train): add data_root arg and node-scale training scripts
+### [00a27402] 2026-03-23 — [ADD] extract & delete
+
+### [7987d445] 2026-03-23 — [add] scripts for 1 node and k8s
+
+### [b0f95b7f] 2026-03-21 — feat(train): add data_root arg and node-scale training scripts
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 ### [adbc572b] 2026-03-20 — fix: correct submodule path to src/diffusion-policy
@@ -136,10 +140,4 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ### [f7b70372] 2026-03-19 — fix(dataloader): disable torchcodec if runtime error occurs
 
 ### [f5e835d4] 2026-03-07 — feat(mapping): add standalone occgrid_publisher node and update rviz config
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
-### [215fc8a6] 2026-03-07 — feat(realworld): use Marker for traj/subgoal with configurable scale
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
-### [538329ff] 2026-03-07 — feat(realworld): support configurable frame_id for traj/subgoal visualization
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
