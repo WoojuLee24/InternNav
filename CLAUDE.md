@@ -124,9 +124,13 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-23 06:02_
+_Last updated: 2026-03-24 05:15_
 
-### [00a27402] 2026-03-23 — [ADD] extract & delete
+### [ba8036cc] 2026-03-24 — [FIX] train navdp on the 1gpu,1node
+
+### [35fadc62] 2026-03-23 — Merge branch 'main' of https://github.com/InternRobotics/InternNav into dev
+
+### [6f51a9dc] 2026-03-23 — [ADD] extract & delete
 
 ### [7987d445] 2026-03-23 — [add] scripts for 1 node and k8s
 
@@ -136,8 +140,3 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ### [adbc572b] 2026-03-20 — fix: correct submodule path to src/diffusion-policy
 
 ### [7fb1cca6] 2026-03-19 — Merge remote-tracking branch 'upstream/release/v0.3.1' into v0.3.1
-
-### [f7b70372] 2026-03-19 — fix(dataloader): disable torchcodec if runtime error occurs
-
-### [f5e835d4] 2026-03-07 — feat(mapping): add standalone occgrid_publisher node and update rviz config
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>

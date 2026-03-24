@@ -72,4 +72,4 @@ python -m torch.distributed.run \
     --gradient_checkpointing True \
     --dataloader_num_workers 4 \
     --run_name ${run_name} \
-    --report_to none
+    --report_to wandb

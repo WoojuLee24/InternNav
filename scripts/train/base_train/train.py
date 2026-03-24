@@ -1,5 +1,6 @@
 import os
 import sys
+from typing import Optional
 
 sys.path.append('./src/diffusion-policy')
 import logging
@@ -35,6 +36,8 @@ class TrainCfg(BaseModel):
 
     name: str = 'cma_train'  # Experiment name
     model_name: str = 'cma'  # Model name, options: 'cma', 'cma_plus', 'seq2seq', 'seq2seq_plus', 'rdp', 'navdp'
+    data_root: Optional[str] = None  # Override root data directory for navdp dataset
+    debug: bool = False  # Debug mode: sets num_workers=0 for single-process DataLoader
 
 
 class CheckpointFormatCallback(TrainerCallback):
@@ -312,6 +315,12 @@ if __name__ == '__main__':
     exp_cfg.name = config.name
     exp_cfg.num_gpus = len(exp_cfg.torch_gpu_ids)
     exp_cfg.world_size = exp_cfg.num_gpus
+
+    if config.data_root is not None and config.model_name == 'navdp':
+        exp_cfg.il.root_dir = config.data_root
+
+    if config.debug:
+        exp_cfg.il.num_workers = 0
 
     available_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
 
