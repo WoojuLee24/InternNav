@@ -252,7 +252,7 @@ def main(config, model_class, model_config_class):
             ddp_bucket_cap_mb=100,
             torch_compile_mode=None,
             dataloader_drop_last=True,
-            disable_tqdm=True,
+            disable_tqdm=False,
             log_level="info",
         )
 

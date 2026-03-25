@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Default values
-NAME=navdp_train
+NAME=navdp_train_1node
 MODEL=navdp
 DATA_ROOT="/home/irteam/data_vol1/InternData-N1-v0.5-mini/vln_n1/traj_data"
 
