@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-24 05:15_
+_Last updated: 2026-03-25 07:57_
 
-### [ba8036cc] 2026-03-24 — [FIX] train navdp on the 1gpu,1node
+### [ab4eb522] 2026-03-25 — [FIX] navdp_train_1node config edit
+
+### [8e9d6a77] 2026-03-24 — [FIX] train navdp on the 1gpu,1node
 
 ### [35fadc62] 2026-03-23 — Merge branch 'main' of https://github.com/InternRobotics/InternNav into dev
 
@@ -138,5 +140,3 @@ _Last updated: 2026-03-24 05:15_
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 ### [adbc572b] 2026-03-20 — fix: correct submodule path to src/diffusion-policy
-
-### [7fb1cca6] 2026-03-19 — Merge remote-tracking branch 'upstream/release/v0.3.1' into v0.3.1

@@ -541,10 +541,12 @@ class NavDP_Base_Datset(Dataset):
         end_time = time.time()
         self.item_cnt += 1
         self.batch_time_sum += end_time - start_time
-        if self.item_cnt % self.batch_size == 0:
-            avg_time = self.batch_time_sum / self.batch_size
+        epoch_items = len(self)
+        log_interval = 100 * epoch_items
+        if self.item_cnt % log_interval == 0:
+            avg_time = self.batch_time_sum / log_interval
             print(
-                f'__getitem__ pid={os.getpid()}, avg_time(last {self.batch_size})={avg_time:.2f}s, cnt={self.item_cnt}'
+                f'__getitem__ pid={os.getpid()}, avg_time(last {log_interval})={avg_time:.2f}s, cnt={self.item_cnt}'
             )
             self.batch_time_sum = 0.0
         point_goal = torch.tensor(point_goal, dtype=torch.float32)

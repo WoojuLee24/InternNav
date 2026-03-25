@@ -36,22 +36,19 @@ class NavDPTrainer(BaseTrainer):
             else:
                 inputs_on_device[key] = value
 
-        import os
-
-        import psutil
-
-        current_pid = os.getpid()
-        process = psutil.Process(current_pid)
-        parent = process.parent()
-
-        if parent:
-            children = parent.children()
-            if len(children) == 8:
-                print("There are 8 training processes running")
-            else:
-                print(f"There are {len(children)} training processes running")
-        else:
-            print("Cannot determine parent process")
+        # import os
+        # import psutil
+        # current_pid = os.getpid()
+        # process = psutil.Process(current_pid)
+        # parent = process.parent()
+        # if parent:
+        #     children = parent.children()
+        #     if len(children) == 8:
+        #         print("There are 8 training processes running")
+        #     else:
+        #         print(f"There are {len(children)} training processes running")
+        # else:
+        #     print("Cannot determine parent process")
 
         # Ensure all inputs are on the model device
         inputs_on_device = {
