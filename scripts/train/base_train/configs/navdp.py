@@ -29,7 +29,7 @@ navdp_exp_cfg = ExpCfg(
     ),
     il=IlCfg(
         epochs=1000,
-        batch_size=32,
+        batch_size=256, # 32,
         lr=1e-4,
         num_workers=32,
         weight_decay=1e-4,  # TODO
