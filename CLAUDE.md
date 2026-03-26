@@ -124,18 +124,18 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-26 12:45_
+_Last updated: 2026-03-26 13:16_
 
-### [c08fa924] 2026-03-26 — [fix] debug nccl_error
+### [d00b6810] 2026-03-26 — [fix] delete pdb to debug ddp training s1
+
+### [ceb10481] 2026-03-26 — Merge branch 'dev' of https://github.com/WoojuLee24/InternNav into dev
+
+### [e2e68253] 2026-03-26 — [fix] debug nccl_error
+
+### [ab00e0a9] 2026-03-26 — [fix] debug data_root of s1
 
 ### [d28d32c6] 2026-03-26 — [chore] edit variable and clean the code
 
 ### [81915c51] 2026-03-26 — [feat] s1 validation and wandb logging
 
 ### [7f9925a4] 2026-03-26 — [FIX] modify batch
-
-### [aeb81617] 2026-03-25 — [FIX] update filepath for check_model.py and batch size of navdp
-
-### [b3b9e059] 2026-03-25 — [FIX] navdp_train_1node config edit
-
-### [8e9d6a77] 2026-03-24 — [FIX] train navdp on the 1gpu,1node
