@@ -35,3 +35,5 @@ class IlCfg(BaseModel, extra='allow'):
     use_discrete_dataset: Optional[bool] = None
     loss: Optional[Loss] = None
     report_to: Optional[str] = None
+    val_ratio: Optional[float] = None           # fraction of data held out for validation
+    val_interval_steps: Optional[int] = 500     # run validation every N global steps; None = every epoch

@@ -3,12 +3,12 @@ from internnav.configs.trainer.eval import EvalCfg
 from internnav.configs.trainer.exp import ExpCfg
 from internnav.configs.trainer.il import FilterFailure, IlCfg, Loss
 
-navdp_exp_cfg = ExpCfg(
-    name='navdp_train',
+navdp_1node_exp_cfg = ExpCfg(
+    name='navdp_1node',
     model_name='navdp',
-    # num_gpus = 4,
+    
     torch_gpu_id=0,
-    torch_gpu_ids=[0],
+    torch_gpu_ids=[0, 1, 2, 3, 4, 5, 6, 7],
     output_dir='checkpoints/%s/ckpts',
     tensorboard_dir='checkpoints/%s/tensorboard',
     checkpoint_folder='checkpoints/%s/ckpts',
@@ -29,9 +29,9 @@ navdp_exp_cfg = ExpCfg(
     ),
     il=IlCfg(
         epochs=1000,
-        batch_size=32,
+        batch_size=256, # 32,
         lr=1e-4,
-        num_workers=8,
+        num_workers=16,
         weight_decay=1e-4,  # TODO
         warmup_ratio=0.05,  # TODO
         use_iw=True,
@@ -47,9 +47,9 @@ navdp_exp_cfg = ExpCfg(
         lmdb_features_dir='r2r',
         lerobot_features_dir='data/vln_pe/traj_data/r2r',
         camera_name='pano_camera_0',
-        report_to='tensorboard',  # wandb, tensorboard, none
+        report_to='wandb',  # wandb, tensorboard, none
         dataset_navdp='data/datasets/navdp_dataset_lerobot.json',
-        root_dir='data/datasets/InternData-N1/vln_n1/traj_data',
+        root_dir='/home/irteam/git/InternNav/InternData-N1-v0.5-mini/vln_n1/traj_data',
         image_size=224,
         scene_scale=1.0,
         preload=False,
@@ -66,6 +66,8 @@ navdp_exp_cfg = ExpCfg(
         scratch=False,
         finetune=False,
         ddp_find_unused_parameters=True,
+        val_ratio=0.1,
+        # val_interval_steps=500,
         filter_failure=FilterFailure(
             use=True,
             min_rgb_nums=15,

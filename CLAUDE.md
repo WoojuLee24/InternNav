@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-26 02:31_
+_Last updated: 2026-03-26 11:55_
 
-### [a1d8d51a] 2026-03-26 — [FIX] modify batch
+### [2428258c] 2026-03-26 — [feat] s1 validation and wandb logging
+
+### [7f9925a4] 2026-03-26 — [FIX] modify batch
 
 ### [aeb81617] 2026-03-25 — [FIX] update filepath for check_model.py and batch size of navdp
 
@@ -137,5 +139,3 @@ _Last updated: 2026-03-26 02:31_
 ### [35fadc62] 2026-03-23 — Merge branch 'main' of https://github.com/InternRobotics/InternNav into dev
 
 ### [6f51a9dc] 2026-03-23 — [ADD] extract & delete
-
-### [7987d445] 2026-03-23 — [add] scripts for 1 node and k8s

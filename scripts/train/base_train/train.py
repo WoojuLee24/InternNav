@@ -1,6 +1,5 @@
 import os
 import sys
-from typing import Optional
 
 sys.path.append('./src/diffusion-policy')
 import logging
@@ -20,23 +19,25 @@ from internnav.dataset.rdp_lerobot_dataset import RDP_LerobotDataset, rdp_collat
 from internnav.model import get_config, get_policy
 from internnav.model.utils.logger import MyLogger
 from internnav.model.utils.utils import load_dataset
-from internnav.trainer import CMATrainer, NavDPTrainer, RDPTrainer
+from internnav.trainer import CMATrainer, NavDPTrainer, RDPTrainer, ValidationCallback
 from scripts.train.base_train.configs import (
     cma_exp_cfg,
     cma_plus_exp_cfg,
     navdp_exp_cfg,
+    navdp_1gpu_exp_cfg,
+    navdp_1node_exp_cfg,
     rdp_exp_cfg,
     seq2seq_exp_cfg,
     seq2seq_plus_exp_cfg,
 )
 
 
+
 class TrainCfg(BaseModel):
     """Training configuration class"""
 
     name: str = 'cma_train'  # Experiment name
-    model_name: str = 'cma'  # Model name, options: 'cma', 'cma_plus', 'seq2seq', 'seq2seq_plus', 'rdp', 'navdp'
-    data_root: Optional[str] = None  # Override root data directory for navdp dataset
+    model_name: str = 'cma'  # Model name, options: 'cma', 'cma_plus', 'seq2seq', 'seq2seq_plus', 'rdp', 'navdp', 'navdp_1gpu', 'navdp_1node'
     debug: bool = False  # Debug mode: sets num_workers=0 for single-process DataLoader
 
 
@@ -75,7 +76,7 @@ def _make_dir(config):
         os.makedirs(config.log_dir, exist_ok=True)
 
 
-def main(config, model_class, model_config_class):
+def main(config, model_class, model_config_class, debug=False):
     try:
         """Main training function."""
         _make_dir(config)
@@ -224,6 +225,65 @@ def main(config, model_class, model_config_class):
             train_dataset = train_dataset_data
             collate_fn = navdp_collate_fn
 
+        # -------- optional validation dataset --------
+        val_dataset = None
+        val_ratio = getattr(config.il, 'val_ratio', None)
+        if val_ratio and val_ratio > 0:
+            if config.model_name == 'navdp':
+                # Re-create dataset with val split (uses cached preload JSON)
+                val_dataset = NavDP_Base_Datset(
+                    config.il.root_dir,
+                    config.il.dataset_navdp,
+                    config.il.memory_size,
+                    config.il.predict_size,
+                    config.il.batch_size,
+                    config.il.image_size,
+                    config.il.scene_scale,
+                    pixel_channel=config.il.pixel_channel,
+                    preload=True,  # use cached JSON (built by train_dataset_data above)
+                    random_digit=config.il.random_digit,
+                    prior_sample=config.il.prior_sample,
+                    is_train=False,
+                    val_ratio=val_ratio,
+                )
+                # Also rebuild train_dataset with val excluded
+                train_dataset = NavDP_Base_Datset(
+                    config.il.root_dir,
+                    config.il.dataset_navdp,
+                    config.il.memory_size,
+                    config.il.predict_size,
+                    config.il.batch_size,
+                    config.il.image_size,
+                    config.il.scene_scale,
+                    pixel_channel=config.il.pixel_channel,
+                    preload=True,
+                    random_digit=config.il.random_digit,
+                    prior_sample=config.il.prior_sample,
+                    is_train=True,
+                    val_ratio=val_ratio,
+                )
+            elif config.model_name in ['cma', 'seq2seq']:
+                # Split lmdb_keys: last val_ratio fraction → val
+                import copy
+                all_keys = list(train_dataset.lmdb_keys)
+                n_val = max(1, int(len(all_keys) * val_ratio))
+                val_dataset = copy.copy(train_dataset)
+                val_dataset.lmdb_keys = all_keys[-n_val:]
+                val_dataset.length = n_val
+                train_dataset.lmdb_keys = all_keys[:-n_val]
+                train_dataset.length = len(train_dataset.lmdb_keys)
+            elif config.model_name == 'rdp':
+                import copy
+                all_keys = list(train_dataset.lmdb_keys)
+                n_val = max(1, int(len(all_keys) * val_ratio))
+                val_dataset = copy.copy(train_dataset)
+                val_dataset.lmdb_keys = all_keys[-n_val:]
+                val_dataset.length = n_val
+                train_dataset.lmdb_keys = all_keys[:-n_val]
+                train_dataset.length = len(train_dataset.lmdb_keys)
+            if val_dataset is not None:
+                print(f'[Val] val_dataset size: {len(val_dataset)}')
+
         # ------------ training args ------------
         training_args = TrainingArguments(
             output_dir=config.output_dir,
@@ -266,6 +326,24 @@ def main(config, model_class, model_config_class):
         ckpt_format_callback = CheckpointFormatCallback(run_name=run_name, exp_cfg_dir=config.log_dir)
         trainer.add_callback(ckpt_format_callback)
 
+        # Add validation callback if val_dataset was built
+        if val_dataset is not None:
+            val_interval = getattr(config.il, 'val_interval_steps', None)
+            val_cb = ValidationCallback(
+                trainer=trainer,
+                val_dataset=val_dataset,
+                collate_fn=collate_fn,
+                val_interval_steps=val_interval,
+                num_workers=0,
+                debug=debug,
+                log_dir=config.log_dir,
+            )
+            trainer.add_callback(val_cb)
+            if val_interval:
+                print(f'[Val] ValidationCallback registered (every {val_interval} steps)')
+            else:
+                print('[Val] ValidationCallback registered (every epoch)')
+
         trainer.train()
         if train_logger:
             for handler in train_logger.handlers:
@@ -304,6 +382,8 @@ if __name__ == '__main__':
         'cma_plus': [cma_plus_exp_cfg, "CMA_Policy"],
         'rdp': [rdp_exp_cfg, "RDP_Policy"],
         'navdp': [navdp_exp_cfg, "NavDP_Policy"],
+        'navdp_1gpu': [navdp_1gpu_exp_cfg, "NavDP_Policy"],
+        'navdp_1node': [navdp_1node_exp_cfg, "NavDP_Policy"],
     }
 
     if config.model_name not in supported_cfg:
@@ -315,9 +395,6 @@ if __name__ == '__main__':
     exp_cfg.name = config.name
     exp_cfg.num_gpus = len(exp_cfg.torch_gpu_ids)
     exp_cfg.world_size = exp_cfg.num_gpus
-
-    if config.data_root is not None and config.model_name == 'navdp':
-        exp_cfg.il.root_dir = config.data_root
 
     if config.debug:
         exp_cfg.il.num_workers = 0
@@ -331,4 +408,4 @@ if __name__ == '__main__':
     assert exp_cfg.num_gpus > 0, 'Number of GPUs must be greater than 0'
     print(f'Using {exp_cfg.num_gpus} GPUs')
 
-    main(exp_cfg, model_class, model_config_class)
+    main(exp_cfg, model_class, model_config_class, debug=config.debug)

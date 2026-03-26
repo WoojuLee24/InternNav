@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Default values
-NAME=navdp_train
-MODEL=navdp
-DATA_ROOT="/home/irteam/data_vol1/InternData-N1-v0.5-mini/vln_n1/traj_data"
+NAME=navdp_1gpu
+MODEL=navdp_1gpu
+DEBUG_FLAG=""
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -16,9 +16,9 @@ while [[ $# -gt 0 ]]; do
             MODEL="$2"
             shift 2
             ;;
-        --data-root)
-            DATA_ROOT="$2"
-            shift 2
+        --debug)
+            DEBUG_FLAG="--debug"
+            shift
             ;;
         *)
             echo "Unknown parameter: $1"
@@ -53,6 +53,10 @@ case $MODEL in
         export CUDA_VISIBLE_DEVICES=0
         NUM_GPUS=1
         ;;
+    "navdp_1gpu")
+        export CUDA_VISIBLE_DEVICES=0
+        NUM_GPUS=1
+        ;;
     *)
         echo "Error: Unsupported model type: $MODEL"
         exit 1
@@ -73,7 +77,7 @@ export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # Check if model is rdp to use python, otherwise use torchrun
-if [[ "$MODEL" == "navdp" ]]; then
+if [[ "$MODEL" == "navdp" || "$MODEL" == "navdp_1gpu" ]]; then
     echo "Using torchrun to start $MODEL training, using $NUM_GPUS GPUs (CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES)"
     torchrun \
         --nproc_per_node=$NUM_GPUS \
@@ -84,11 +88,11 @@ if [[ "$MODEL" == "navdp" ]]; then
         scripts/train/base_train/train.py \
         --name "$NAME" \
         --model-name "$MODEL" \
-        ${DATA_ROOT:+--data-root "$DATA_ROOT"}
+        $DEBUG_FLAG
 else
     echo "Using python to start $MODEL training, using $NUM_GPUS GPUs (CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES)"
     python scripts/train/base_train/train.py \
         --name "$NAME" \
         --model-name "$MODEL" \
-        ${DATA_ROOT:+--data-root "$DATA_ROOT"}
+        $DEBUG_FLAG
 fi
