@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-26 13:16_
+_Last updated: 2026-03-26 13:28_
 
-### [d00b6810] 2026-03-26 — [fix] delete pdb to debug ddp training s1
+### [a8f73911] 2026-03-26 — [fix] json dump for ddp
+
+### [0c88598a] 2026-03-26 — [fix] delete pdb to debug ddp training s1
 
 ### [ceb10481] 2026-03-26 — Merge branch 'dev' of https://github.com/WoojuLee24/InternNav into dev
 
@@ -137,5 +139,3 @@ _Last updated: 2026-03-26 13:16_
 ### [d28d32c6] 2026-03-26 — [chore] edit variable and clean the code
 
 ### [81915c51] 2026-03-26 — [feat] s1 validation and wandb logging
-
-### [7f9925a4] 2026-03-26 — [FIX] modify batch
