@@ -40,8 +40,10 @@ class ValidationCallback(TrainerCallback):
         self.log_dir = log_dir
 
     def _validate(self, args, state):
-        if not state.is_world_process_zero:
-            return
+        import torch.distributed as dist
+
+        is_dist = dist.is_available() and dist.is_initialized()
+        rank = dist.get_rank() if is_dist else 0
 
         rng_state = np.random.get_state()
         np.random.seed(42)
@@ -63,7 +65,7 @@ class ValidationCallback(TrainerCallback):
         with torch.no_grad():
             for batch in val_loader:
                 try:
-                    if self.debug and num_batches == 0:
+                    if self.debug and num_batches == 0 and rank == 0:
                         _save_val_batch_images(batch, state.global_step, self.log_dir)
                     batch = {k: v.to(device) if torch.is_tensor(v) else v for k, v in batch.items()}
                     loss = self.trainer.compute_loss(model, batch)
@@ -76,7 +78,13 @@ class ValidationCallback(TrainerCallback):
         model.train()
         np.random.set_state(rng_state)
 
-        if num_batches > 0:
+        # Aggregate loss across all ranks
+        if is_dist:
+            stats = torch.tensor([total_loss, float(num_batches)], device=device)
+            dist.all_reduce(stats, op=dist.ReduceOp.SUM)
+            total_loss, num_batches = stats[0].item(), int(stats[1].item())
+
+        if rank == 0 and num_batches > 0:
             avg_val_loss = total_loss / num_batches
             print(f"[Val] step={state.global_step} epoch={int(state.epoch)}  val_loss={avg_val_loss:.4f}  ({num_batches} batches)")
             try:
