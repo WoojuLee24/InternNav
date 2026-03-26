@@ -124,9 +124,13 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-25 07:57_
+_Last updated: 2026-03-26 02:31_
 
-### [ab4eb522] 2026-03-25 — [FIX] navdp_train_1node config edit
+### [a1d8d51a] 2026-03-26 — [FIX] modify batch
+
+### [aeb81617] 2026-03-25 — [FIX] update filepath for check_model.py and batch size of navdp
+
+### [b3b9e059] 2026-03-25 — [FIX] navdp_train_1node config edit
 
 ### [8e9d6a77] 2026-03-24 — [FIX] train navdp on the 1gpu,1node
 
@@ -135,8 +139,3 @@ _Last updated: 2026-03-25 07:57_
 ### [6f51a9dc] 2026-03-23 — [ADD] extract & delete
 
 ### [7987d445] 2026-03-23 — [add] scripts for 1 node and k8s
-
-### [b0f95b7f] 2026-03-21 — feat(train): add data_root arg and node-scale training scripts
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-
-### [adbc572b] 2026-03-20 — fix: correct submodule path to src/diffusion-policy
