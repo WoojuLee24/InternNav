@@ -121,8 +121,20 @@ class NavDP_Base_Datset(Dataset):
                 'trajectory_depth_path': self.trajectory_depth_path,
                 'trajectory_afford_path': self.trajectory_afford_path,
             }
-            with open(preload_path, 'w') as f:
-                json.dump(save_dict, f, indent=4)
+            import torch.distributed as _dist
+            _is_dist = _dist.is_available() and _dist.is_initialized()
+            _rank = _dist.get_rank() if _is_dist else 0
+            # if _rank == 0:
+            #     with open(preload_path, 'w') as f:
+            #         json.dump(save_dict, f, indent=4)
+            import torch.distributed as _dist
+            _is_dist = _dist.is_available() and _dist.is_initialized()
+            _rank = _dist.get_rank() if _is_dist else 0
+            if _rank == 0:
+                with open(preload_path, 'w') as f:
+                    json.dump(save_dict, f, indent=4) 
+            if _is_dist:
+                _dist.barrier()  # wait for rank 0 to finish writing before all ranks read
 
             # split train / val before replication
             if val_ratio and val_ratio > 0:
