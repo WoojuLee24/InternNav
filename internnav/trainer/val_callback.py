@@ -82,7 +82,7 @@ class ValidationCallback(TrainerCallback):
             try:
                 import wandb
                 if wandb.run is not None:
-                    wandb.log({"eval/loss": avg_val_loss}, step=state.global_step)
+                    wandb.log({"val/loss": avg_val_loss, "val/epoch": state.epoch}, step=state.global_step)
             except Exception:
                 pass
 
