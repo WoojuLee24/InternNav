@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-26 12:01_
+_Last updated: 2026-03-26 12:45_
 
-### [42a5d054] 2026-03-26 — [chore] edit variable and clean the code
+### [c08fa924] 2026-03-26 — [fix] debug nccl_error
+
+### [d28d32c6] 2026-03-26 — [chore] edit variable and clean the code
 
 ### [81915c51] 2026-03-26 — [feat] s1 validation and wandb logging
 
@@ -137,5 +139,3 @@ _Last updated: 2026-03-26 12:01_
 ### [b3b9e059] 2026-03-25 — [FIX] navdp_train_1node config edit
 
 ### [8e9d6a77] 2026-03-24 — [FIX] train navdp on the 1gpu,1node
-
-### [35fadc62] 2026-03-23 — Merge branch 'main' of https://github.com/InternRobotics/InternNav into dev
