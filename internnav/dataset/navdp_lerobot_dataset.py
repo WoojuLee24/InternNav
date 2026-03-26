@@ -48,9 +48,11 @@ class NavDP_Base_Datset(Dataset):
         preload=False,
         random_digit=False,
         prior_sample=False,
+        is_train=True,
+        val_ratio=0.0,
     ):
 
-        self.dataset_dirs = np.array([p for p in os.listdir(root_dirs)])
+        self.dataset_dirs = np.array(sorted(os.listdir(root_dirs)))
         self.memory_size = memory_size
         self.image_size = image_size
         self.scene_scale_size = scene_data_scale
@@ -73,7 +75,7 @@ class NavDP_Base_Datset(Dataset):
 
         if preload is False:
             for group_dir in self.dataset_dirs:  # gibson_zed, 3dfront ...
-                all_scene_dirs = np.array([p for p in os.listdir(os.path.join(root_dirs, group_dir))])
+                all_scene_dirs = np.array(sorted(os.listdir(os.path.join(root_dirs, group_dir))))
                 select_scene_dirs = all_scene_dirs[
                     np.arange(0, all_scene_dirs.shape[0], 1 / self.scene_scale_size).astype(np.int32)
                 ]
@@ -124,17 +126,50 @@ class NavDP_Base_Datset(Dataset):
             with open(preload_path, 'w') as f:
                 json.dump(save_dict, f, indent=4)
 
-            # replicate the data 50 times
-            self.trajectory_data_dir = self.trajectory_data_dir * 50
-            self.trajectory_rgb_path = self.trajectory_rgb_path * 50
-            self.trajectory_depth_path = self.trajectory_depth_path * 50
-            self.trajectory_afford_path = self.trajectory_afford_path * 50
+            # split train / val before replication
+            if val_ratio and val_ratio > 0:
+                n_base = len(self.trajectory_data_dir)
+                n_val = max(1, int(n_base * val_ratio))
+                if is_train:
+                    self.trajectory_data_dir = self.trajectory_data_dir[:-n_val]
+                    self.trajectory_rgb_path = self.trajectory_rgb_path[:-n_val]
+                    self.trajectory_depth_path = self.trajectory_depth_path[:-n_val]
+                    self.trajectory_afford_path = self.trajectory_afford_path[:-n_val]
+                else:
+                    self.trajectory_data_dir = self.trajectory_data_dir[-n_val:]
+                    self.trajectory_rgb_path = self.trajectory_rgb_path[-n_val:]
+                    self.trajectory_depth_path = self.trajectory_depth_path[-n_val:]
+                    self.trajectory_afford_path = self.trajectory_afford_path[-n_val:]
+
+            # replicate the data 50 times (training only)
+            if is_train:
+                self.trajectory_data_dir = self.trajectory_data_dir * 50
+                self.trajectory_rgb_path = self.trajectory_rgb_path * 50
+                self.trajectory_depth_path = self.trajectory_depth_path * 50
+                self.trajectory_afford_path = self.trajectory_afford_path * 50
         else:
             load_dict = json.load(open(preload_path, 'r'))
-            self.trajectory_data_dir = load_dict['trajectory_data_dir'] * 50
-            self.trajectory_rgb_path = load_dict['trajectory_rgb_path'] * 50
-            self.trajectory_depth_path = load_dict['trajectory_depth_path'] * 50
-            self.trajectory_afford_path = load_dict['trajectory_afford_path'] * 50
+            _tdd = load_dict['trajectory_data_dir']
+            _trp = load_dict['trajectory_rgb_path']
+            _tdp = load_dict['trajectory_depth_path']
+            _tap = load_dict['trajectory_afford_path']
+            if val_ratio and val_ratio > 0:
+                n_base = len(_tdd)
+                n_val = max(1, int(n_base * val_ratio))
+                if is_train:
+                    _tdd, _trp, _tdp, _tap = _tdd[:-n_val], _trp[:-n_val], _tdp[:-n_val], _tap[:-n_val]
+                else:
+                    _tdd, _trp, _tdp, _tap = _tdd[-n_val:], _trp[-n_val:], _tdp[-n_val:], _tap[-n_val:]
+            if is_train:
+                self.trajectory_data_dir = _tdd * 50
+                self.trajectory_rgb_path = _trp * 50
+                self.trajectory_depth_path = _tdp * 50
+                self.trajectory_afford_path = _tap * 50
+            else:
+                self.trajectory_data_dir = _tdd
+                self.trajectory_rgb_path = _trp
+                self.trajectory_depth_path = _tdp
+                self.trajectory_afford_path = _tap
 
     def __len__(self):
         return len(self.trajectory_data_dir)
