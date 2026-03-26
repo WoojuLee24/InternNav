@@ -112,10 +112,8 @@ class NavDP_Base_Datset(Dataset):
                             self.trajectory_depth_path.append(episode_depth_path)
                             self.trajectory_afford_path.append(afford_dir)
                         except Exception as e:
-                            import pdb
-
                             print(f"Error processing episode {episode_idx}: {e}")
-                            pdb.set_trace()
+                            continue
 
             save_dict = {
                 'trajectory_data_dir': self.trajectory_data_dir,
