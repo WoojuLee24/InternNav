@@ -180,6 +180,7 @@ class NavDPTrainer(BaseTrainer):
             drop_last=True,
             collate_fn=self.data_collator,
             prefetch_factor=2 if self.config.il.num_workers > 0 else None,
+            persistent_workers=self.config.il.num_workers > 0,
         )
         # print(loader)
         return loader
