@@ -26,7 +26,7 @@ navdp_h200_1gpu_exp_cfg = ExpCfg(
         step_interval=50,
     ),
     il=IlCfg(
-        epochs=1000,
+        epochs=10,
         batch_size=128,
         lr=1e-4,
         num_workers=16,
@@ -47,7 +47,7 @@ navdp_h200_1gpu_exp_cfg = ExpCfg(
         camera_name='pano_camera_0',
         report_to='wandb',  # wandb, tensorboard, none
         dataset_navdp='data/datasets/navdp_dataset_lerobot.json',
-        root_dir='/ws/src/InternNav/data/InternData-N1-v0.5-mini/vln_n1/traj_data',
+        root_dir='/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_n1/traj_data',
         image_size=224,
         scene_scale=1.0,  # full dataset
         preload=False,
