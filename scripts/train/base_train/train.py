@@ -26,6 +26,7 @@ from scripts.train.base_train.configs import (
     navdp_exp_cfg,
     navdp_1gpu_exp_cfg,
     navdp_1node_exp_cfg,
+    navdp_h200_1gpu_exp_cfg,
     rdp_exp_cfg,
     seq2seq_exp_cfg,
     seq2seq_plus_exp_cfg,
@@ -384,6 +385,7 @@ if __name__ == '__main__':
         'navdp': [navdp_exp_cfg, "NavDP_Policy"],
         'navdp_1gpu': [navdp_1gpu_exp_cfg, "NavDP_Policy"],
         'navdp_1node': [navdp_1node_exp_cfg, "NavDP_Policy"],
+        'navdp_h200_1gpu': [navdp_h200_1gpu_exp_cfg, "NavDP_Policy"],
     }
 
     if config.model_name not in supported_cfg:
