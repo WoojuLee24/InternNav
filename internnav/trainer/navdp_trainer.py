@@ -179,6 +179,7 @@ class NavDPTrainer(BaseTrainer):
             pin_memory=True,
             drop_last=True,
             collate_fn=self.data_collator,
+            prefetch_factor=2 if self.config.il.num_workers > 0 else None,
         )
         # print(loader)
         return loader

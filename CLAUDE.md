@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-27 06:18_
+_Last updated: 2026-03-27 08:34_
 
-### [7b19dd0b] 2026-03-27 — [fix] disable torch.cuda.synchronize when ddp (2)
+### [46de211b] 2026-03-27 — [feat] prefetch_factor
+
+### [36b17d6b] 2026-03-27 — [fix] disable torch.cuda.synchronize when ddp (2)
 
 ### [1678d4c2] 2026-03-27 — [fix] disable torch.cuda.synchronize when ddp
 
@@ -137,5 +139,3 @@ _Last updated: 2026-03-27 06:18_
 ### [ceb10481] 2026-03-26 — Merge branch 'dev' of https://github.com/WoojuLee24/InternNav into dev
 
 ### [e2e68253] 2026-03-26 — [fix] debug nccl_error
-
-### [ab00e0a9] 2026-03-26 — [fix] debug data_root of s1
