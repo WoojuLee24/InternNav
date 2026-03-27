@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-26 13:28_
+_Last updated: 2026-03-27 06:03_
 
-### [a8f73911] 2026-03-26 — [fix] json dump for ddp
+### [8d2da369] 2026-03-27 — [fix] disable torch.cuda.synchronize when ddp
+
+### [9b33af91] 2026-03-26 — [fix] json dump for ddp
 
 ### [0c88598a] 2026-03-26 — [fix] delete pdb to debug ddp training s1
 
@@ -137,5 +139,3 @@ _Last updated: 2026-03-26 13:28_
 ### [ab00e0a9] 2026-03-26 — [fix] debug data_root of s1
 
 ### [d28d32c6] 2026-03-26 — [chore] edit variable and clean the code
-
-### [81915c51] 2026-03-26 — [feat] s1 validation and wandb logging

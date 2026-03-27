@@ -62,7 +62,9 @@ class NavDPTrainer(BaseTrainer):
             "batch_label_critic": inputs["batch_label_critic"].to(model_device),
             "batch_augment_critic": inputs["batch_augment_critic"].to(model_device),
         }
-        torch.cuda.synchronize(model_device)
+        is_ddp = dist.is_initialized() and dist.get_world_size() > 1
+        if self.config.debug or not is_ddp:
+            torch.cuda.synchronize(model_device)
 
         # unpack input data and move to device
         # batch_pg = inputs["batch_pg"]
