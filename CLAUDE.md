@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-27 10:34_
+_Last updated: 2026-03-27 12:39_
 
-### [8cbf4f77] 2026-03-27 — [feat] persistent_workers
+### [f8419e84] 2026-03-27 — h200 1gpu
+
+### [6822bbf5] 2026-03-27 — [feat] persistent_workers
 
 ### [ab27020a] 2026-03-27 — [feat] prefetch_factor
 
@@ -137,5 +139,3 @@ _Last updated: 2026-03-27 10:34_
 ### [9b33af91] 2026-03-26 — [fix] json dump for ddp
 
 ### [0c88598a] 2026-03-26 — [fix] delete pdb to debug ddp training s1
-
-### [ceb10481] 2026-03-26 — Merge branch 'dev' of https://github.com/WoojuLee24/InternNav into dev
