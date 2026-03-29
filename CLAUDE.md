@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-27 13:47_
+_Last updated: 2026-03-29 17:23_
 
-### [b38d355d] 2026-03-27 — [chore] edit param
+### [b2e6f0f4] 2026-03-29 — [feat] system 2 validation added
+
+### [9725fed4] 2026-03-27 — [chore] edit param
 
 ### [70add386] 2026-03-27 — find=False
 
@@ -137,5 +139,3 @@ _Last updated: 2026-03-27 13:47_
 ### [6822bbf5] 2026-03-27 — [feat] persistent_workers
 
 ### [ab27020a] 2026-03-27 — [feat] prefetch_factor
-
-### [36b17d6b] 2026-03-27 — [fix] disable torch.cuda.synchronize when ddp (2)
