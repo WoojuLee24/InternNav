@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-29 17:37_
+_Last updated: 2026-03-29 17:51_
 
-### [18b4122f] 2026-03-29 — [chore] edit run_name
+### [17f31d59] 2026-03-29 — [chore] add date
+
+### [89976813] 2026-03-29 — [chore] edit run_name
 
 ### [3962b544] 2026-03-29 — [feat] system 2 validation added
 
@@ -137,5 +139,3 @@ _Last updated: 2026-03-29 17:37_
 ### [5ab0641b] 2026-03-27 — [fix] h200 1gpu update
 
 ### [33d7b7f6] 2026-03-27 — h200 1gpu
-
-### [6822bbf5] 2026-03-27 — [feat] persistent_workers
