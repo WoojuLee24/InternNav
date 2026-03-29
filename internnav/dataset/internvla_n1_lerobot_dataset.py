@@ -1382,12 +1382,25 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, dat
         train_datasets.append(VLLNDataset(tokenizer=tokenizer, data_args=data_args))
     if data_args.vln_dataset_use:
         train_datasets.append(NavPixelGoalDataset(tokenizer=tokenizer, data_args=data_args))
-    train_dataset = CombinedDataset(train_datasets, shuffle=False)
+    full_dataset = CombinedDataset(train_datasets, shuffle=False)
+
+    eval_dataset = None
+    val_ratio = getattr(data_args, "val_ratio", 0.0)
+    if val_ratio > 0.0:
+        n_total = len(full_dataset)
+        n_val = max(1, int(n_total * val_ratio))
+        n_train = n_total - n_val
+        train_dataset, eval_dataset = torch.utils.data.random_split(
+            full_dataset, [n_train, n_val], generator=torch.Generator().manual_seed(42)
+        )
+    else:
+        train_dataset = full_dataset
+
     if data_args.data_flatten:
         data_collator = FlattenedDataCollatorForSupervisedDataset(tokenizer=tokenizer)
-        return dict(train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator)
+        return dict(train_dataset=train_dataset, eval_dataset=eval_dataset, data_collator=data_collator)
     data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
-    return dict(train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator)
+    return dict(train_dataset=train_dataset, eval_dataset=eval_dataset, data_collator=data_collator)
 
 
 if __name__ == "__main__":

@@ -41,6 +41,7 @@ class DataArguments:
     resize_w: Optional[int] = field(default=384)
     num_future_steps: Optional[int] = field(default=4)
     max_dialog_turns: Optional[int] = field(default=6)
+    val_ratio: float = field(default=0.0, metadata={"help": "Fraction of dataset to use for validation. 0.0 disables validation."})
 
 
 @dataclass
