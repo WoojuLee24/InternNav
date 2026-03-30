@@ -41,6 +41,18 @@ class TrainCfg(BaseModel):
     model_name: str = 'cma'  # Model name, options: 'cma', 'cma_plus', 'seq2seq', 'seq2seq_plus', 'rdp', 'navdp', 'navdp_1gpu', 'navdp_1node'
     debug: bool = False  # Debug mode: sets num_workers=0 for single-process DataLoader
 
+    # Ablation / override fields — when set, these override the base config file values.
+    num_workers: int | None = None           # dataloader num_workers override
+    find_unused_parameters: bool | None = None  # DDP find_unused_parameters override
+    cuda_synchronize: bool | None = None     # torch.cuda.synchronize() after forward pass
+    scene_scale: float | None = None         # fraction of dataset to use (0.01 / 0.1 / 1.0)
+    batch_size: int | None = None            # per-device batch size override
+    persistent_workers: bool | None = None   # keep DataLoader workers alive between epochs
+    prefetch_factor: int | None = None       # DataLoader prefetch_factor override
+    preload: bool | None = None              # preload dataset into memory
+    bf16: bool | None = None                 # bfloat16 mixed precision
+    tf32: bool | None = None                 # TF32 on Ampere GPUs
+
 
 class CheckpointFormatCallback(TrainerCallback):
     """This callback format checkpoint to make them standalone. For now, it copies all config
@@ -149,7 +161,8 @@ def main(config, model_class, model_config_class, debug=False):
             # If distributed training, wrap the model with DDP
             if world_size > 1:
                 model = torch.nn.parallel.DistributedDataParallel(
-                    model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True
+                    model, device_ids=[local_rank], output_device=local_rank,
+                    find_unused_parameters=config.il.ddp_find_unused_parameters,
                 )
         # ------------ load logger ------------
         train_logger_filename = os.path.join(config.log_dir, 'train.log')
@@ -292,8 +305,8 @@ def main(config, model_class, model_config_class, debug=False):
             remove_unused_columns=False,
             deepspeed='',
             gradient_checkpointing=False,
-            bf16=False,  # fp16=False,
-            tf32=False,
+            bf16=bool(getattr(config.il, 'bf16', False) or False),
+            tf32=bool(getattr(config.il, 'tf32', False) or False),
             per_device_train_batch_size=config.il.batch_size,
             gradient_accumulation_steps=1,
             dataloader_num_workers=config.il.num_workers,
@@ -400,6 +413,28 @@ if __name__ == '__main__':
 
     if config.debug:
         exp_cfg.il.num_workers = 0
+
+    # Apply ablation overrides (only when explicitly set on the CLI)
+    if config.num_workers is not None:
+        exp_cfg.il.num_workers = config.num_workers
+    if config.find_unused_parameters is not None:
+        exp_cfg.il.ddp_find_unused_parameters = config.find_unused_parameters
+    if config.cuda_synchronize is not None:
+        exp_cfg.il.cuda_synchronize = config.cuda_synchronize
+    if config.scene_scale is not None:
+        exp_cfg.il.scene_scale = config.scene_scale
+    if config.batch_size is not None:
+        exp_cfg.il.batch_size = config.batch_size
+    if config.persistent_workers is not None:
+        exp_cfg.il.persistent_workers = config.persistent_workers
+    if config.prefetch_factor is not None:
+        exp_cfg.il.prefetch_factor = config.prefetch_factor
+    if config.preload is not None:
+        exp_cfg.il.preload = config.preload
+    if config.bf16 is not None:
+        exp_cfg.il.bf16 = config.bf16
+    if config.tf32 is not None:
+        exp_cfg.il.tf32 = config.tf32
 
     available_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
 

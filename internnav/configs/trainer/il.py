@@ -37,3 +37,8 @@ class IlCfg(BaseModel, extra='allow'):
     report_to: Optional[str] = None
     val_ratio: Optional[float] = None           # fraction of data held out for validation
     val_interval_steps: Optional[int] = 500     # run validation every N global steps; None = every epoch
+    persistent_workers: Optional[bool] = None   # keep DataLoader workers alive between epochs
+    prefetch_factor: Optional[int] = None       # number of batches to prefetch per worker
+    cuda_synchronize: Optional[bool] = None     # call torch.cuda.synchronize() after each forward pass
+    bf16: Optional[bool] = None                 # use bfloat16 mixed precision
+    tf32: Optional[bool] = None                 # allow TF32 on Ampere GPUs

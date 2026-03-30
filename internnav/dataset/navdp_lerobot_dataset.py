@@ -72,6 +72,8 @@ class NavDP_Base_Datset(Dataset):
         self.batch_size = batch_size
         self.batch_time_sum = 0.0
         self._last_time = None
+        self._ply_cache: dict = {}      # ply path -> obstacle_points ndarray
+        self._parquet_cache: dict = {}  # parquet path -> (intrinsic, extrinsic, trajectory, length)
 
         if preload is False:
             for group_dir in self.dataset_dirs:  # gibson_zed, 3dfront ...
@@ -237,25 +239,45 @@ class NavDP_Base_Datset(Dataset):
         return depth[:, :, np.newaxis]
 
     def process_data_parquet(self, index):
-        if not os.path.isfile(self.trajectory_data_dir[index]):
-            raise FileNotFoundError(self.trajectory_data_dir[index])
-        df = pd.read_parquet(self.trajectory_data_dir[index])
-        camera_intrinsic = np.vstack(np.array(df['observation.camera_intrinsic'].tolist()[0])).reshape(3, 3)
-        camera_extrinsic = np.vstack(np.array(df['observation.camera_extrinsic'].tolist()[0])).reshape(4, 4)
-        trajectory_length = len(df['action'].tolist())
-        camera_trajectory = np.array([np.stack(frame) for frame in df['action']], dtype=np.float64).reshape(-1, 4, 4)
-        return camera_intrinsic, camera_extrinsic, camera_trajectory, trajectory_length
+        path = self.trajectory_data_dir[index]
+        if path in self._parquet_cache:
+            return self._parquet_cache[path]
+
+        _base = os.path.basename(path).replace('.parquet', '.npz')
+        npz_path = os.path.join(os.path.dirname(path), 'npz_cache', _base)
+        if os.path.isfile(npz_path):
+            d = np.load(npz_path)
+            result = (d['camera_intrinsic'], d['camera_extrinsic'], d['trajectory'], int(d['trajectory'].shape[0]))
+        else:
+            if not os.path.isfile(path):
+                raise FileNotFoundError(path)
+            df = pd.read_parquet(path)
+            camera_intrinsic = np.vstack(np.array(df['observation.camera_intrinsic'].tolist()[0])).reshape(3, 3)
+            camera_extrinsic = np.vstack(np.array(df['observation.camera_extrinsic'].tolist()[0])).reshape(4, 4)
+            trajectory_length = len(df['action'].tolist())
+            camera_trajectory = np.array([np.stack(frame) for frame in df['action']], dtype=np.float64).reshape(-1, 4, 4)
+            result = (camera_intrinsic, camera_extrinsic, camera_trajectory, trajectory_length)
+
+        self._parquet_cache[path] = result
+        return result
 
     def process_obstacle_points(self, index):
-        scene_pcd = self.load_pointcloud(self.trajectory_afford_path[index])
-        scene_color = np.array(scene_pcd.colors)
-        scene_points = np.array(scene_pcd.points)
-        color_distance = np.abs(scene_color - np.array([0, 0, 0.5])).sum(axis=-1)
-        select_index = np.where(color_distance < 0.05)[0]
-        scene_obstacle = o3d.geometry.PointCloud()
-        scene_obstacle.points = o3d.utility.Vector3dVector(scene_points[select_index])
-        scene_obstacle.colors = o3d.utility.Vector3dVector(scene_color[select_index])
-        return np.array(scene_obstacle.points), scene_obstacle
+        path = self.trajectory_afford_path[index]
+        if path in self._ply_cache:
+            return self._ply_cache[path], None
+
+        npz_path = path.replace('pointcloud.ply', 'pointcloud_obstacle.npz')
+        if os.path.isfile(npz_path):
+            pts = np.load(npz_path)['obstacle_points']
+        else:
+            scene_pcd = self.load_pointcloud(path)
+            scene_color = np.array(scene_pcd.colors)
+            scene_points = np.array(scene_pcd.points)
+            color_distance = np.abs(scene_color - np.array([0, 0, 0.5])).sum(axis=-1)
+            pts = scene_points[color_distance < 0.05]
+
+        self._ply_cache[path] = pts
+        return pts, None
 
     def process_memory(self, rgb_paths, depth_paths, start_step, memory_digit=1):
         memory_index = np.arange(start_step - (self.memory_size - 1) * memory_digit, start_step + 1, memory_digit)

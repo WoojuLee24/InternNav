@@ -62,7 +62,10 @@ class NavDPTrainer(BaseTrainer):
             "batch_label_critic": inputs["batch_label_critic"].to(model_device),
             "batch_augment_critic": inputs["batch_augment_critic"].to(model_device),
         }
-        if not (dist.is_initialized() and dist.get_world_size() > 1):
+        cuda_sync = getattr(self.config.il, 'cuda_synchronize', None)
+        if cuda_sync is None:
+            cuda_sync = not (dist.is_initialized() and dist.get_world_size() > 1)
+        if cuda_sync:
             torch.cuda.synchronize(model_device)
 
         # unpack input data and move to device
@@ -171,16 +174,21 @@ class NavDPTrainer(BaseTrainer):
         rank = dist.get_rank() if dist.is_initialized() else 0
         sampler = DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank, shuffle=True, seed=1234)
 
+        nw = self.config.il.num_workers
+        cfg_pf = getattr(self.config.il, 'prefetch_factor', None)
+        cfg_pw = getattr(self.config.il, 'persistent_workers', None)
+        prefetch_factor = cfg_pf if cfg_pf is not None else (2 if nw > 0 else None)
+        persistent_workers = cfg_pw if cfg_pw is not None else (nw > 0)
         loader = DataLoader(
             self.train_dataset,
             batch_size=self.config.il.batch_size,
             sampler=sampler,
-            num_workers=self.config.il.num_workers,
+            num_workers=nw,
             pin_memory=True,
             drop_last=True,
             collate_fn=self.data_collator,
-            prefetch_factor=2 if self.config.il.num_workers > 0 else None,
-            persistent_workers=self.config.il.num_workers > 0,
+            prefetch_factor=prefetch_factor if nw > 0 else None,
+            persistent_workers=persistent_workers,
         )
         # print(loader)
         return loader
