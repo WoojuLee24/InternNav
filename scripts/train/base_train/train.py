@@ -184,6 +184,7 @@ def main(config, model_class, model_config_class, debug=False):
                 preload=config.il.preload,
                 random_digit=config.il.random_digit,
                 prior_sample=config.il.prior_sample,
+                use_scipy_kdtree=getattr(config.il, 'use_scipy_kdtree', False),
             )
         else:
             if '3dgs' in config.il.lmdb_features_dir or '3dgs' in config.il.lmdb_features_dir:
@@ -246,6 +247,7 @@ def main(config, model_class, model_config_class, debug=False):
                     prior_sample=config.il.prior_sample,
                     is_train=False,
                     val_ratio=val_ratio,
+                    use_scipy_kdtree=getattr(config.il, 'use_scipy_kdtree', False),
                 )
                 # Also rebuild train_dataset with val excluded
                 train_dataset = NavDP_Base_Datset(
@@ -262,6 +264,7 @@ def main(config, model_class, model_config_class, debug=False):
                     prior_sample=config.il.prior_sample,
                     is_train=True,
                     val_ratio=val_ratio,
+                    use_scipy_kdtree=getattr(config.il, 'use_scipy_kdtree', False),
                 )
             elif config.model_name in ['cma', 'seq2seq']:
                 # Split lmdb_keys: last val_ratio fraction → val
