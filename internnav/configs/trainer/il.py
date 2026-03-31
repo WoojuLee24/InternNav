@@ -42,3 +42,6 @@ class IlCfg(BaseModel, extra='allow'):
     cuda_synchronize: Optional[bool] = None     # call torch.cuda.synchronize() after each forward pass
     bf16: Optional[bool] = None                 # use bfloat16 mixed precision
     tf32: Optional[bool] = None                 # allow TF32 on Ampere GPUs
+    use_npy_cache: Optional[bool] = None        # use pre-built npz cache for parquet/ply (None = auto-detect)
+    use_webdataset: Optional[bool] = None       # use episode-packed WebDataset shards
+    webdataset_shard_dir: Optional[str] = None  # path to WebDataset shard directory

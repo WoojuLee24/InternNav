@@ -15,6 +15,7 @@ from transformers import TrainerCallback, TrainingArguments
 
 from internnav.dataset.cma_lerobot_dataset import CMALerobotDataset, cma_collate_fn
 from internnav.dataset.navdp_lerobot_dataset import NavDP_Base_Datset, navdp_collate_fn
+from internnav.dataset.navdp_webdataset import NavDP_WebDataset
 from internnav.dataset.rdp_lerobot_dataset import RDP_LerobotDataset, rdp_collate_fn
 from internnav.model import get_config, get_policy
 from internnav.model.utils.logger import MyLogger
@@ -26,6 +27,7 @@ from scripts.train.base_train.configs import (
     navdp_exp_cfg,
     navdp_1gpu_exp_cfg,
     navdp_1node_exp_cfg,
+    navdp_ablation_1node_exp_cfg,
     navdp_h200_1gpu_exp_cfg,
     rdp_exp_cfg,
     seq2seq_exp_cfg,
@@ -52,6 +54,9 @@ class TrainCfg(BaseModel):
     preload: bool | None = None              # preload dataset into memory
     bf16: bool | None = None                 # bfloat16 mixed precision
     tf32: bool | None = None                 # TF32 on Ampere GPUs
+    use_npy_cache: bool | None = None        # use pre-built npz cache for parquet/ply
+    use_webdataset: bool | None = None       # use episode-packed WebDataset shards
+    webdataset_shard_dir: str | None = None  # path to WebDataset shard directory
 
 
 class CheckpointFormatCallback(TrainerCallback):
@@ -185,19 +190,41 @@ def main(config, model_class, model_config_class, debug=False):
 
         # ------------ load dataset ------------
         if config.model_name == "navdp":
-            train_dataset_data = NavDP_Base_Datset(
-                config.il.root_dir,
-                config.il.dataset_navdp,
-                config.il.memory_size,
-                config.il.predict_size,
-                config.il.batch_size,
-                config.il.image_size,
-                config.il.scene_scale,
-                pixel_channel=config.il.pixel_channel,
-                preload=config.il.preload,
-                random_digit=config.il.random_digit,
-                prior_sample=config.il.prior_sample,
-            )
+            _use_npy_cache = getattr(config.il, 'use_npy_cache', None)
+            _use_npy_cache = True if _use_npy_cache is None else _use_npy_cache
+            _use_webdataset = getattr(config.il, 'use_webdataset', None) or False
+            _shard_dir = getattr(config.il, 'webdataset_shard_dir', None)
+            if _use_webdataset:
+                if not _shard_dir:
+                    raise ValueError('webdataset_shard_dir must be set when use_webdataset=True')
+                train_dataset_data = NavDP_WebDataset(
+                    config.il.root_dir,
+                    _shard_dir,
+                    config.il.dataset_navdp,
+                    config.il.memory_size,
+                    config.il.predict_size,
+                    config.il.batch_size,
+                    config.il.image_size,
+                    config.il.scene_scale,
+                    pixel_channel=config.il.pixel_channel,
+                    random_digit=config.il.random_digit,
+                    prior_sample=config.il.prior_sample,
+                )
+            else:
+                train_dataset_data = NavDP_Base_Datset(
+                    config.il.root_dir,
+                    config.il.dataset_navdp,
+                    config.il.memory_size,
+                    config.il.predict_size,
+                    config.il.batch_size,
+                    config.il.image_size,
+                    config.il.scene_scale,
+                    pixel_channel=config.il.pixel_channel,
+                    preload=config.il.preload,
+                    random_digit=config.il.random_digit,
+                    prior_sample=config.il.prior_sample,
+                    use_npy_cache=_use_npy_cache,
+                )
         else:
             if '3dgs' in config.il.lmdb_features_dir or '3dgs' in config.il.lmdb_features_dir:
                 dataset_root_dir = config.il.dataset_six_floor_root_dir
@@ -244,8 +271,10 @@ def main(config, model_class, model_config_class, debug=False):
         val_ratio = getattr(config.il, 'val_ratio', None)
         if val_ratio and val_ratio > 0:
             if config.model_name == 'navdp':
-                # Re-create dataset with val split (uses cached preload JSON)
-                val_dataset = NavDP_Base_Datset(
+                # Re-create dataset with val split
+                _DatasetClass = NavDP_WebDataset if _use_webdataset else NavDP_Base_Datset
+                _extra_kwargs = {'shard_dir': _shard_dir} if _use_webdataset else {'preload': True, 'use_npy_cache': _use_npy_cache}
+                val_dataset = _DatasetClass(
                     config.il.root_dir,
                     config.il.dataset_navdp,
                     config.il.memory_size,
@@ -254,14 +283,14 @@ def main(config, model_class, model_config_class, debug=False):
                     config.il.image_size,
                     config.il.scene_scale,
                     pixel_channel=config.il.pixel_channel,
-                    preload=True,  # use cached JSON (built by train_dataset_data above)
                     random_digit=config.il.random_digit,
                     prior_sample=config.il.prior_sample,
                     is_train=False,
                     val_ratio=val_ratio,
+                    **_extra_kwargs,
                 )
                 # Also rebuild train_dataset with val excluded
-                train_dataset = NavDP_Base_Datset(
+                train_dataset = _DatasetClass(
                     config.il.root_dir,
                     config.il.dataset_navdp,
                     config.il.memory_size,
@@ -270,11 +299,11 @@ def main(config, model_class, model_config_class, debug=False):
                     config.il.image_size,
                     config.il.scene_scale,
                     pixel_channel=config.il.pixel_channel,
-                    preload=True,
                     random_digit=config.il.random_digit,
                     prior_sample=config.il.prior_sample,
                     is_train=True,
                     val_ratio=val_ratio,
+                    **_extra_kwargs,
                 )
             elif config.model_name in ['cma', 'seq2seq']:
                 # Split lmdb_keys: last val_ratio fraction → val
@@ -398,6 +427,7 @@ if __name__ == '__main__':
         'navdp': [navdp_exp_cfg, "NavDP_Policy"],
         'navdp_1gpu': [navdp_1gpu_exp_cfg, "NavDP_Policy"],
         'navdp_1node': [navdp_1node_exp_cfg, "NavDP_Policy"],
+        'navdp_ablation_1node': [navdp_ablation_1node_exp_cfg, "NavDP_Policy"],
         'navdp_h200_1gpu': [navdp_h200_1gpu_exp_cfg, "NavDP_Policy"],
     }
 
@@ -435,6 +465,12 @@ if __name__ == '__main__':
         exp_cfg.il.bf16 = config.bf16
     if config.tf32 is not None:
         exp_cfg.il.tf32 = config.tf32
+    if config.use_npy_cache is not None:
+        exp_cfg.il.use_npy_cache = config.use_npy_cache
+    if config.use_webdataset is not None:
+        exp_cfg.il.use_webdataset = config.use_webdataset
+    if config.webdataset_shard_dir is not None:
+        exp_cfg.il.webdataset_shard_dir = config.webdataset_shard_dir
 
     available_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
 

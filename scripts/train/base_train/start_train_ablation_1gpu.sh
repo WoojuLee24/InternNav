@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
 #  Ablation training script — grid search
-#  Usage:  bash scripts/train/base_train/start_train_ablation.sh
+#  Usage:  bash scripts/train/base_train/start_train_ablation_1gpu.sh
 #  Edit the "GRID" and "FIXED SETTINGS" blocks below and re-run.
 #  All (num_workers × prefetch_factor)
 #  combinations are run sequentially; results are summarised at end.

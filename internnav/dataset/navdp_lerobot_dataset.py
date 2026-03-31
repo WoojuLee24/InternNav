@@ -50,8 +50,10 @@ class NavDP_Base_Datset(Dataset):
         prior_sample=False,
         is_train=True,
         val_ratio=0.0,
+        use_npy_cache=True,
     ):
 
+        self.use_npy_cache = use_npy_cache
         self.dataset_dirs = np.array(sorted(os.listdir(root_dirs)))
         self.memory_size = memory_size
         self.image_size = image_size
@@ -74,6 +76,7 @@ class NavDP_Base_Datset(Dataset):
         self._last_time = None
         self._ply_cache: dict = {}      # ply path -> obstacle_points ndarray
         self._parquet_cache: dict = {}  # parquet path -> (intrinsic, extrinsic, trajectory, length)
+        self._kdtree_cache: dict = {}   # ply path -> cKDTree of obstacle XY points
 
         if preload is False:
             for group_dir in self.dataset_dirs:  # gibson_zed, 3dfront ...
@@ -183,6 +186,16 @@ class NavDP_Base_Datset(Dataset):
                 self.trajectory_depth_path = _tdp
                 self.trajectory_afford_path = _tap
 
+        # Read original image dimensions once (used by process_pixel_goal).
+        # Avoids repeated Image.open per __getitem__ call.
+        try:
+            _sample_path = self.trajectory_rgb_path[0][0]
+            _img = Image.open(_sample_path)
+            self._orig_img_H, self._orig_img_W = _img.size[1], _img.size[0]
+            _img.close()
+        except Exception:
+            self._orig_img_H, self._orig_img_W = 480, 640  # d435i fallback
+
     def __len__(self):
         return len(self.trajectory_data_dir)
 
@@ -209,6 +222,11 @@ class NavDP_Base_Datset(Dataset):
         return pcd
 
     def process_image(self, image_path):
+        if self.use_npy_cache:
+            stem = os.path.splitext(os.path.basename(image_path))[0]
+            npy_path = os.path.join(os.path.dirname(image_path), 'npy_cache', stem + '.npy')
+            if os.path.isfile(npy_path):
+                return np.load(npy_path)  # float32, shape (H,W,3)
         image = self.load_image(image_path)
         H, W, C = image.shape
         prop = self.image_size / max(H, W)
@@ -223,6 +241,11 @@ class NavDP_Base_Datset(Dataset):
         return image
 
     def process_depth(self, depth_path):
+        if self.use_npy_cache:
+            stem = os.path.splitext(os.path.basename(depth_path))[0]
+            npy_path = os.path.join(os.path.dirname(depth_path), 'npy_cache', stem + '.npy')
+            if os.path.isfile(npy_path):
+                return np.load(npy_path)  # float32, shape (H,W,1)
         depth = self.load_depth(depth_path) / 10000.0
         H, W = depth.shape
         prop = self.image_size / max(H, W)
@@ -243,11 +266,13 @@ class NavDP_Base_Datset(Dataset):
         if path in self._parquet_cache:
             return self._parquet_cache[path]
 
-        _base = os.path.basename(path).replace('.parquet', '.npz')
-        npz_path = os.path.join(os.path.dirname(path), 'npz_cache', _base)
-        if os.path.isfile(npz_path):
-            d = np.load(npz_path)
-            result = (d['camera_intrinsic'], d['camera_extrinsic'], d['trajectory'], int(d['trajectory'].shape[0]))
+        stem = os.path.splitext(os.path.basename(path))[0]
+        p_intr = os.path.join(os.path.dirname(path), 'npy_cache', stem + '_intrinsic.npy')
+        p_extr = os.path.join(os.path.dirname(path), 'npy_cache', stem + '_extrinsic.npy')
+        p_traj = os.path.join(os.path.dirname(path), 'npy_cache', stem + '_trajectory.npy')
+        if self.use_npy_cache and all(os.path.isfile(p) for p in [p_intr, p_extr, p_traj]):
+            trajectory = np.load(p_traj)
+            result = (np.load(p_intr), np.load(p_extr), trajectory, int(trajectory.shape[0]))
         else:
             if not os.path.isfile(path):
                 raise FileNotFoundError(path)
@@ -262,13 +287,14 @@ class NavDP_Base_Datset(Dataset):
         return result
 
     def process_obstacle_points(self, index):
+        from scipy.spatial import cKDTree
         path = self.trajectory_afford_path[index]
         if path in self._ply_cache:
             return self._ply_cache[path], None
 
-        npz_path = path.replace('pointcloud.ply', 'pointcloud_obstacle.npz')
-        if os.path.isfile(npz_path):
-            pts = np.load(npz_path)['obstacle_points']
+        npy_path = path.replace('pointcloud.ply', 'pointcloud_obstacle.npy')
+        if self.use_npy_cache and os.path.isfile(npy_path):
+            pts = np.load(npy_path)
         else:
             scene_pcd = self.load_pointcloud(path)
             scene_color = np.array(scene_pcd.colors)
@@ -277,6 +303,8 @@ class NavDP_Base_Datset(Dataset):
             pts = scene_points[color_distance < 0.05]
 
         self._ply_cache[path] = pts
+        # Build cKDTree on XY plane (used by __getitem__ distance computation)
+        self._kdtree_cache[path] = cKDTree(pts[:, :2]) if pts.shape[0] > 0 else None
         return pts, None
 
     def process_memory(self, rgb_paths, depth_paths, start_step, memory_digit=1):
@@ -289,26 +317,22 @@ class NavDP_Base_Datset(Dataset):
         return context_image, context_depth, memory_index
 
     def process_pixel_goal(self, image_url, target_point, camera_intrinsic, camera_extrinsic):
-        try:
-            image = Image.open(image_url)
-            image = np.array(image, np.uint8)
-        except Exception as e:
-            print(f"Error loading image {image_url}: {e}")
-            image = np.zeros((self.image_size, self.image_size, 3), dtype=np.uint8)
+        # Use cached original image dimensions — avoids Image.open per call
+        orig_H, orig_W = self._orig_img_H, self._orig_img_W
         resize_image = self.process_image(image_url)
 
         coordinate = np.array([-target_point[1], target_point[0], camera_extrinsic[2, 3] * 0.8])
         camera_coordinate = np.matmul(camera_extrinsic[0:3, 0:3], coordinate[:, None])
         pixel_coord_x = camera_intrinsic[0, 2] + (camera_coordinate[0] / camera_coordinate[2]) * camera_intrinsic[0, 0]
         pixel_coord_y = camera_intrinsic[1, 2] + (-camera_coordinate[1] / camera_coordinate[2]) * camera_intrinsic[1, 1]
-        pixel_mask = np.zeros_like(image)
+        pixel_mask = np.zeros((orig_H, orig_W, 3), dtype=np.uint8)
         visible_flag = False
 
         if (
             pixel_coord_x > 0
-            and pixel_coord_x < image.shape[1]
+            and pixel_coord_x < orig_W
             and pixel_coord_y > 0
-            and pixel_coord_y < image.shape[0]
+            and pixel_coord_y < orig_H
         ):
             pixel_mask = cv2.rectangle(
                 pixel_mask,
@@ -536,16 +560,11 @@ class NavDP_Base_Datset(Dataset):
         pred_actions = target_xyt_actions[action_indexes]
         augment_actions = augment_xyt_actions[action_indexes]
         if trajectory_obstacle_points.shape[0] != 0:
-            pred_distance = (
-                np.abs(target_world_points[:, np.newaxis, 0:2] - trajectory_obstacle_points[np.newaxis, :, 0:2])
-                .sum(axis=-1)
-                .min(axis=-1)
-            )
-            augment_distance = (
-                np.abs(augment_world_points[:, np.newaxis, 0:2] - trajectory_obstacle_points[np.newaxis, :, 0:2])
-                .sum(axis=-1)
-                .min(axis=-1)
-            )
+            # cKDTree (built in process_obstacle_points) replaces O(N×M) brute-force
+            # with O(N log M) nearest-neighbour query; p=1 preserves L1 (Manhattan) distance
+            _tree = self._kdtree_cache.get(self.trajectory_afford_path[index])
+            pred_distance, _ = _tree.query(target_world_points[:, :2], k=1, p=1)
+            augment_distance, _ = _tree.query(augment_world_points[:, :2], k=1, p=1)
             pred_critic = (
                 -5.0 * (pred_distance[action_indexes[:-1]] < 0.1).mean()
                 + 0.5 * (pred_distance[action_indexes][1:] - pred_distance[action_indexes][:-1]).sum()
