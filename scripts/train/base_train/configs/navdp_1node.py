@@ -29,9 +29,9 @@ navdp_1node_exp_cfg = ExpCfg(
     ),
     il=IlCfg(
         epochs=1000,
-        batch_size=256, # 32,
+        batch_size=64, # 32, 64 (optimal speed), 256
         lr=1e-4,
-        num_workers=4,
+        num_workers=4, # 4 (optimal speed), 8, 16 
         weight_decay=1e-4,  # TODO
         warmup_ratio=0.05,  # TODO
         use_iw=True,
@@ -55,6 +55,7 @@ navdp_1node_exp_cfg = ExpCfg(
         preload=False,
         random_digit=False,
         prior_sample=False,
+        use_scipy_kdtree=True,  # ablation: True=scipy cKDTree O(N logM), False=numpy broadcast O(N*M)
         memory_size=8,
         predict_size=24,
         pixel_channel=4,

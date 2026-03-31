@@ -3,17 +3,21 @@ import builtins
 import json
 import os
 from datetime import datetime
+import time
 
 import cv2
 import jsonlines
 import numpy as np
 import open3d as o3d
 import pandas as pd
+from scipy.spatial import cKDTree
+
 import torch
 from PIL import Image
 from scipy.interpolate import CubicSpline
 from torch.utils.data import Dataset
 from tqdm import tqdm
+import torch.distributed as _dist
 
 original_print = builtins.print
 
@@ -50,6 +54,7 @@ class NavDP_Base_Datset(Dataset):
         prior_sample=False,
         is_train=True,
         val_ratio=0.0,
+        use_scipy_kdtree=False,
     ):
 
         self.dataset_dirs = np.array(sorted(os.listdir(root_dirs)))
@@ -72,6 +77,9 @@ class NavDP_Base_Datset(Dataset):
         self.batch_size = batch_size
         self.batch_time_sum = 0.0
         self._last_time = None
+        self.use_scipy_kdtree = use_scipy_kdtree
+        self._dist_time_sum = 0.0
+        self._dist_cnt = 0
 
         if preload is False:
             for group_dir in self.dataset_dirs:  # gibson_zed, 3dfront ...
@@ -121,13 +129,7 @@ class NavDP_Base_Datset(Dataset):
                 'trajectory_depth_path': self.trajectory_depth_path,
                 'trajectory_afford_path': self.trajectory_afford_path,
             }
-            import torch.distributed as _dist
-            _is_dist = _dist.is_available() and _dist.is_initialized()
-            _rank = _dist.get_rank() if _is_dist else 0
-            # if _rank == 0:
-            #     with open(preload_path, 'w') as f:
-            #         json.dump(save_dict, f, indent=4)
-            import torch.distributed as _dist
+           
             _is_dist = _dist.is_available() and _dist.is_initialized()
             _rank = _dist.get_rank() if _is_dist else 0
             if _rank == 0:
@@ -459,8 +461,6 @@ class NavDP_Base_Datset(Dataset):
         return start_choice, target_choice
 
     def __getitem__(self, index):
-        import os
-        import time
 
         if self._last_time is None:
             self._last_time = time.time()
@@ -514,16 +514,34 @@ class NavDP_Base_Datset(Dataset):
         pred_actions = target_xyt_actions[action_indexes]
         augment_actions = augment_xyt_actions[action_indexes]
         if trajectory_obstacle_points.shape[0] != 0:
-            pred_distance = (
-                np.abs(target_world_points[:, np.newaxis, 0:2] - trajectory_obstacle_points[np.newaxis, :, 0:2])
-                .sum(axis=-1)
-                .min(axis=-1)
-            )
-            augment_distance = (
-                np.abs(augment_world_points[:, np.newaxis, 0:2] - trajectory_obstacle_points[np.newaxis, :, 0:2])
-                .sum(axis=-1)
-                .min(axis=-1)
-            )
+            _dist_t0 = time.time()
+            if self.use_scipy_kdtree:
+                _obs_xy = trajectory_obstacle_points[:, 0:2]
+                _tree = cKDTree(_obs_xy)
+                pred_distance, _ = _tree.query(target_world_points[:, 0:2], k=1, p=1)
+                augment_distance, _ = _tree.query(augment_world_points[:, 0:2], k=1, p=1)
+            else:
+                pred_distance = (
+                    np.abs(target_world_points[:, np.newaxis, 0:2] - trajectory_obstacle_points[np.newaxis, :, 0:2])
+                    .sum(axis=-1)
+                    .min(axis=-1)
+                )
+                augment_distance = (
+                    np.abs(augment_world_points[:, np.newaxis, 0:2] - trajectory_obstacle_points[np.newaxis, :, 0:2])
+                    .sum(axis=-1)
+                    .min(axis=-1)
+                )
+            _dist_elapsed = time.time() - _dist_t0
+            self._dist_time_sum += _dist_elapsed
+            self._dist_cnt += 1
+            if self._dist_cnt % 100 == 0:
+                _method = 'scipy_kdtree' if self.use_scipy_kdtree else 'numpy_broadcast'
+                print(
+                    f'[dist] method={_method}, obs={trajectory_obstacle_points.shape[0]}, '
+                    f'traj={target_world_points.shape[0]}, '
+                    f'avg_time(last 100)={self._dist_time_sum / 100 * 1000:.2f}ms'
+                )
+                self._dist_time_sum = 0.0
             pred_critic = (
                 -5.0 * (pred_distance[action_indexes[:-1]] < 0.1).mean()
                 + 0.5 * (pred_distance[action_indexes][1:] - pred_distance[action_indexes][:-1]).sum()

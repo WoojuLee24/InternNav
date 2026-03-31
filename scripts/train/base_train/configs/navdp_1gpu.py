@@ -47,7 +47,7 @@ navdp_1gpu_exp_cfg = ExpCfg(
         lmdb_features_dir='r2r',
         lerobot_features_dir='data/vln_pe/traj_data/r2r',
         camera_name='pano_camera_0',
-        report_to='wandb',  # wandb, tensorboard, none
+        report_to='none',  # wandb, tensorboard, none
         dataset_navdp='data/datasets/navdp_dataset_lerobot.json',
         root_dir='/ws/src/InternNav/data/InternData-N1-v0.5-mini/vln_n1/traj_data',
         image_size=224,
@@ -55,6 +55,7 @@ navdp_1gpu_exp_cfg = ExpCfg(
         preload=False,
         random_digit=False,
         prior_sample=False,
+        use_scipy_kdtree=True,  # ablation: True=scipy cKDTree O(N logM), False=numpy broadcast O(N*M)
         memory_size=8,
         predict_size=24,
         pixel_channel=4,
