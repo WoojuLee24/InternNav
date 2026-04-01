@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-03-31 16:42_
+_Last updated: 2026-04-01 11:54_
 
-### [ad06cbd2] 2026-03-31 — [feat] 1. optimize distance calculation for dataloader, 2. optimize batch size and nw
+### [5574daff] 2026-04-01 — [feat] train ablation
+
+### [9113f143] 2026-03-31 — [feat] 1. optimize distance calculation for dataloader, 2. optimize batch size and nw
 
 ### [690901cf] 2026-03-29 — [chore] add date
 
@@ -137,5 +139,3 @@ _Last updated: 2026-03-31 16:42_
 ### [9725fed4] 2026-03-27 — [chore] edit param
 
 ### [70add386] 2026-03-27 — find=False
-
-### [5ab0641b] 2026-03-27 — [fix] h200 1gpu update
