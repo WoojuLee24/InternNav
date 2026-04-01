@@ -1,0 +1,453 @@
+import os
+import sys
+
+sys.path.append('./src/diffusion-policy')
+import logging
+import sys
+from datetime import datetime
+from pathlib import Path
+
+import torch
+import torch.distributed as dist
+import tyro
+from pydantic import BaseModel
+from transformers import TrainerCallback, TrainingArguments
+
+from internnav.dataset.cma_lerobot_dataset import CMALerobotDataset, cma_collate_fn
+from internnav.dataset.navdp_lerobot_dataset import NavDP_Base_Datset, navdp_collate_fn
+from internnav.dataset.rdp_lerobot_dataset import RDP_LerobotDataset, rdp_collate_fn
+from internnav.model import get_config, get_policy
+from internnav.model.utils.logger import MyLogger
+from internnav.model.utils.utils import load_dataset
+from internnav.trainer import CMATrainer, NavDPTrainer, RDPTrainer, ValidationCallback
+from scripts.train.base_train.configs import (
+    cma_exp_cfg,
+    cma_plus_exp_cfg,
+    navdp_exp_cfg,
+    navdp_1gpu_exp_cfg,
+    navdp_1node_exp_cfg,
+    navdp_h200_1gpu_exp_cfg,
+    rdp_exp_cfg,
+    seq2seq_exp_cfg,
+    seq2seq_plus_exp_cfg,
+)
+
+
+class TrainCfg(BaseModel):
+    """Training configuration class"""
+
+    name: str = 'cma_train'  # Experiment name
+    model_name: str = 'cma'  # Model name, options: 'cma', 'cma_plus', 'seq2seq', 'seq2seq_plus', 'rdp', 'navdp', 'navdp_1gpu', 'navdp_1node'
+    debug: bool = False  # Debug mode: sets num_workers=0 for single-process DataLoader
+
+    # Ablation / override fields — when set, these override the base config file values.
+    num_workers: int | None = None           # dataloader num_workers override
+    find_unused_parameters: bool | None = None  # DDP find_unused_parameters override
+    cuda_synchronize: bool | None = None     # torch.cuda.synchronize() after forward pass
+    scene_scale: float | None = None         # fraction of dataset to use (0.01 / 0.1 / 1.0)
+    batch_size: int | None = None            # per-device batch size override
+    persistent_workers: bool | None = None   # keep DataLoader workers alive between epochs
+    prefetch_factor: int | None = None       # DataLoader prefetch_factor override
+    preload: bool | None = None              # preload dataset into memory
+    bf16: bool | None = None                 # bfloat16 mixed precision
+    tf32: bool | None = None                 # TF32 on Ampere GPUs
+    use_scipy_kdtree: bool | None = None     # use scipy KDTree for distance calculation
+
+
+class CheckpointFormatCallback(TrainerCallback):
+    """This callback format checkpoint to make them standalone. For now, it copies all config
+    files to /checkpoint-{step}/experiment_cfg/:
+    - conf.yaml
+    - initial_actions.npz
+    - metadata.json
+    """
+
+    def __init__(self, run_name: str, exp_cfg_dir: Path | None = None):
+        """
+        Args:
+            run_name: Name of the experiment run
+            exp_cfg_dir: Path to the directory containing all experiment metadata
+        """
+        self.exp_cfg_dir = exp_cfg_dir
+
+    def on_save(self, args, state, control, **kwargs):
+        """Called after the trainer saves a checkpoint."""
+        if state.is_world_process_zero:
+            checkpoint_dir = Path(args.output_dir) / f'checkpoint-{state.global_step}'  # noqa: F841
+
+
+def _make_dir(config):
+    config.tensorboard_dir = config.tensorboard_dir % config.name
+    config.checkpoint_folder = config.checkpoint_folder % config.name
+    config.log_dir = config.log_dir % config.name
+    config.output_dir = config.output_dir % config.name
+    if not os.path.exists(config.tensorboard_dir):
+        os.makedirs(config.tensorboard_dir, exist_ok=True)
+    if not os.path.exists(config.checkpoint_folder):
+        os.makedirs(config.checkpoint_folder, exist_ok=True)
+    if not os.path.exists(config.log_dir):
+        os.makedirs(config.log_dir, exist_ok=True)
+
+
+def main(config, model_class, model_config_class, debug=False):
+    try:
+        """Main training function."""
+        _make_dir(config)
+
+        print("=== Start training ===")
+        print(f"Current time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"PyTorch version: {torch.__version__}")
+        print(f"CUDA available: {torch.cuda.is_available()}")
+        print(f"CUDA device count: {torch.cuda.device_count()}")
+        print("Environment variables:")
+        print(f"  RANK: {os.getenv('RANK', 'Not set')}")
+        print(f"  LOCAL_RANK: {os.getenv('LOCAL_RANK', 'Not set')}")
+        print(f"  WORLD_SIZE: {os.getenv('WORLD_SIZE', 'Not set')}")
+        print(f"  MASTER_ADDR: {os.getenv('MASTER_ADDR', 'Not set')}")
+        print(f"  MASTER_PORT: {os.getenv('MASTER_PORT', 'Not set')}")
+
+        if config.model_name == "navdp":
+            local_rank = int(os.getenv('LOCAL_RANK', '0'))
+            world_size = int(os.getenv('WORLD_SIZE', '1'))
+            rank = int(os.getenv('RANK', '0'))
+
+            # Set CUDA device for each process
+            device_id = local_rank
+            torch.cuda.set_device(device_id)
+            device = torch.device(f'cuda:{device_id}')
+            print(f"World size: {world_size}, Local rank: {local_rank}, Global rank: {rank}")
+
+            # Initialize distributed training environment
+            if world_size > 1:
+                try:
+                    dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=rank)
+                    print("Distributed initialization SUCCESS")
+                except Exception as e:
+                    print(f"Distributed initialization FAILED: {str(e)}")
+                    world_size = 1
+
+            print("=" * 50)
+            print("After distributed init:")
+            print(f"LOCAL_RANK: {local_rank}")
+            print(f"WORLD_SIZE: {world_size}")
+
+        if dist.is_initialized():
+            print(f"Dist WORLD_SIZE: {dist.get_world_size()}")
+            print(f"Dist RANK: {dist.get_rank()}")
+        else:
+            print("Distributed NOT initialized")
+
+        # ------------ load model ------------
+        model_cfg = model_config_class(model_cfg=config.model_dump())
+        if config.il.ckpt_to_load:
+            print(f"load model from:{config.il.ckpt_to_load}")
+        model = model_class.from_pretrained(pretrained_model_name_or_path=config.il.ckpt_to_load, config=model_cfg)
+        if config.model_name == "navdp":
+            model.to(device)
+            for name, param in model.named_parameters():
+                if 'mask_token' in name:
+                    param.requires_grad = False
+            # Check that all parameters and buffers are on the correct device
+            for name, param in model.named_parameters():
+                if param.device != device:
+                    print(f"Parameter {name} is on wrong device {param.device}, should be moved to {device}")
+                    param.data = param.data.to(device)
+
+            for name, buffer in model.named_buffers():
+                if buffer.device != device:
+                    print(f"Buffer {name} is on wrong device {buffer.device}, should be moved to {device}")
+                    buffer.data = buffer.data.to(device)
+
+            # If distributed training, wrap the model with DDP
+            if world_size > 1:
+                model = torch.nn.parallel.DistributedDataParallel(
+                    model, device_ids=[local_rank], output_device=local_rank,
+                    find_unused_parameters=config.il.ddp_find_unused_parameters,
+                )
+        # ------------ load logger ------------
+        train_logger_filename = os.path.join(config.log_dir, 'train.log')
+        if dist.is_initialized() and dist.get_rank() == 0:
+            train_logger = MyLogger(
+                name='train',
+                level=logging.INFO,
+                format_str='%(asctime)-15s %(message)s',
+                filename=train_logger_filename,
+            )
+        else:
+            # Other processes use console logging
+            train_logger = MyLogger(name='train', level=logging.INFO, format_str='%(asctime)-15s %(message)s')
+        transformers_logger = logging.getLogger("transformers")
+        if transformers_logger.hasHandlers():
+            transformers_logger.handlers = []
+        if config.model_name == "navdp" and local_rank in [0, -1]:  # Only main process or non-distributed
+            transformers_logger.addHandler(train_logger.handlers[0])
+        transformers_logger.setLevel(logging.INFO)
+
+        # ------------ load dataset ------------
+        if config.model_name == "navdp":
+            train_dataset_data = NavDP_Base_Datset(
+                config.il.root_dir,
+                config.il.dataset_navdp,
+                config.il.memory_size,
+                config.il.predict_size,
+                config.il.batch_size,
+                config.il.image_size,
+                config.il.scene_scale,
+                pixel_channel=config.il.pixel_channel,
+                preload=config.il.preload,
+                random_digit=config.il.random_digit,
+                prior_sample=config.il.prior_sample,
+                use_scipy_kdtree=getattr(config.il, 'use_scipy_kdtree', False),
+            )
+        else:
+            if '3dgs' in config.il.lmdb_features_dir or '3dgs' in config.il.lmdb_features_dir:
+                dataset_root_dir = config.il.dataset_six_floor_root_dir
+                dataset_type = '3dgs'
+            elif 'grutopia' in config.il.lmdb_features_dir:
+                dataset_root_dir = config.il.dataset_grutopia10_root_dir
+                dataset_type = 'grutopia'
+            else:
+                dataset_root_dir = config.il.dataset_r2r_root_dir
+                dataset_type = 'r2r'
+            train_dataset_data = load_dataset(dataset_root_dir, 'train', logger=train_logger, dataset_type=dataset_type)
+            global_batch_size = config.il.batch_size * len(config.torch_gpu_ids)
+
+        # ------------ data_loader ------------
+        if config.model_name in ['cma', 'seq2seq']:
+            policy_trainer = CMATrainer
+            train_dataset = CMALerobotDataset(
+                config,
+                config.il.lerobot_features_dir,
+                config.il.use_iw,
+                dataset_data=train_dataset_data,
+                inflection_weight_coef=config.il.inflection_weight_coef,
+                lmdb_map_size=config.il.lmdb_map_size,
+                batch_size=config.il.batch_size,
+            )
+            collate_fn = cma_collate_fn
+
+        elif config.model_name == 'rdp':
+            policy_trainer = RDPTrainer
+            train_dataset = RDP_LerobotDataset(
+                config,
+                config.il.lerobot_features_dir,
+                dataset_data=train_dataset_data,
+                batch_size=config.il.batch_size,
+            )
+            collate_fn = rdp_collate_fn(global_batch_size=global_batch_size)
+        elif config.model_name == 'navdp':
+            policy_trainer = NavDPTrainer
+            train_dataset = train_dataset_data
+            collate_fn = navdp_collate_fn
+
+        # -------- optional validation dataset --------
+        val_dataset = None
+        val_ratio = getattr(config.il, 'val_ratio', None)
+        if val_ratio and val_ratio > 0:
+            if config.model_name == 'navdp':
+                # Re-create dataset with val split (uses cached preload JSON)
+                val_dataset = NavDP_Base_Datset(
+                    config.il.root_dir,
+                    config.il.dataset_navdp,
+                    config.il.memory_size,
+                    config.il.predict_size,
+                    config.il.batch_size,
+                    config.il.image_size,
+                    config.il.scene_scale,
+                    pixel_channel=config.il.pixel_channel,
+                    preload=True,  # use cached JSON (built by train_dataset_data above)
+                    random_digit=config.il.random_digit,
+                    prior_sample=config.il.prior_sample,
+                    is_train=False,
+                    val_ratio=val_ratio,
+                    use_scipy_kdtree=getattr(config.il, 'use_scipy_kdtree', False),
+                )
+                # Also rebuild train_dataset with val excluded
+                train_dataset = NavDP_Base_Datset(
+                    config.il.root_dir,
+                    config.il.dataset_navdp,
+                    config.il.memory_size,
+                    config.il.predict_size,
+                    config.il.batch_size,
+                    config.il.image_size,
+                    config.il.scene_scale,
+                    pixel_channel=config.il.pixel_channel,
+                    preload=True,
+                    random_digit=config.il.random_digit,
+                    prior_sample=config.il.prior_sample,
+                    is_train=True,
+                    val_ratio=val_ratio,
+                    use_scipy_kdtree=getattr(config.il, 'use_scipy_kdtree', False),
+                )
+            elif config.model_name in ['cma', 'seq2seq']:
+                # Split lmdb_keys: last val_ratio fraction → val
+                import copy
+                all_keys = list(train_dataset.lmdb_keys)
+                n_val = max(1, int(len(all_keys) * val_ratio))
+                val_dataset = copy.copy(train_dataset)
+                val_dataset.lmdb_keys = all_keys[-n_val:]
+                val_dataset.length = n_val
+                train_dataset.lmdb_keys = all_keys[:-n_val]
+                train_dataset.length = len(train_dataset.lmdb_keys)
+            elif config.model_name == 'rdp':
+                import copy
+                all_keys = list(train_dataset.lmdb_keys)
+                n_val = max(1, int(len(all_keys) * val_ratio))
+                val_dataset = copy.copy(train_dataset)
+                val_dataset.lmdb_keys = all_keys[-n_val:]
+                val_dataset.length = n_val
+                train_dataset.lmdb_keys = all_keys[:-n_val]
+                train_dataset.length = len(train_dataset.lmdb_keys)
+            if val_dataset is not None:
+                print(f'[Val] val_dataset size: {len(val_dataset)}')
+
+        # ------------ training args ------------
+        training_args = TrainingArguments(
+            output_dir=config.output_dir,
+            run_name=config.name,
+            remove_unused_columns=False,
+            deepspeed='',
+            gradient_checkpointing=False,
+            bf16=bool(getattr(config.il, 'bf16', False) or False),
+            tf32=bool(getattr(config.il, 'tf32', False) or False),
+            per_device_train_batch_size=config.il.batch_size,
+            gradient_accumulation_steps=1,
+            dataloader_num_workers=config.il.num_workers,
+            dataloader_pin_memory=False,
+            optim='adamw_torch',
+            learning_rate=config.il.lr,
+            lr_scheduler_type='cosine',
+            logging_steps=10.0,
+            num_train_epochs=config.il.epochs,
+            save_strategy='epoch',  # no
+            save_steps=config.il.save_interval_epochs,
+            save_total_limit=8,
+            report_to=config.il.report_to,
+            seed=0,
+            do_eval=False,
+            ddp_find_unused_parameters=config.il.ddp_find_unused_parameters,
+            ddp_bucket_cap_mb=100,
+            torch_compile_mode=None,
+            dataloader_drop_last=True,
+            disable_tqdm=False,
+            log_level="info",
+        )
+
+        # Create the trainer
+        trainer = policy_trainer(
+            config=config, model=model, args=training_args, train_dataset=train_dataset, data_collator=collate_fn
+        )
+
+        # Add checkpoint format callback to ensure experiment_cfg is copied to each checkpoint
+        run_name = config.name
+        ckpt_format_callback = CheckpointFormatCallback(run_name=run_name, exp_cfg_dir=config.log_dir)
+        trainer.add_callback(ckpt_format_callback)
+
+        # Add validation callback if val_dataset was built
+        if val_dataset is not None:
+            val_interval = getattr(config.il, 'val_interval_steps', None)
+            val_cb = ValidationCallback(
+                trainer=trainer,
+                val_dataset=val_dataset,
+                collate_fn=collate_fn,
+                val_interval_steps=val_interval,
+                num_workers=0,
+                debug=debug,
+                log_dir=config.log_dir,
+            )
+            trainer.add_callback(val_cb)
+            if val_interval:
+                print(f'[Val] ValidationCallback registered (every {val_interval} steps)')
+            else:
+                print('[Val] ValidationCallback registered (every epoch)')
+
+        trainer.train()
+        if train_logger:
+            for handler in train_logger.handlers:
+                handler.flush()
+    except Exception as e:
+        import traceback
+
+        print(f"Unhandled exception: {str(e)}")
+        print("Stack trace:")
+        traceback.print_exc()
+
+        # If distributed environment, ensure all processes exit
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+        raise
+
+
+if __name__ == '__main__':
+    # Parse command line arguments using tyro
+    config = tyro.cli(TrainCfg)
+
+    # Print configuration information
+    print('\n' + '=' * 50)
+    print('FINE-TUNING CONFIGURATION:')
+    print('=' * 50)
+    for key, value in vars(config).items():
+        print(f'{key}: {value}')
+    print('=' * 50 + '\n')
+
+    # Select configuration based on model_name
+    supported_cfg = {
+        'seq2seq': [seq2seq_exp_cfg, "Seq2Seq_Policy"],
+        'seq2seq_plus': [seq2seq_plus_exp_cfg, 'Seq2Seq_Policy'],
+        'cma': [cma_exp_cfg, "CMA_Policy"],
+        'cma_plus': [cma_plus_exp_cfg, "CMA_Policy"],
+        'rdp': [rdp_exp_cfg, "RDP_Policy"],
+        'navdp': [navdp_exp_cfg, "NavDP_Policy"],
+        'navdp_1gpu': [navdp_1gpu_exp_cfg, "NavDP_Policy"],
+        'navdp_1node': [navdp_1node_exp_cfg, "NavDP_Policy"],
+        'navdp_h200_1gpu': [navdp_h200_1gpu_exp_cfg, "NavDP_Policy"],
+    }
+
+    if config.model_name not in supported_cfg:
+        raise ValueError(f'Invalid model name: {config.model_name}. Supported models are: {list(supported_cfg.keys())}')
+
+    exp_cfg, policy_name = supported_cfg[config.model_name]
+    model_class, model_config_class = get_policy(policy_name), get_config(policy_name)
+
+    exp_cfg.name = config.name
+    exp_cfg.num_gpus = len(exp_cfg.torch_gpu_ids)
+    exp_cfg.world_size = exp_cfg.num_gpus
+
+    if config.debug:
+        exp_cfg.il.num_workers = 0
+
+    # Apply ablation overrides (only when explicitly set on the CLI)
+    if config.num_workers is not None:
+        exp_cfg.il.num_workers = config.num_workers
+    if config.find_unused_parameters is not None:
+        exp_cfg.il.ddp_find_unused_parameters = config.find_unused_parameters
+    if config.cuda_synchronize is not None:
+        exp_cfg.il.cuda_synchronize = config.cuda_synchronize
+    if config.scene_scale is not None:
+        exp_cfg.il.scene_scale = config.scene_scale
+    if config.batch_size is not None:
+        exp_cfg.il.batch_size = config.batch_size
+    if config.persistent_workers is not None:
+        exp_cfg.il.persistent_workers = config.persistent_workers
+    if config.prefetch_factor is not None:
+        exp_cfg.il.prefetch_factor = config.prefetch_factor
+    if config.preload is not None:
+        exp_cfg.il.preload = config.preload
+    if config.bf16 is not None:
+        exp_cfg.il.bf16 = config.bf16
+    if config.tf32 is not None:
+        exp_cfg.il.tf32 = config.tf32
+    if config.use_scipy_kdtree is not None:
+        exp_cfg.il.use_scipy_kdtree = config.use_scipy_kdtree
+
+    available_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
+
+    # Validate GPU configuration
+    assert (
+        exp_cfg.num_gpus <= available_gpus
+    ), f'Number of GPUs requested ({exp_cfg.num_gpus}) is greater than the available GPUs ({available_gpus})'
+    assert exp_cfg.num_gpus > 0, 'Number of GPUs must be greater than 0'
+    print(f'Using {exp_cfg.num_gpus} GPUs')
+
+    main(exp_cfg, model_class, model_config_class, debug=config.debug)
