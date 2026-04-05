@@ -18,7 +18,7 @@ for arg in "$@"; do
 done
 
 # ---- BASE CONFIG -------------------------------------------
-MODEL=navdp_1node         # base config: navdp_1gpu or navdp_1node
+MODEL=navdp_1node_ablation         # base config: navdp_1gpu or navdp_1node
 SESSION_TAG=ablation_$(date +%Y%m%d_%H%M%S)
 
 # ---- GPU ---------------------------------------------------

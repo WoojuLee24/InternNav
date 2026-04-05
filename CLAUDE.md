@@ -124,9 +124,13 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-04-05 07:39_
+_Last updated: 2026-04-05 08:47_
 
-### [b471ca48] 2026-04-05 — [fix] checkpoint save debug
+### [4d60cb6a] 2026-04-05 — [chore] ablation 1 node
+
+### [5f5f3f45] 2026-04-05 — [chore] edit param for h200_1gpu
+
+### [69833ccb] 2026-04-05 — [fix] checkpoint save debug
 
 ### [b5f5310e] 2026-04-05 — [feat] save_checkpoints: every_epoch and best mode
 
@@ -135,7 +139,3 @@ _Last updated: 2026-04-05 07:39_
 ### [653ffefa] 2026-04-01 — [feat] train ablation
 
 ### [9113f143] 2026-03-31 — [feat] 1. optimize distance calculation for dataloader, 2. optimize batch size and nw
-
-### [690901cf] 2026-03-29 — [chore] add date
-
-### [89976813] 2026-03-29 — [chore] edit run_name
