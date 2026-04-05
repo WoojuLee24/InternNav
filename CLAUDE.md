@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-04-05 07:10_
+_Last updated: 2026-04-05 07:39_
 
-### [c67dc8a3] 2026-04-05 — [feat] save_checkpoints: every_epoch and best mode
+### [b471ca48] 2026-04-05 — [fix] checkpoint save debug
+
+### [b5f5310e] 2026-04-05 — [feat] save_checkpoints: every_epoch and best mode
 
 ### [9a14c036] 2026-04-05 — [feat] npz/npy and cache for parquet and pointcloud
 
@@ -137,5 +139,3 @@ _Last updated: 2026-04-05 07:10_
 ### [690901cf] 2026-03-29 — [chore] add date
 
 ### [89976813] 2026-03-29 — [chore] edit run_name
-
-### [3962b544] 2026-03-29 — [feat] system 2 validation added
