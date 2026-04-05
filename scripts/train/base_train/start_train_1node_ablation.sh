@@ -36,8 +36,8 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # ---- GRID: values to sweep ---------------------------------
 # 여러 값 → sweep, 값 하나 → 고정, 빈 배열 () → base config 사용
-SCENE_SCALE_LIST=(0.01)       # e.g. (0.01 0.1 1.0)
-NUM_WORKERS_LIST=(4 8)        # e.g. (2 4 8 16)
+SCENE_SCALE_LIST=(0.1)       # e.g. (0.01 0.1 1.0)
+NUM_WORKERS_LIST=(4)        # e.g. (2 4 8 16)
 PREFETCH_FACTOR_LIST=(1)      # e.g. (1 2 4)
 BATCH_SIZE_LIST=(32)          # e.g. (16 32 64)
 PERSISTENT_WORKERS_LIST=(True) # e.g. (True False)
@@ -48,7 +48,7 @@ USE_SCIPY_KDTREE_LIST=(True)  # e.g. (True False)
 USE_NPY_OBSTACLE_LIST=(True False)  # e.g. (True False)
 USE_NPZ_PARQUET_LIST=(True False)  # e.g. (True False)
 USE_KDTREE_CACHE_LIST=(True False)  # e.g. (True False)
-USE_PARQUET_CACHE_LIST=(False)  # e.g. (True False)
+USE_PARQUET_CACHE_LIST=(True False)  # e.g. (True False)
 
 
 # ---- GENERATE COMBINATIONS via Python ----------------------
