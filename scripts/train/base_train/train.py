@@ -40,6 +40,8 @@ class TrainCfg(BaseModel):
     name: str = 'cma_train'  # Experiment name
     model_name: str = 'cma'  # Model name, options: 'cma', 'cma_plus', 'seq2seq', 'seq2seq_plus', 'rdp', 'navdp', 'navdp_1gpu', 'navdp_1node'
     debug: bool = False  # Debug mode: sets num_workers=0 for single-process DataLoader
+    save_checkpoints: bool = True            # save checkpoint-best and checkpoint-latest after each validation
+    save_every_epoch: bool = False           # save checkpoint-epoch-{N} at every epoch end
 
 
 class CheckpointFormatCallback(TrainerCallback):
@@ -306,9 +308,9 @@ def main(config, model_class, model_config_class, debug=False):
             lr_scheduler_type='cosine',
             logging_steps=10.0,
             num_train_epochs=config.il.epochs,
-            save_strategy='epoch',  # no
+            save_strategy='no',
             save_steps=config.il.save_interval_epochs,
-            save_total_limit=8,
+            save_total_limit=1,
             report_to=config.il.report_to,
             seed=0,
             do_eval=False,
@@ -341,6 +343,8 @@ def main(config, model_class, model_config_class, debug=False):
                 num_workers=0,
                 debug=debug,
                 log_dir=config.log_dir,
+                save_checkpoints=config.save_checkpoints,
+                save_every_epoch=config.save_every_epoch,
             )
             trainer.add_callback(val_cb)
             if val_interval:

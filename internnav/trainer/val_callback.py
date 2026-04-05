@@ -1,4 +1,5 @@
 import os
+import shutil
 
 import cv2
 import numpy as np
@@ -18,19 +19,27 @@ def _save_val_batch_images(batch, step, save_dir):
 
 
 class ValidationCallback(TrainerCallback):
-    """Computes validation loss and logs to wandb.
+    """Computes validation loss and optionally saves checkpoints.
 
     Mode is determined automatically:
       - val_interval_steps is set (> 0) → step mode: runs every N steps
       - val_interval_steps is None       → epoch mode: runs every epoch
 
+    Checkpoint saving (controlled by save_checkpoints / save_every_epoch):
+      - checkpoint-latest/      : overwritten after every validation run
+      - checkpoint-best/        : overwritten only when val_loss improves
+      - checkpoint-epoch-{N}/   : saved every epoch if save_every_epoch=True
+
     Args:
         val_interval_steps: interval in steps (None = epoch mode).
+        save_checkpoints: if False, skip best/latest saving (e.g. ablation runs).
+        save_every_epoch: if True, save checkpoint-epoch-{N} at every epoch end.
         debug: if True, saves first batch images to log_dir.
     """
 
     def __init__(self, trainer, val_dataset, collate_fn, val_interval_steps=None,
-                 num_workers=0, debug=False, log_dir="val_batch_debug"):
+                 num_workers=0, debug=False, log_dir="val_batch_debug",
+                 save_checkpoints=True, save_every_epoch=False):
         self.trainer = trainer
         self.val_dataset = val_dataset
         self.collate_fn = collate_fn
@@ -38,6 +47,9 @@ class ValidationCallback(TrainerCallback):
         self.num_workers = num_workers
         self.debug = debug
         self.log_dir = log_dir
+        self.save_checkpoints = save_checkpoints
+        self.save_every_epoch = save_every_epoch
+        self._best_val_loss = float('inf')
 
     def _validate(self, args, state):
         import torch.distributed as dist
@@ -86,7 +98,28 @@ class ValidationCallback(TrainerCallback):
 
         if rank == 0 and num_batches > 0:
             avg_val_loss = total_loss / num_batches
-            print(f"[Val] step={state.global_step} epoch={int(state.epoch)}  val_loss={avg_val_loss:.4f}  ({num_batches} batches)")
+            is_best = avg_val_loss < self._best_val_loss
+            print(f"[Val] step={state.global_step} epoch={int(state.epoch)}  val_loss={avg_val_loss:.4f}  ({num_batches} batches){'  ** best **' if is_best else ''}")
+
+            if self.save_checkpoints:
+                # Save latest checkpoint (always overwrite)
+                latest_ckpt_dir = os.path.join(args.output_dir, 'checkpoint-latest')
+                if os.path.isdir(latest_ckpt_dir):
+                    shutil.rmtree(latest_ckpt_dir)
+                self.trainer.save_model(latest_ckpt_dir + '/')
+                print(f"[Val] Latest checkpoint saved → {latest_ckpt_dir}")
+
+                # Save best checkpoint (only when improved)
+                if is_best:
+                    best_ckpt_dir = os.path.join(args.output_dir, 'checkpoint-best')
+                    if os.path.isdir(best_ckpt_dir):
+                        shutil.rmtree(best_ckpt_dir)
+                    self.trainer.save_model(best_ckpt_dir + '/')
+                    print(f"[Val] Best checkpoint saved → {best_ckpt_dir}  (val_loss={avg_val_loss:.4f})")
+
+            if is_best:
+                self._best_val_loss = avg_val_loss
+
             try:
                 import wandb
                 if wandb.run is not None:
@@ -95,6 +128,15 @@ class ValidationCallback(TrainerCallback):
                 pass
 
     def on_epoch_end(self, args, state, control, **kwargs):
+        import torch.distributed as dist
+        rank = dist.get_rank() if (dist.is_available() and dist.is_initialized()) else 0
+
+        if self.save_every_epoch and rank == 0:
+            epoch = int(state.epoch)
+            epoch_ckpt_dir = os.path.join(args.output_dir, f'checkpoint-epoch-{epoch}')
+            self.trainer.save_model(epoch_ckpt_dir + '/')
+            print(f"[Val] Epoch checkpoint saved → {epoch_ckpt_dir}")
+
         if self.val_interval_steps is not None:
             return  # step mode handles validation
         self._validate(args, state)
