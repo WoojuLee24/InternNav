@@ -57,6 +57,8 @@ class TrainCfg(BaseModel):
     use_kdtree_cache: bool | None = None    # cache cKDTree per scene to avoid rebuild each step
     use_parquet_cache: bool | None = None   # cache parsed parquet per episode to avoid re-read each step
     enable_timing: bool = False              # print per-step timing (dataloader / forward / backward / total)
+    save_checkpoints: bool = False           # save checkpoint-best and checkpoint-latest after each validation
+    save_every_epoch: bool = False           # save checkpoint-epoch-{N} at every epoch end
 
 
 class CheckpointFormatCallback(TrainerCallback):
@@ -336,9 +338,9 @@ def main(config, model_class, model_config_class, debug=False):
             lr_scheduler_type='cosine',
             logging_steps=10.0,
             num_train_epochs=config.il.epochs,
-            save_strategy='epoch',  # no
+            save_strategy='no',
             save_steps=config.il.save_interval_epochs,
-            save_total_limit=8,
+            save_total_limit=1,
             report_to=config.il.report_to,
             seed=0,
             do_eval=False,
@@ -371,6 +373,8 @@ def main(config, model_class, model_config_class, debug=False):
                 num_workers=0,
                 debug=debug,
                 log_dir=config.log_dir,
+                save_checkpoints=config.save_checkpoints,
+                save_every_epoch=config.save_every_epoch,
             )
             trainer.add_callback(val_cb)
             if val_interval:
