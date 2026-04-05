@@ -40,8 +40,8 @@ class TrainCfg(BaseModel):
     name: str = 'cma_train'  # Experiment name
     model_name: str = 'cma'  # Model name, options: 'cma', 'cma_plus', 'seq2seq', 'seq2seq_plus', 'rdp', 'navdp', 'navdp_1gpu', 'navdp_1node'
     debug: bool = False  # Debug mode: sets num_workers=0 for single-process DataLoader
-    save_checkpoints: bool = True            # save checkpoint-best and checkpoint-latest after each validation
-    save_every_epoch: bool = False           # save checkpoint-epoch-{N} at every epoch end
+    save_checkpoints: bool = True
+    save_every_epoch: bool = False
 
 
 class CheckpointFormatCallback(TrainerCallback):
@@ -407,6 +407,9 @@ if __name__ == '__main__':
 
     if config.debug:
         exp_cfg.il.num_workers = 0
+
+    exp_cfg.save_checkpoints = config.save_checkpoints
+    exp_cfg.save_every_epoch = config.save_every_epoch
 
     available_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
 

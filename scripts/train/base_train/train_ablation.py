@@ -470,6 +470,8 @@ if __name__ == '__main__':
     if config.use_parquet_cache is not None:
         exp_cfg.il.use_parquet_cache = config.use_parquet_cache
     exp_cfg.il.enable_timing = config.enable_timing
+    exp_cfg.save_checkpoints = config.save_checkpoints
+    exp_cfg.save_every_epoch = config.save_every_epoch
 
     available_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
 
