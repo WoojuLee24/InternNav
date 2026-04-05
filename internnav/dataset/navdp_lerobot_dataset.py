@@ -55,6 +55,10 @@ class NavDP_Base_Datset(Dataset):
         is_train=True,
         val_ratio=0.0,
         use_scipy_kdtree=False,
+        use_npy_obstacle=False,
+        use_npz_parquet=False,
+        use_kdtree_cache=False,
+        use_parquet_cache=False,
     ):
 
         self.dataset_dirs = np.array(sorted(os.listdir(root_dirs)))
@@ -78,6 +82,13 @@ class NavDP_Base_Datset(Dataset):
         self.batch_time_sum = 0.0
         self._last_time = None
         self.use_scipy_kdtree = use_scipy_kdtree
+        self.use_npy_obstacle = use_npy_obstacle
+        self.use_npz_parquet = use_npz_parquet
+        self.use_kdtree_cache = use_kdtree_cache
+        self.use_parquet_cache = use_parquet_cache
+        self._obstacle_cache: dict = {}   # ply_path -> np.ndarray, per-worker cache
+        self._kdtree_cache: dict = {}     # ply_path -> cKDTree, per-worker cache
+        self._parquet_cache: dict = {}    # parquet_path -> (intrinsic, extrinsic, trajectory, length)
         self._dist_time_sum = 0.0
         self._dist_cnt = 0
 
@@ -155,10 +166,13 @@ class NavDP_Base_Datset(Dataset):
 
             # replicate the data 50 times (training only)
             if is_train:
+                self._n_base_episodes = len(self.trajectory_data_dir)
                 self.trajectory_data_dir = self.trajectory_data_dir * 50
                 self.trajectory_rgb_path = self.trajectory_rgb_path * 50
                 self.trajectory_depth_path = self.trajectory_depth_path * 50
                 self.trajectory_afford_path = self.trajectory_afford_path * 50
+            else:
+                self._n_base_episodes = len(self.trajectory_data_dir)
         else:
             load_dict = json.load(open(preload_path, 'r'))
             _tdd = load_dict['trajectory_data_dir']
@@ -173,11 +187,13 @@ class NavDP_Base_Datset(Dataset):
                 else:
                     _tdd, _trp, _tdp, _tap = _tdd[-n_val:], _trp[-n_val:], _tdp[-n_val:], _tap[-n_val:]
             if is_train:
+                self._n_base_episodes = len(_tdd)
                 self.trajectory_data_dir = _tdd * 50
                 self.trajectory_rgb_path = _trp * 50
                 self.trajectory_depth_path = _tdp * 50
                 self.trajectory_afford_path = _tap * 50
             else:
+                self._n_base_episodes = len(_tdd)
                 self.trajectory_data_dir = _tdd
                 self.trajectory_rgb_path = _trp
                 self.trajectory_depth_path = _tdp
@@ -239,17 +255,38 @@ class NavDP_Base_Datset(Dataset):
         return depth[:, :, np.newaxis]
 
     def process_data_parquet(self, index):
-        if not os.path.isfile(self.trajectory_data_dir[index]):
-            raise FileNotFoundError(self.trajectory_data_dir[index])
-        df = pd.read_parquet(self.trajectory_data_dir[index])
-        camera_intrinsic = np.vstack(np.array(df['observation.camera_intrinsic'].tolist()[0])).reshape(3, 3)
-        camera_extrinsic = np.vstack(np.array(df['observation.camera_extrinsic'].tolist()[0])).reshape(4, 4)
-        trajectory_length = len(df['action'].tolist())
-        camera_trajectory = np.array([np.stack(frame) for frame in df['action']], dtype=np.float64).reshape(-1, 4, 4)
-        return camera_intrinsic, camera_extrinsic, camera_trajectory, trajectory_length
+        path = self.trajectory_data_dir[index]
+        if self.use_parquet_cache and path in self._parquet_cache:
+            return self._parquet_cache[path]
+        if self.use_npz_parquet:
+            npz_path = os.path.join(os.path.dirname(path), 'npz_cache',
+                                    os.path.basename(path).replace('.parquet', '.npz'))
+            data = np.load(npz_path)
+            camera_intrinsic = data['camera_intrinsic']
+            camera_extrinsic = data['camera_extrinsic']
+            camera_trajectory = data['trajectory']
+            trajectory_length = camera_trajectory.shape[0]
+        else:
+            if not os.path.isfile(path):
+                raise FileNotFoundError(path)
+            df = pd.read_parquet(path)
+            camera_intrinsic = np.vstack(np.array(df['observation.camera_intrinsic'].tolist()[0])).reshape(3, 3)
+            camera_extrinsic = np.vstack(np.array(df['observation.camera_extrinsic'].tolist()[0])).reshape(4, 4)
+            trajectory_length = len(df['action'].tolist())
+            camera_trajectory = np.array([np.stack(frame) for frame in df['action']], dtype=np.float64).reshape(-1, 4, 4)
+        result = camera_intrinsic, camera_extrinsic, camera_trajectory, trajectory_length
+        if self.use_parquet_cache:
+            self._parquet_cache[path] = result
+        return result
 
     def process_obstacle_points(self, index):
-        scene_pcd = self.load_pointcloud(self.trajectory_afford_path[index])
+        ply_path = self.trajectory_afford_path[index]
+        if self.use_npy_obstacle:
+            if ply_path not in self._obstacle_cache:
+                npy_path = ply_path.replace('pointcloud.ply', 'pointcloud_obstacle.npy')
+                self._obstacle_cache[ply_path] = np.load(npy_path)
+            return self._obstacle_cache[ply_path], None
+        scene_pcd = self.load_pointcloud(ply_path)
         scene_color = np.array(scene_pcd.colors)
         scene_points = np.array(scene_pcd.points)
         color_distance = np.abs(scene_color - np.array([0, 0, 0.5])).sum(axis=-1)
@@ -517,7 +554,13 @@ class NavDP_Base_Datset(Dataset):
             _dist_t0 = time.time()
             if self.use_scipy_kdtree:
                 _obs_xy = trajectory_obstacle_points[:, 0:2]
-                _tree = cKDTree(_obs_xy)
+                if self.use_kdtree_cache:
+                    ply_path = self.trajectory_afford_path[index]
+                    if ply_path not in self._kdtree_cache:
+                        self._kdtree_cache[ply_path] = cKDTree(_obs_xy)
+                    _tree = self._kdtree_cache[ply_path]
+                else:
+                    _tree = cKDTree(_obs_xy)
                 pred_distance, _ = _tree.query(target_world_points[:, 0:2], k=1, p=1)
                 augment_distance, _ = _tree.query(augment_world_points[:, 0:2], k=1, p=1)
             else:
@@ -535,12 +578,6 @@ class NavDP_Base_Datset(Dataset):
             self._dist_time_sum += _dist_elapsed
             self._dist_cnt += 1
             if self._dist_cnt % 100 == 0:
-                _method = 'scipy_kdtree' if self.use_scipy_kdtree else 'numpy_broadcast'
-                print(
-                    f'[dist] method={_method}, obs={trajectory_obstacle_points.shape[0]}, '
-                    f'traj={target_world_points.shape[0]}, '
-                    f'avg_time(last 100)={self._dist_time_sum / 100 * 1000:.2f}ms'
-                )
                 self._dist_time_sum = 0.0
             pred_critic = (
                 -5.0 * (pred_distance[action_indexes[:-1]] < 0.1).mean()
@@ -602,8 +639,9 @@ class NavDP_Base_Datset(Dataset):
 
         # Summarize avg time of batch
         end_time = time.time()
+        elapsed = end_time - start_time
         self.item_cnt += 1
-        self.batch_time_sum += end_time - start_time
+        self.batch_time_sum += elapsed
         epoch_items = len(self)
         log_interval = 100 * epoch_items
         if self.item_cnt % log_interval == 0:
@@ -612,6 +650,17 @@ class NavDP_Base_Datset(Dataset):
                 f'__getitem__ pid={os.getpid()}, avg_time(last {log_interval})={avg_time:.2f}s, cnt={self.item_cnt}'
             )
             self.batch_time_sum = 0.0
+        # Episode-level log every 100 items: episode_id, scene, parquet filename, trajectory_length, elapsed
+        if self.item_cnt % 100 == 0:
+            episode_id = index % self._n_base_episodes
+            scene_name = os.path.basename(os.path.dirname(os.path.dirname(self.trajectory_afford_path[index])))
+            parquet_name = os.path.basename(self.trajectory_data_dir[index])
+            print(
+                f'[Episode] pid={os.getpid()}, cnt={self.item_cnt}'
+                f' | episode_id={episode_id}/{self._n_base_episodes}, scene={scene_name}, parquet={parquet_name}'
+                f' | traj_len={trajectory_length}, start={memory_start_choice}, target={target_choice}'
+                f' | elapsed={elapsed*1e3:.1f}ms'
+            )
         point_goal = torch.tensor(point_goal, dtype=torch.float32)
         image_goal = torch.tensor(image_goal, dtype=torch.float32)
         pixel_goal = torch.tensor(pixel_goal, dtype=torch.float32)

@@ -51,11 +51,15 @@ navdp_1gpu_exp_cfg = ExpCfg(
         dataset_navdp='data/datasets/navdp_dataset_lerobot.json',
         root_dir='/ws/src/InternNav/data/InternData-N1-v0.5-mini/vln_n1/traj_data',
         image_size=224,
-        scene_scale=0.01, # 1.0 (full), small (0.1), tiny (0.01)
+        scene_scale=0.005, # 1.0 (full), small (0.1), tiny (0.01)
         preload=False,
         random_digit=False,
         prior_sample=False,
         use_scipy_kdtree=True,  # ablation: True=scipy cKDTree O(N logM), False=numpy broadcast O(N*M)
+        use_npy_obstacle=False,  # ablation: True=load pre-filtered pointcloud_obstacle.npy (fast), False=parse pointcloud.ply via Open3D
+        use_npz_parquet=False,   # ablation: True=load pre-converted npz_cache/*.npz instead of parsing parquet
+        use_kdtree_cache=False,  # ablation: True=cache cKDTree per scene (avoid rebuild each step)
+        use_parquet_cache=False,  # ablation: True=cache parsed parquet per episode (avoid re-read each step)
         memory_size=8,
         predict_size=24,
         pixel_channel=4,

@@ -52,6 +52,11 @@ class TrainCfg(BaseModel):
     bf16: bool | None = None                 # bfloat16 mixed precision
     tf32: bool | None = None                 # TF32 on Ampere GPUs
     use_scipy_kdtree: bool | None = None     # use scipy KDTree for distance calculation
+    use_npy_obstacle: bool | None = None    # load pre-filtered pointcloud_obstacle.npy instead of parsing pointcloud.ply
+    use_npz_parquet: bool | None = None     # load pre-converted npz_cache/*.npz instead of parsing parquet
+    use_kdtree_cache: bool | None = None    # cache cKDTree per scene to avoid rebuild each step
+    use_parquet_cache: bool | None = None   # cache parsed parquet per episode to avoid re-read each step
+    enable_timing: bool = False              # print per-step timing (dataloader / forward / backward / total)
 
 
 class CheckpointFormatCallback(TrainerCallback):
@@ -198,6 +203,10 @@ def main(config, model_class, model_config_class, debug=False):
                 random_digit=config.il.random_digit,
                 prior_sample=config.il.prior_sample,
                 use_scipy_kdtree=getattr(config.il, 'use_scipy_kdtree', False),
+                use_npy_obstacle=getattr(config.il, 'use_npy_obstacle', False),
+                use_npz_parquet=getattr(config.il, 'use_npz_parquet', False),
+                use_kdtree_cache=getattr(config.il, 'use_kdtree_cache', False),
+                use_parquet_cache=getattr(config.il, 'use_parquet_cache', False),
             )
         else:
             if '3dgs' in config.il.lmdb_features_dir or '3dgs' in config.il.lmdb_features_dir:
@@ -261,6 +270,10 @@ def main(config, model_class, model_config_class, debug=False):
                     is_train=False,
                     val_ratio=val_ratio,
                     use_scipy_kdtree=getattr(config.il, 'use_scipy_kdtree', False),
+                    use_npy_obstacle=getattr(config.il, 'use_npy_obstacle', False),
+                    use_kdtree_cache=getattr(config.il, 'use_kdtree_cache', False),
+                    use_parquet_cache=getattr(config.il, 'use_parquet_cache', False),
+                use_npz_parquet=getattr(config.il, 'use_npz_parquet', False),
                 )
                 # Also rebuild train_dataset with val excluded
                 train_dataset = NavDP_Base_Datset(
@@ -278,6 +291,10 @@ def main(config, model_class, model_config_class, debug=False):
                     is_train=True,
                     val_ratio=val_ratio,
                     use_scipy_kdtree=getattr(config.il, 'use_scipy_kdtree', False),
+                    use_npy_obstacle=getattr(config.il, 'use_npy_obstacle', False),
+                    use_kdtree_cache=getattr(config.il, 'use_kdtree_cache', False),
+                    use_parquet_cache=getattr(config.il, 'use_parquet_cache', False),
+                use_npz_parquet=getattr(config.il, 'use_npz_parquet', False),
                 )
             elif config.model_name in ['cma', 'seq2seq']:
                 # Split lmdb_keys: last val_ratio fraction → val
@@ -440,6 +457,15 @@ if __name__ == '__main__':
         exp_cfg.il.tf32 = config.tf32
     if config.use_scipy_kdtree is not None:
         exp_cfg.il.use_scipy_kdtree = config.use_scipy_kdtree
+    if config.use_npy_obstacle is not None:
+        exp_cfg.il.use_npy_obstacle = config.use_npy_obstacle
+    if config.use_npz_parquet is not None:
+        exp_cfg.il.use_npz_parquet = config.use_npz_parquet
+    if config.use_kdtree_cache is not None:
+        exp_cfg.il.use_kdtree_cache = config.use_kdtree_cache
+    if config.use_parquet_cache is not None:
+        exp_cfg.il.use_parquet_cache = config.use_parquet_cache
+    exp_cfg.il.enable_timing = config.enable_timing
 
     available_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
 
