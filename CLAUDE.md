@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-04-05 08:47_
+_Last updated: 2026-04-05 08:50_
 
-### [4d60cb6a] 2026-04-05 — [chore] ablation 1 node
+### [525cc66a] 2026-04-05 — [chore] ablation 1 node
+
+### [b6d7fd04] 2026-04-05 — [chore] ablation 1 node
 
 ### [5f5f3f45] 2026-04-05 — [chore] edit param for h200_1gpu
 
@@ -137,5 +139,3 @@ _Last updated: 2026-04-05 08:47_
 ### [9a14c036] 2026-04-05 — [feat] npz/npy and cache for parquet and pointcloud
 
 ### [653ffefa] 2026-04-01 — [feat] train ablation
-
-### [9113f143] 2026-03-31 — [feat] 1. optimize distance calculation for dataloader, 2. optimize batch size and nw

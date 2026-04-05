@@ -26,6 +26,7 @@ from scripts.train.base_train.configs import (
     navdp_exp_cfg,
     navdp_1gpu_exp_cfg,
     navdp_1node_exp_cfg,
+    navdp_1node_ablation_exp_cfg,
     navdp_h200_1gpu_exp_cfg,
     rdp_exp_cfg,
     seq2seq_exp_cfg,
@@ -37,7 +38,7 @@ class TrainCfg(BaseModel):
     """Training configuration class"""
 
     name: str = 'cma_train'  # Experiment name
-    model_name: str = 'cma'  # Model name, options: 'cma', 'cma_plus', 'seq2seq', 'seq2seq_plus', 'rdp', 'navdp', 'navdp_1gpu', 'navdp_1node'
+    model_name: str = 'cma'  # Model name, options: 'cma', 'cma_plus', 'seq2seq', 'seq2seq_plus', 'rdp', 'navdp', 'navdp_1gpu', 'navdp_1node', 'navdp_1node_ablation'
     debug: bool = False  # Debug mode: sets num_workers=0 for single-process DataLoader
 
     # Ablation / override fields — when set, these override the base config file values.
@@ -422,6 +423,7 @@ if __name__ == '__main__':
         'navdp': [navdp_exp_cfg, "NavDP_Policy"],
         'navdp_1gpu': [navdp_1gpu_exp_cfg, "NavDP_Policy"],
         'navdp_1node': [navdp_1node_exp_cfg, "NavDP_Policy"],
+        'navdp_1node_ablation': [navdp_1node_ablation_exp_cfg, "NavDP_Policy"],
         'navdp_h200_1gpu': [navdp_h200_1gpu_exp_cfg, "NavDP_Policy"],
     }
 
