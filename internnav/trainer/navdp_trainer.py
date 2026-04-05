@@ -23,6 +23,47 @@ class NavDPTrainer(BaseTrainer):
 
         print(f"[Rank {dist.get_rank() if dist.is_initialized() else 0}] Model device: {self.model_device}")
 
+    def training_step(self, model, inputs, num_items_in_batch=None):
+        enable_timing = getattr(getattr(self.config, 'il', None), 'enable_timing', False)
+        if not enable_timing:
+            return super().training_step(model, inputs, num_items_in_batch=num_items_in_batch)
+
+        rank = dist.get_rank() if dist.is_initialized() else 0
+
+        step_start = time.perf_counter()
+        dataloader_time = step_start - getattr(self, '_step_end_time', step_start)
+
+        model.train()
+        inputs = self._prepare_inputs(inputs)
+
+        torch.cuda.synchronize()
+        fwd_start = time.perf_counter()
+        with self.compute_loss_context_manager():
+            loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
+        torch.cuda.synchronize()
+        fwd_time = time.perf_counter() - fwd_start
+
+        torch.cuda.synchronize()
+        bwd_start = time.perf_counter()
+        self.accelerator.backward(loss)
+        torch.cuda.synchronize()
+        bwd_time = time.perf_counter() - bwd_start
+
+        step_time = time.perf_counter() - step_start
+        self._step_end_time = time.perf_counter()
+
+        if enable_timing and self.state.global_step % 10 == 0:
+            print(
+                f"[Speed] step={self.state.global_step}"
+                f" | rank={rank}"
+                f" | dataloader={dataloader_time*1e3:.1f}ms"
+                f" | forward={fwd_time*1e3:.1f}ms"
+                f" | backward={bwd_time*1e3:.1f}ms"
+                f" | total={step_time*1e3:.1f}ms"
+            )
+
+        return loss.detach() / self.args.gradient_accumulation_steps
+
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         # get model device
         model_device = next(model.parameters()).device

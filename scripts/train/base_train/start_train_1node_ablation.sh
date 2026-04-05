@@ -11,10 +11,15 @@
 #  모든 조합(cartesian product)을 순차 실행하고 결과를 요약.
 # ============================================================
 
+# ---- ARGS --------------------------------------------------
+TIMING_FLAG=""
+for arg in "$@"; do
+    [[ "$arg" == "--time" ]] && TIMING_FLAG="--enable-timing"
+done
+
 # ---- BASE CONFIG -------------------------------------------
 MODEL=navdp_1node         # base config: navdp_1gpu or navdp_1node
 SESSION_TAG=ablation_$(date +%Y%m%d_%H%M%S)
-SCENE_SCALE_LIST=(0.01)       # e.g. (0.01 0.1 1.0)
 
 # ---- GPU ---------------------------------------------------
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
@@ -31,6 +36,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # ---- GRID: values to sweep ---------------------------------
 # 여러 값 → sweep, 값 하나 → 고정, 빈 배열 () → base config 사용
+SCENE_SCALE_LIST=(0.01)       # e.g. (0.01 0.1 1.0)
 NUM_WORKERS_LIST=(4 8)        # e.g. (2 4 8 16)
 PREFETCH_FACTOR_LIST=(1)      # e.g. (1 2 4)
 BATCH_SIZE_LIST=(32)          # e.g. (16 32 64)
@@ -39,6 +45,10 @@ PRELOAD_LIST=(False)          # e.g. (True False)
 BF16_LIST=(False)             # e.g. (True False)
 TF32_LIST=(False)             # e.g. (True False)
 USE_SCIPY_KDTREE_LIST=(True)  # e.g. (True False)
+USE_NPY_OBSTACLE_LIST=(True False)  # e.g. (True False)
+USE_NPZ_PARQUET_LIST=(True False)  # e.g. (True False)
+USE_KDTREE_CACHE_LIST=(True False)  # e.g. (True False)
+USE_PARQUET_CACHE_LIST=(False)  # e.g. (True False)
 
 
 # ---- GENERATE COMBINATIONS via Python ----------------------
@@ -63,6 +73,10 @@ params = [
     ('bf16',               'bf16', '--bf16',               to_list('${BF16_LIST[*]}')),
     ('tf32',               'tf32', '--tf32',               to_list('${TF32_LIST[*]}')),
     ('use_scipy_kdtree',   'kdt',  '--use-scipy-kdtree',   to_list('${USE_SCIPY_KDTREE_LIST[*]}')),
+    ('use_npy_obstacle',   'npy',  '--use-npy-obstacle',   to_list('${USE_NPY_OBSTACLE_LIST[*]}')),
+    ('use_npz_parquet',    'npzp', '--use-npz-parquet',    to_list('${USE_NPZ_PARQUET_LIST[*]}')),
+    ('use_kdtree_cache',   'kdc',  '--use-kdtree-cache',   to_list('${USE_KDTREE_CACHE_LIST[*]}')),
+    ('use_parquet_cache',  'pqc',  '--use-parquet-cache',  to_list('${USE_PARQUET_CACHE_LIST[*]}')),
 ]
 
 lists = [p[3] for p in params]
@@ -116,6 +130,7 @@ for COMBO in "${COMBOS[@]}"; do
         scripts/train/base_train/train_ablation.py \
         --name "$NAME" \
         --model-name "$MODEL" \
+        $TIMING_FLAG \
         $EXTRA_ARGS 2>&1 | tee "$LOGFILE"
     EXIT_CODE=${PIPESTATUS[0]}
 
