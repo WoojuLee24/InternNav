@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-04-06 06:49_
+_Last updated: 2026-04-06 06:58_
 
-### [65c93836] 2026-04-06 — [feat] 1. lr_scheduler, 2. run_queue
+### [0bb754ea] 2026-04-06 — [chore] move run_queue.sh
+
+### [8295a3e6] 2026-04-06 — [feat] 1. lr_scheduler, 2. run_queue
 
 ### [e7942488] 2026-04-06 — [chore] edit default ply, parquet setting as npy, npz
 
@@ -137,5 +139,3 @@ _Last updated: 2026-04-06 06:49_
 ### [b6d7fd04] 2026-04-05 — [chore] ablation 1 node
 
 ### [5f5f3f45] 2026-04-05 — [chore] edit param for h200_1gpu
-
-### [69833ccb] 2026-04-05 — [fix] checkpoint save debug
