@@ -42,6 +42,7 @@ class TrainCfg(BaseModel):
     debug: bool = False  # Debug mode: sets num_workers=0 for single-process DataLoader
     save_checkpoints: bool = True
     save_every_epoch: bool = False
+    il_overrides: str = '{}'  # JSON override for il config, e.g. '{"lr_scheduler_type":"cosine","lr_eta_min":1e-6}'
 
 
 class CheckpointFormatCallback(TrainerCallback):
@@ -410,6 +411,10 @@ if __name__ == '__main__':
 
     exp_cfg.save_checkpoints = config.save_checkpoints
     exp_cfg.save_every_epoch = config.save_every_epoch
+    if config.il_overrides and config.il_overrides != '{}':
+        import json
+        for k, v in json.loads(config.il_overrides).items():
+            setattr(exp_cfg.il, k, v)
 
     available_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
 

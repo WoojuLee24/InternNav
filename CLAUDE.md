@@ -124,18 +124,18 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-04-05 08:50_
+_Last updated: 2026-04-06 06:49_
 
-### [525cc66a] 2026-04-05 — [chore] ablation 1 node
+### [65c93836] 2026-04-06 — [feat] 1. lr_scheduler, 2. run_queue
+
+### [e7942488] 2026-04-06 — [chore] edit default ply, parquet setting as npy, npz
+
+### [dafaced6] 2026-04-05 — [chore] edit param for 1node ablation
+
+### [dae9f923] 2026-04-05 — [chore] ablation 1 node
 
 ### [b6d7fd04] 2026-04-05 — [chore] ablation 1 node
 
 ### [5f5f3f45] 2026-04-05 — [chore] edit param for h200_1gpu
 
 ### [69833ccb] 2026-04-05 — [fix] checkpoint save debug
-
-### [b5f5310e] 2026-04-05 — [feat] save_checkpoints: every_epoch and best mode
-
-### [9a14c036] 2026-04-05 — [feat] npz/npy and cache for parquet and pointcloud
-
-### [653ffefa] 2026-04-01 — [feat] train ablation
