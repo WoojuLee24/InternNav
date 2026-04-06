@@ -191,8 +191,25 @@ class NavDPTrainer(BaseTrainer):
         return optimizer
 
     def create_scheduler(self, optimizer, num_training_steps: int):
-        """Create learning rate scheduler"""
-        scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.5, total_iters=10000)
+        """Create learning rate scheduler.
+        lr_scheduler_type: 'linear' (default) or 'cosine'
+        linear params: lr_end_factor (default 0.5), lr_total_iters (default 10000)
+        cosine params: lr_eta_min (default 1e-6)
+        """
+        scheduler_type = getattr(self.config.il, 'lr_scheduler_type', 'linear')
+        if scheduler_type == 'cosine':
+            eta_min = getattr(self.config.il, 'lr_eta_min', 1e-6)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=num_training_steps, eta_min=eta_min
+            )
+            print(f"[Scheduler] CosineAnnealingLR: T_max={num_training_steps}, eta_min={eta_min}")
+        else:
+            end_factor = getattr(self.config.il, 'lr_end_factor', 0.5)
+            total_iters = getattr(self.config.il, 'lr_total_iters', 10000)
+            scheduler = torch.optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=1.0, end_factor=end_factor, total_iters=total_iters
+            )
+            print(f"[Scheduler] LinearLR: end_factor={end_factor}, total_iters={total_iters}")
         return scheduler
 
     def create_optimizer_and_scheduler(self, num_training_steps: int):
