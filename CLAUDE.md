@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-04-06 06:58_
+_Last updated: 2026-04-06 07:21_
 
-### [0bb754ea] 2026-04-06 — [chore] move run_queue.sh
+### [43613c81] 2026-04-06 — [chore] mv run_queue.sh
+
+### [f7ec314c] 2026-04-06 — [chore] move run_queue.sh
 
 ### [8295a3e6] 2026-04-06 — [feat] 1. lr_scheduler, 2. run_queue
 
@@ -137,5 +139,3 @@ _Last updated: 2026-04-06 06:58_
 ### [dae9f923] 2026-04-05 — [chore] ablation 1 node
 
 ### [b6d7fd04] 2026-04-05 — [chore] ablation 1 node
-
-### [5f5f3f45] 2026-04-05 — [chore] edit param for h200_1gpu
