@@ -56,6 +56,8 @@ navdp_1node_exp_cfg = ExpCfg(
         random_digit=False,
         prior_sample=False,
         use_scipy_kdtree=True,  # ablation: True=scipy cKDTree O(N logM), False=numpy broadcast O(N*M)
+        use_npy_obstacle=True,   # load pre-filtered pointcloud_obstacle.npy instead of parsing pointcloud.ply
+        use_npz_parquet=True,    # load pre-converted npz_cache/*.npz instead of parsing parquet
         memory_size=8,
         predict_size=24,
         pixel_channel=4,
