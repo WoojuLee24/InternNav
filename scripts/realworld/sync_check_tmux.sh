@@ -32,7 +32,7 @@ tmux split-window -v -t "$SESSION_NAME":0.1
 COMMON_PREFIX="source /opt/ros/jazzy/setup.bash; cd $REPO_DIR;"
 
 # Pane 0: server
-tmux send-keys -t "$SESSION_NAME":0.0 "$COMMON_PREFIX /opt/venv/bin/python3 scripts/realworld/http_internvla_server_debug.py --mode sync --num_history 1 --plan_step_gap 12 --device $DEVICE --model_path $MODEL_PATH --calib $CALIB_PATH 2>&1 | tee $RUN_DIR/server_stdout.log" C-m
+tmux send-keys -t "$SESSION_NAME":0.0 "$COMMON_PREFIX /opt/venv/bin/python3 scripts/realworld/http_internvla_server_debug.py --mode sync --resize_w 256 --resize_h 256 --num_history 1 --plan_step_gap 12 --device $DEVICE --model_path $MODEL_PATH --calib $CALIB_PATH 2>&1 | tee $RUN_DIR/server_stdout.log" C-m
 
 # Pane 1: scout bridge
 tmux send-keys -t "$SESSION_NAME":0.1 "$COMMON_PREFIX python3.12 scripts/realworld/scout_bridge.py 2>&1 | tee $RUN_DIR/scout_bridge.log" C-m

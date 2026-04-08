@@ -274,8 +274,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--model_path", type=str, default="checkpoints/InternVLA-N1-w-NavDP")
-    parser.add_argument("--resize_w", type=int, default=384)
-    parser.add_argument("--resize_h", type=int, default=384)
+    parser.add_argument("--resize_w", type=int, default=256)
+    parser.add_argument("--resize_h", type=int, default=256)
     parser.add_argument("--num_history", type=int, default=1)
     parser.add_argument("--plan_step_gap", type=int, default=12)
     parser.add_argument("--mode", type=str, default="sync", choices=["sync", "async"],

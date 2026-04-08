@@ -297,6 +297,32 @@ Interpretation:
 - Slightly worse trajectory behavior on both bags.
 - Rejected as current implementation.
 
+## Module 18 attempt: reduce encoder input resolution (`--resize_w 256 --resize_h 256`)
+
+Status: accepted
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix64 | `my_camera_bag_20260310_035208` | 133 | 4 | 5 | 0.874 | 1.087 | 0 |
+| fix65 | `my_camera_bag_20260310_035611` | 129 | 6 | 11 | 0.890 | 1.068 | 0 |
+
+Interpretation:
+- Improved throughput/latency versus module 15 defaults while preserving strong trajectory behavior.
+- Promoted to default and kept as explicit flag.
+
+## Module 19 attempt: reduce resolution further (`--resize_w 224 --resize_h 224`)
+
+Status: rejected (over-aggressive)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix66 | `my_camera_bag_20260310_035208` | 109 | 20 | 52 | 1.020 | 0.921 | 0 |
+| fix67 | `my_camera_bag_20260310_035611` | 122 | 12 | 32 | 0.975 | 0.967 | 0 |
+
+Interpretation:
+- Speed improved further, but quality shifted too much into discrete/no-traj behavior.
+- Rejected as default; keep as optional experimental profile only.
+
 ## Speed/quality trend snapshot (selected checkpoints)
 
 | Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
@@ -305,6 +331,8 @@ Interpretation:
 | History tuned | fix50/fix51 | 0.610–0.613 | 1.591–1.603 | 90–90 |
 | Gap tuned (best) | fix56/fix57 | 0.836–0.844 | 1.150–1.153 | 125–126 |
 | Gap tuned (aggressive) | fix58/fix59 | 0.900–0.914 | 1.038–1.068 | 120–138 |
+| Resolution tuned (accepted) | fix64/fix65 | 0.874–0.890 | 1.068–1.087 | 129–133 |
+| Resolution tuned (too aggressive) | fix66/fix67 | 0.975–1.020 | 0.921–0.967 | 109–122 |
 
 ## Current accepted state
 
@@ -312,6 +340,8 @@ Interpretation:
 - Keep behavior from `c97d22d8` + accepted module 5 optimization + accepted module 8 flag scaffold.
 - Accepted tuning options so far: `--num_history 2`, `--num_history 1`, `--plan_step_gap 8`, `--plan_step_gap 12`.
 - Accepted optional aggressive profile: `--plan_step_gap 16`.
+- Accepted resolution tuning: `--resize_w 256 --resize_h 256` (default).
+- Rejected but available for optional tests: `--resize_w 224 --resize_h 224`.
 - `--vision-cache` remains available as experimental flag but current implementation is rejected.
 - Rejected optimization attempts are reverted from code.
 - Guardrail remains strict: if trajectory quality drops, discard that method.
