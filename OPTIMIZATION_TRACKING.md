@@ -183,9 +183,46 @@ Interpretation:
 - Major slowdown and trajectory collapse.
 - Rejected immediately.
 
+## Module 11 attempt: reduce history length (`--num_history 2`)
+
+Status: accepted
+
+Before baseline:
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix46 | `my_camera_bag_20260310_035208` | 53 | 10 | 11 | 0.410 | 2.402 | 0 |
+| fix47 | `my_camera_bag_20260310_035611` | 45 | 18 | 18 | 0.411 | 2.447 | 0 |
+
+After (`--num_history 2`):
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix48 | `my_camera_bag_20260310_035208` | 86 | 3 | 3 | 0.568 | 1.718 | 0 |
+| fix49 | `my_camera_bag_20260310_035611` | 80 | 7 | 10 | 0.583 | 1.677 | 0 |
+
+Interpretation:
+- Strong speed gain and strong trajectory improvement on both bags.
+- Kept as accepted optimization and exposed via existing `--num_history` flag.
+
+## Module 12 attempt: reduce history length further (`--num_history 1`)
+
+Status: accepted (best so far)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix50 | `my_camera_bag_20260310_035208` | 90 | 5 | 5 | 0.610 | 1.591 | 0 |
+| fix51 | `my_camera_bag_20260310_035611` | 90 | 4 | 5 | 0.613 | 1.603 | 0 |
+
+Interpretation:
+- Additional speedup over module 11 and stable trajectory quality.
+- Best current tradeoff among tested sync settings.
+- Keep as optional flag configuration for further real-world validation.
+
 ## Current accepted state
 
 - Keep behavior from `c97d22d8` + accepted module 5 optimization.
 - Keep behavior from `c97d22d8` + accepted module 5 optimization + accepted module 8 flag scaffold.
+- Accepted tuning options so far: `--num_history 2` and `--num_history 1`.
 - Rejected optimization attempts are reverted from code.
 - Guardrail remains strict: if trajectory quality drops, discard that method.

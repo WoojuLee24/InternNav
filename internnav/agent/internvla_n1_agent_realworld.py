@@ -47,6 +47,8 @@ class InternVLAN1AsyncAgent:
         self.resize_h = args.resize_h
         self.num_history = args.num_history
         self.PLAN_STEP_GAP = args.plan_step_gap
+        self.use_kv_cache = bool(getattr(args, 'kv_cache', False))
+        self.max_new_tokens = int(getattr(args, 'max_new_tokens', 128))
 
         prompt = "You are an autonomous navigation assistant. Your task is to <instruction>. Where should you go next to stay on track? Please output the next waypoint's coordinates in the image. Please output STOP when you have successfully completed the task."
         answer = ""
@@ -253,14 +255,18 @@ class InternVLAN1AsyncAgent:
                 inputs["input_ids"] = input_ids
         inputs = inputs.to(self.device)
         t0 = time.time()
+        gen_kwargs = {
+            'max_new_tokens': self.max_new_tokens,
+            'do_sample': False,
+            'return_dict_in_generate': True,
+        }
+        if self.use_kv_cache:
+            gen_kwargs['use_cache'] = True
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=128,
-                do_sample=False,
-                # use_cache=True,
+                **gen_kwargs,
                 # past_key_values=self.past_key_values,
-                return_dict_in_generate=True,
                 # raw_input_ids=copy.deepcopy(inputs.input_ids),
             )
         output_ids = outputs.sequences
