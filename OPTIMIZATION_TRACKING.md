@@ -122,8 +122,34 @@ Interpretation:
 - One bag improved a lot, the other degraded notably.
 - Not robust across both benchmark bags, so rejected.
 
+## Module 8 attempt: optimization-flag scaffold for future combinations
+
+Status: accepted (scaffold only; no behavior change intended)
+
+What was added:
+- Server and client now accept these flags (currently scaffold-only):
+  - `--kv-cache`
+  - `--tensorrt`
+  - `--quantization`
+  - `--vision-cache`
+  - `--method` (repeatable custom method tag)
+- Client includes selected optimization flags in request JSON under `optimizations`.
+- Server logs received optimization requests; execution remains sync-baseline behavior for now.
+
+Validation runs:
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix34 | `my_camera_bag_20260310_035208` | 60 | 4 | 4 | 0.419 | 2.378 | 0 |
+| fix35 | `my_camera_bag_20260310_035611` | 40 | 24 | 24 | 0.421 | 2.393 | 0 |
+
+Interpretation:
+- Scaffold is functional (flags observed in server logs) and does not introduce transport/runtime failures.
+- Kept to enable controlled future A/B testing with explicit flags.
+
 ## Current accepted state
 
 - Keep behavior from `c97d22d8` + accepted module 5 optimization.
+- Keep behavior from `c97d22d8` + accepted module 5 optimization + accepted module 8 flag scaffold.
 - Rejected optimization attempts are reverted from code.
 - Guardrail remains strict: if trajectory quality drops, discard that method.

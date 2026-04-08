@@ -32,6 +32,13 @@ save_dir = 'vis_debug/http_internvla_server_debug'
 os.makedirs(save_dir, exist_ok=True)
 agent_lock = threading.Lock()
 SERVER_MODE = "sync"
+SERVER_OPT_FLAGS = {
+    "kv_cache": False,
+    "tensorrt": False,
+    "quantization": False,
+    "vision_cache": False,
+    "methods": [],
+}
 
 
 @app.route("/eval_dual", methods=['POST'])
@@ -66,6 +73,9 @@ def eval_dual():
         req_mode = data.get('mode', SERVER_MODE)
         if req_mode != 'sync':
             print(f"[Server] Requested mode '{req_mode}' not implemented yet; using sync")
+        req_opts = data.get('optimizations', {})
+        if req_opts:
+            print(f"[Server] Received optimization request (scaffold): {req_opts}")
         if policy_init:
             start_time = time.time()
             idx = 0
@@ -270,6 +280,12 @@ if __name__ == '__main__':
     parser.add_argument("--plan_step_gap", type=int, default=4)
     parser.add_argument("--mode", type=str, default="sync", choices=["sync", "async"],
                         help="Execution mode. async is scaffold-only for now.")
+    parser.add_argument("--kv-cache", action="store_true", help="Enable KV-cache optimization (scaffold flag).")
+    parser.add_argument("--tensorrt", action="store_true", help="Enable TensorRT optimization (scaffold flag).")
+    parser.add_argument("--quantization", action="store_true", help="Enable quantization optimization (scaffold flag).")
+    parser.add_argument("--vision-cache", action="store_true", help="Enable vision-cache optimization (scaffold flag).")
+    parser.add_argument("--method", action="append", default=[],
+                        help="Additional optimization method tag (repeatable, scaffold only).")
     parser.add_argument("--calib", type=str, default="/home/gdr/gd_vln/workspace/src/InternNav/scripts/realworld/calib/calib_scout.txt",
                         help="Path to calibration file (e.g. calib/calib_scout.txt)")
     args = parser.parse_args()
@@ -277,6 +293,15 @@ if __name__ == '__main__':
     if args.mode != "sync":
         print(f"[Server] mode={args.mode} requested, but async path is not implemented yet. Falling back to sync.")
     SERVER_MODE = "sync"
+    SERVER_OPT_FLAGS = {
+        "kv_cache": bool(args.kv_cache),
+        "tensorrt": bool(args.tensorrt),
+        "quantization": bool(args.quantization),
+        "vision_cache": bool(args.vision_cache),
+        "methods": list(args.method),
+    }
+    if any([args.kv_cache, args.tensorrt, args.quantization, args.vision_cache, len(args.method) > 0]):
+        print(f"[Server] Optimization flags enabled (scaffold only): {SERVER_OPT_FLAGS}")
 
     calib = Calibration(args.calib)
     args.camera_intrinsic = np.array([

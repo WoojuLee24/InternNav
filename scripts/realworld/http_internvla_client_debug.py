@@ -46,6 +46,13 @@ last_pixel_goal = None
 last_s2_step = -1
 manager = None
 CLIENT_MODE = "sync"
+CLIENT_OPT_FLAGS = {
+    "kv_cache": False,
+    "tensorrt": False,
+    "quantization": False,
+    "vision_cache": False,
+    "methods": [],
+}
 current_control_mode = ControlMode.MPC_Mode
 trajs_in_world = None
 calib = None
@@ -63,7 +70,12 @@ def dual_sys_eval(image_bytes, depth_bytes, front_image_bytes, url='http://127.0
     if manager:
         manager.get_logger().debug(f"[HTTP] Preparing request. idx: {http_idx + 1}, reset: {policy_init}")
 
-    data = {"reset": policy_init, "idx": http_idx, "mode": CLIENT_MODE}
+    data = {
+        "reset": policy_init,
+        "idx": http_idx,
+        "mode": CLIENT_MODE,
+        "optimizations": CLIENT_OPT_FLAGS,
+    }
     json_data = json.dumps(data)
 
     policy_init = False
@@ -719,6 +731,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', type=str, default='sync', choices=['sync', 'async'],
                         help='Execution mode. async is scaffold-only for now.')
+    parser.add_argument('--kv-cache', action='store_true', help='Enable KV-cache optimization (scaffold flag).')
+    parser.add_argument('--tensorrt', action='store_true', help='Enable TensorRT optimization (scaffold flag).')
+    parser.add_argument('--quantization', action='store_true', help='Enable quantization optimization (scaffold flag).')
+    parser.add_argument('--vision-cache', action='store_true', help='Enable vision-cache optimization (scaffold flag).')
+    parser.add_argument('--method', action='append', default=[],
+                        help='Additional optimization method tag (repeatable, scaffold only).')
     parser.add_argument('--odom_topic', type=str, default='/gdq/msg/gdq_odom', help='ROS2 odometry topic name')
     parser.add_argument('--calib', type=str, default='/home/gdr/gd_vln/workspace/src/InternNav/scripts/realworld/calib/calib_scout.txt',
                         help='Path to calibration file (e.g. calib/calib_r64.txt)')
@@ -735,6 +753,15 @@ if __name__ == '__main__':
     if args.mode != 'sync':
         print(f"[Client] mode={args.mode} requested, but async path is not implemented yet. Falling back to sync.")
     CLIENT_MODE = 'sync'
+    CLIENT_OPT_FLAGS = {
+        "kv_cache": bool(args.kv_cache),
+        "tensorrt": bool(args.tensorrt),
+        "quantization": bool(args.quantization),
+        "vision_cache": bool(args.vision_cache),
+        "methods": list(args.method),
+    }
+    if any([args.kv_cache, args.tensorrt, args.quantization, args.vision_cache, len(args.method) > 0]):
+        print(f"[Client] Optimization flags enabled (scaffold only): {CLIENT_OPT_FLAGS}")
 
     calib = Calibration(args.calib)
 
