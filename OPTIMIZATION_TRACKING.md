@@ -52,7 +52,25 @@ Interpretation:
 - Guard was too strict for current timestamp alignment and prevented all inference requests.
 - Reverted immediately.
 
+## Module 3 attempt: telemetry thread in client (S1/S2/http counters)
+
+Status: rejected (behavior affected)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix24 | `my_camera_bag_20260310_035208` | 38 | 26 | 26 | 0.400 | 2.408 | 0 |
+| fix25 | `my_camera_bag_20260310_035611` | 38 | 26 | 26 | 0.400 | 2.392 | 0 |
+
+Additional measured telemetry (from injected metrics thread):
+- fix24: `s1_control_hz ~8.77`, `s2_plan_hz ~0.43`, `http_hz ~0.40`, `http_avg_ms ~2417`
+- fix25: `s1_control_hz ~8.74`, `s2_plan_hz ~0.53`, `http_hz ~0.40`, `http_avg_ms ~2388`
+
+Interpretation:
+- Even measurement-only thread changed runtime behavior and reduced trajectory responses vs baseline.
+- Reverted immediately to keep sync baseline healthy.
+
 ## Current accepted state
 
 - Keep behavior from `c97d22d8` (sync default with mode flags scaffold).
 - Rejected optimization attempts are reverted from code.
+- Guardrail remains strict: if trajectory quality drops, discard that method.
