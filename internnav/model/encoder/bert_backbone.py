@@ -3,7 +3,11 @@ from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
-from transformers.modeling_utils import apply_chunking_to_forward
+
+try:
+    from transformers.modeling_utils import apply_chunking_to_forward
+except ImportError:
+    from transformers.pytorch_utils import apply_chunking_to_forward
 
 
 def gelu(x):

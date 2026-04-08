@@ -79,6 +79,13 @@ def dual_sys_eval(image_bytes, depth_bytes, front_image_bytes, url='http://127.0
             manager.get_logger().error(f"[HTTP] Request Failed: {e}")
         return {}
 
+    if response.status_code != 200:
+        if manager:
+            manager.get_logger().error(
+                f"[HTTP] Bad status {response.status_code}. Body: {response.text[:200]}"
+            )
+        return {"status": "waiting"}
+
     # [LOG] 응답 확인 (print 대체)
     if manager:
         # 응답 내용은 너무 길 수 있으니 debug 레벨로, 상태 코드는 info로
@@ -93,7 +100,12 @@ def dual_sys_eval(image_bytes, depth_bytes, front_image_bytes, url='http://127.0
     if manager:
         manager.get_logger().info(f"[HTTP] idx: {http_idx} | Latency: {latency:.4f}s")
 
-    return json.loads(response.text)
+    try:
+        return response.json()
+    except ValueError:
+        if manager:
+            manager.get_logger().error(f"[HTTP] Invalid JSON response: {response.text[:200]}")
+        return {"status": "waiting"}
 
 
 def control_thread():

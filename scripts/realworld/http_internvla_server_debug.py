@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import threading
 import time
 from datetime import datetime
 import sys
@@ -29,91 +30,99 @@ start_time = time.time()
 output_dir = ''
 save_dir = 'vis_debug/http_internvla_server_debug'
 os.makedirs(save_dir, exist_ok=True)
+agent_lock = threading.Lock()
 
 
 @app.route("/eval_dual", methods=['POST'])
 def eval_dual():
     global idx, output_dir, start_time
-    start_time = time.time()
-
-    image_file = request.files['image']
-    depth_file = request.files['depth']
-    json_data = request.form['json']
-    data = json.loads(json_data)
-
-    image = Image.open(image_file.stream)
-    image = image.convert('RGB')
-    image = np.asarray(image)
-
-    depth = Image.open(depth_file.stream)
-    depth = depth.convert('I')
-    depth = np.asarray(depth)
-    depth = depth.astype(np.float32) / 10000.0
-    print(f"read http data cost {time.time() - start_time}")
-
-    camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
-    #instruction = "Turn around and walk out of this office. Turn towards your slight right at the chair. Move forward to the walkway and go near the red bin. You can see an open door on your right side, go inside the open door. Stop at the computer monitor"
-    #instruction = "Turn around and walk out of this office. Turn towards your slight right at the chair. Move forward to the walkway and go near the red bin. You can see an open door on your right side, go inside the open door. Stop at the computer monitor"
-    # instruction = "Stop. Just stop. Move forward one step. Move forward two step. Turn right and stop."
-    # instruction = "Go straight along the walkway and turn right at the crosswalk. Go straight to the end of the crosswalk and stop."
-    # instruction = "Go straight along the walkway until you see a crosswalk. Go straight again until you see a second crosswalk. Turn right at the second crosswalk and go straight to the end of the crosswalk. Stop at the end of the crosswalk."
-    instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
-    policy_init = data['reset']
-    if policy_init:
+    try:
         start_time = time.time()
-        idx = 0
-        output_dir = 'output/runs' + datetime.now().strftime('%m-%d-%H%M')
-        os.makedirs(output_dir, exist_ok=True)
-        print("init reset model!!!")
-        agent.reset()
 
-    idx += 1
+        image_file = request.files['image']
+        depth_file = request.files['depth']
+        json_data = request.form['json']
+        data = json.loads(json_data)
 
-    look_down = False
-    t0 = time.time()
-    dual_sys_output = {}
+        image = Image.open(image_file.stream)
+        image = image.convert('RGB')
+        image = np.asarray(image)
 
-    dual_sys_output = agent.step(
-        image, depth, camera_pose, instruction, intrinsic=args.camera_intrinsic, look_down=look_down
-    )
-    if dual_sys_output.output_action is not None and dual_sys_output.output_action == [5]:
-        look_down = True
-        dual_sys_output = agent.step(
-            image, depth, camera_pose, instruction, intrinsic=args.camera_intrinsic, look_down=look_down
-        )
+        depth = Image.open(depth_file.stream)
+        depth = depth.convert('I')
+        depth = np.asarray(depth)
+        depth = depth.astype(np.float32) / 10000.0
+        print(f"read http data cost {time.time() - start_time}")
 
-    t1 = time.time()
-    generate_time = t1 - t0
-    print(f"dual sys step time: {generate_time}")
-    
-    # 서버의 라우트 함수 내부
-    json_data = request.form['json']
-    data = json.loads(json_data)
+        camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+        #instruction = "Turn around and walk out of this office. Turn towards your slight right at the chair. Move forward to the walkway and go near the red bin. You can see an open door on your right side, go inside the open door. Stop at the computer monitor"
+        #instruction = "Turn around and walk out of this office. Turn towards your slight right at the chair. Move forward to the walkway and go near the red bin. You can see an open door on your right side, go inside the open door. Stop at the computer monitor"
+        # instruction = "Stop. Just stop. Move forward one step. Move forward two step. Turn right and stop."
+        # instruction = "Go straight along the walkway and turn right at the crosswalk. Go straight to the end of the crosswalk and stop."
+        # instruction = "Go straight along the walkway until you see a crosswalk. Go straight again until you see a second crosswalk. Turn right at the second crosswalk and go straight to the end of the crosswalk. Stop at the end of the crosswalk."
+        instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
+        policy_init = data['reset']
+        if policy_init:
+            start_time = time.time()
+            idx = 0
+            output_dir = 'output/runs' + datetime.now().strftime('%m-%d-%H%M')
+            os.makedirs(output_dir, exist_ok=True)
+            print("init reset model!!!")
+            with agent_lock:
+                agent.reset()
 
-    # 클라이언트에서 보낸 idx 추출
-    image_id = data.get('idx', 0) 
-    filename = f"frame_{image_id:05d}"  # 예: frame_00001.jpg
+        idx += 1
 
-    # image_id = int(time.time() * 1000) 
-    # filename = f"rec_{image_id}.jpg"
+        look_down = False
+        t0 = time.time()
+        dual_sys_output = {}
 
-    json_output = {}
-    if dual_sys_output.output_action is not None:
-        json_output['discrete_action'] = dual_sys_output.output_action
-        # annotate_image(image_id, image, agent.llm_output, dual_sys_output.output_trajectory, dual_sys_output.output_pixel, save_dir, filename)
+        with agent_lock:
+            dual_sys_output = agent.step(
+                image, depth, camera_pose, instruction, intrinsic=args.camera_intrinsic, look_down=look_down
+            )
+            if dual_sys_output.output_action is not None and dual_sys_output.output_action == [5]:
+                look_down = True
+                dual_sys_output = agent.step(
+                    image, depth, camera_pose, instruction, intrinsic=args.camera_intrinsic, look_down=look_down
+                )
 
-    else:
-        json_output['trajectory'] = dual_sys_output.output_trajectory.tolist()
-        if dual_sys_output.output_pixel is not None:
-            json_output['pixel_goal'] = dual_sys_output.output_pixel
-            # annotate_image(image_id, image, 'traj', dual_sys_output.output_trajectory.tolist(), dual_sys_output.output_pixel, save_dir, filename)
+        t1 = time.time()
+        generate_time = t1 - t0
+        print(f"dual sys step time: {generate_time}")
+
+        # 서버의 라우트 함수 내부
+        json_data = request.form['json']
+        data = json.loads(json_data)
+
+        # 클라이언트에서 보낸 idx 추출
+        image_id = data.get('idx', 0)
+        filename = f"frame_{image_id:05d}"  # 예: frame_00001.jpg
+
+        # image_id = int(time.time() * 1000)
+        # filename = f"rec_{image_id}.jpg"
+
+        json_output = {}
+        if dual_sys_output.output_action is not None:
+            json_output['discrete_action'] = dual_sys_output.output_action
+            # annotate_image(image_id, image, agent.llm_output, dual_sys_output.output_trajectory, dual_sys_output.output_pixel, save_dir, filename)
+
+        elif dual_sys_output.output_trajectory is not None:
+            json_output['trajectory'] = dual_sys_output.output_trajectory.tolist()
+            if dual_sys_output.output_pixel is not None:
+                json_output['pixel_goal'] = dual_sys_output.output_pixel
+                # annotate_image(image_id, image, 'traj', dual_sys_output.output_trajectory.tolist(), dual_sys_output.output_pixel, save_dir, filename)
+            else:
+                # annotate_image(image_id, image, 'traj_cached_latent', dual_sys_output.output_trajectory.tolist(), dual_sys_output.output_pixel, save_dir, filename)
+                pass
         else:
-            # annotate_image(image_id, image, 'traj_cached_latent', dual_sys_output.output_trajectory.tolist(), dual_sys_output.output_pixel, save_dir, filename)
-            pass
-        
+            json_output['status'] = 'waiting'
 
-    # print(f"json_output {json_output}")
-    return jsonify(json_output)
+        # print(f"json_output {json_output}")
+        return jsonify(json_output)
+    except Exception as e:
+        print(f"[Server] eval_dual exception: {repr(e)}")
+        return jsonify({'status': 'waiting', 'error': str(e)})
 
 
 
@@ -280,14 +289,15 @@ if __name__ == '__main__':
     #     "hello",
     #     args.camera_intrinsic,
     # )
-    # Patch: type error fix for first call
-    agent.step(
-        np.zeros((480, 640, 3), dtype=np.uint8),
-        np.zeros((480, 640)),
-        np.eye(4),
-        "hello",
-        args.camera_intrinsic,
-    )
-    agent.reset()
+    # Warmup can trigger CUDA asserts on some checkpoints/runtime combos; skip by default.
+    if os.environ.get("INTERNNAV_SERVER_WARMUP", "0") == "1":
+        agent.step(
+            np.zeros((480, 640, 3), dtype=np.uint8),
+            np.zeros((480, 640)),
+            np.eye(4),
+            "hello",
+            args.camera_intrinsic,
+        )
+        agent.reset()
 
     app.run(host='0.0.0.0', port=5802)

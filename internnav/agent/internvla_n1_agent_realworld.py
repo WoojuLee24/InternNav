@@ -40,7 +40,7 @@ class InternVLAN1AsyncAgent:
         self.model.eval()
         self.model.to(self.device)
 
-        self.processor = AutoProcessor.from_pretrained(args.model_path)
+        self.processor = AutoProcessor.from_pretrained(args.model_path, use_fast=False)
         self.processor.tokenizer.padding_side = 'left'
 
         self.resize_w = args.resize_w
@@ -226,7 +226,32 @@ class InternVLAN1AsyncAgent:
 
         text = self.processor.apply_chat_template(self.conversation_history, tokenize=False, add_generation_prompt=True)
 
-        inputs = self.processor(text=[text], images=self.input_images, return_tensors="pt").to(self.device)
+        proc_images = self.input_images
+        for _ in range(2):
+            try:
+                inputs = self.processor(text=[text], images=proc_images, return_tensors="pt")
+                break
+            except IndexError as e:
+                if "image_grid_thw" not in str(e) or len(proc_images) <= 1:
+                    raise
+                proc_images = proc_images[:-1]
+                print(f"[System 2] Processor image mismatch; retry with {len(proc_images)} images")
+        else:
+            inputs = self.processor(text=[text], images=proc_images, return_tensors="pt")
+        vocab_size = getattr(self.model.config, "vocab_size", None)
+        if vocab_size is None and getattr(self.model.config, "text_config", None) is not None:
+            vocab_size = getattr(self.model.config.text_config, "vocab_size", None)
+        if vocab_size is not None and hasattr(inputs, "input_ids"):
+            input_ids = inputs.input_ids
+            invalid_mask = (input_ids < 0) | (input_ids >= vocab_size)
+            if invalid_mask.any():
+                eos_id = int(getattr(self.model.config, "eos_token_id", 0) or 0)
+                bad_count = int(invalid_mask.sum().item())
+                print(f"[System 2] Found {bad_count} invalid token ids; replacing with eos={eos_id}")
+                input_ids = input_ids.clone()
+                input_ids[invalid_mask] = eos_id
+                inputs["input_ids"] = input_ids
+        inputs = inputs.to(self.device)
         t0 = time.time()
         with torch.no_grad():
             outputs = self.model.generate(
@@ -251,6 +276,9 @@ class InternVLAN1AsyncAgent:
         print(f"output {self.episode_idx}  {self.llm_output} cost: {t1 - t0}s")
         if bool(re.search(r'\d', self.llm_output)):
             coord = [int(c) for c in re.findall(r'\d+', self.llm_output)]
+            if len(coord) < 2:
+                action_seq = self.parse_actions(self.llm_output)
+                return action_seq, None, None
             pixel_goal = [int(coord[1]), int(coord[0])]
             image_grid_thw = torch.cat([thw.unsqueeze(0) for thw in inputs.image_grid_thw], dim=0)
             pixel_values = inputs.pixel_values

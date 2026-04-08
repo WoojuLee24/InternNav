@@ -119,10 +119,23 @@ class QFormer(nn.Module):
 
 
 class InternVLAN1MetaModel:
+    @staticmethod
+    def _resolve_hidden_size(config):
+        hidden_size = getattr(config, "hidden_size", None)
+        if hidden_size is not None:
+            return hidden_size
+        text_cfg = getattr(config, "text_config", None)
+        if text_cfg is not None:
+            text_hidden = getattr(text_cfg, "hidden_size", None)
+            if text_hidden is not None:
+                return text_hidden
+        raise AttributeError("InternVLAN1 config missing hidden_size/text_config.hidden_size")
+
     def __init__(self, config):
         super(InternVLAN1MetaModel, self).__init__(config)
         if hasattr(config, "system1"):
-            self.latent_queries = nn.Parameter(torch.randn(1, config.n_query, config.hidden_size))
+            hidden_size = self._resolve_hidden_size(config)
+            self.latent_queries = nn.Parameter(torch.randn(1, config.n_query, hidden_size))
 
             if 'nextdit' in config.system1:
                 self.traj_dit, self.noise_scheduler = build_traj_dit(config)
@@ -169,7 +182,8 @@ class InternVLAN1MetaModel:
         self.config.n_query = model_args.n_query
         if getattr(self, 'latent_queries', None) is None:
             print("random initiation the latent_queries !!!")
-            self.latent_queries = nn.Parameter(torch.randn(1, self.config.n_query, self.config.hidden_size))
+            hidden_size = self._resolve_hidden_size(self.config)
+            self.latent_queries = nn.Parameter(torch.randn(1, self.config.n_query, hidden_size))
 
 
 class InternVLAN1MetaForCausalLM(ABC):
