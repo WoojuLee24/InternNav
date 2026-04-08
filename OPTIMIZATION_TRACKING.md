@@ -96,6 +96,32 @@ Interpretation:
 - Slight request-rate improvement with no server errors/failures.
 - Kept as safe optimization.
 
+## Module 6 attempt: add latest-request coalescing endpoint scaffold (`/eval_dual_latest`)
+
+Status: rejected (sync metrics not consistently improved)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix30 | `my_camera_bag_20260310_035208` | 46 | 18 | 18 | 0.414 | 2.385 | 0 |
+| fix31 | `my_camera_bag_20260310_035611` | 44 | 19 | 20 | 0.414 | 2.413 | 0 |
+
+Interpretation:
+- No transport/server failures, but no robust trajectory gain.
+- Added complexity without clear sync benefit, so rejected for now.
+
+## Module 7 attempt: reduce debug log emission around per-request path
+
+Status: rejected (bag-to-bag inconsistency)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix32 | `my_camera_bag_20260310_035208` | 60 | 4 | 4 | 0.417 | 2.410 | 0 |
+| fix33 | `my_camera_bag_20260310_035611` | 40 | 24 | 24 | 0.418 | 2.405 | 0 |
+
+Interpretation:
+- One bag improved a lot, the other degraded notably.
+- Not robust across both benchmark bags, so rejected.
+
 ## Current accepted state
 
 - Keep behavior from `c97d22d8` + accepted module 5 optimization.
