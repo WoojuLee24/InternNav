@@ -219,10 +219,57 @@ Interpretation:
 - Best current tradeoff among tested sync settings.
 - Keep as optional flag configuration for further real-world validation.
 
+## Module 13 attempt: promote accepted setting to default (`--num_history 1` default)
+
+Status: accepted
+
+Validation runs with new default path:
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix52 | `my_camera_bag_20260310_035208` | 82 | 11 | 19 | 0.649 | 1.502 | 0 |
+| fix53 | `my_camera_bag_20260310_035611` | 88 | 6 | 11 | 0.628 | 1.543 | 0 |
+
+Interpretation:
+- Default now reflects accepted optimization and remains stable.
+
+## Module 14 attempt: increase S2 step gap (`--plan_step_gap 8`)
+
+Status: accepted
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix54 | `my_camera_bag_20260310_035208` | 113 | 2 | 3 | 0.749 | 1.279 | 0 |
+| fix55 | `my_camera_bag_20260310_035611` | 112 | 3 | 6 | 0.753 | 1.285 | 0 |
+
+Interpretation:
+- Significant speed gain and improved trajectory behavior on both bags.
+
+## Module 15 attempt: increase S2 step gap further (`--plan_step_gap 12`)
+
+Status: accepted (best current speed-quality point)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix56 | `my_camera_bag_20260310_035208` | 125 | 4 | 4 | 0.836 | 1.150 | 0 |
+| fix57 | `my_camera_bag_20260310_035611` | 126 | 2 | 3 | 0.844 | 1.153 | 0 |
+
+Interpretation:
+- Strongest speed increase so far with excellent trajectory behavior.
+- Promoted to default while still overrideable via flag.
+
+## Speed/quality trend snapshot (selected checkpoints)
+
+| Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
+|---|---|---:|---:|---:|
+| Early stable baseline | fix46/fix47 | 0.410–0.411 | 2.402–2.447 | 45–53 |
+| History tuned | fix50/fix51 | 0.610–0.613 | 1.591–1.603 | 90–90 |
+| Gap tuned (best) | fix56/fix57 | 0.836–0.844 | 1.150–1.153 | 125–126 |
+
 ## Current accepted state
 
 - Keep behavior from `c97d22d8` + accepted module 5 optimization.
 - Keep behavior from `c97d22d8` + accepted module 5 optimization + accepted module 8 flag scaffold.
-- Accepted tuning options so far: `--num_history 2` and `--num_history 1`.
+- Accepted tuning options so far: `--num_history 2`, `--num_history 1`, `--plan_step_gap 8`, `--plan_step_gap 12`.
 - Rejected optimization attempts are reverted from code.
 - Guardrail remains strict: if trajectory quality drops, discard that method.

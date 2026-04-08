@@ -276,8 +276,8 @@ if __name__ == '__main__':
     parser.add_argument("--model_path", type=str, default="checkpoints/InternVLA-N1-w-NavDP")
     parser.add_argument("--resize_w", type=int, default=384)
     parser.add_argument("--resize_h", type=int, default=384)
-    parser.add_argument("--num_history", type=int, default=8)
-    parser.add_argument("--plan_step_gap", type=int, default=4)
+    parser.add_argument("--num_history", type=int, default=1)
+    parser.add_argument("--plan_step_gap", type=int, default=12)
     parser.add_argument("--mode", type=str, default="sync", choices=["sync", "async"],
                         help="Execution mode. async is scaffold-only for now.")
     parser.add_argument("--kv-cache", action="store_true", help="Enable KV-cache optimization (scaffold flag).")
