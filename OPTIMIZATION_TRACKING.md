@@ -258,6 +258,19 @@ Interpretation:
 - Strongest speed increase so far with excellent trajectory behavior.
 - Promoted to default while still overrideable via flag.
 
+## Module 16 attempt: aggressive step gap (`--plan_step_gap 16`)
+
+Status: accepted as optional profile (not default)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix58 | `my_camera_bag_20260310_035208` | 138 | 1 | 1 | 0.900 | 1.068 | 0 |
+| fix59 | `my_camera_bag_20260310_035611` | 120 | 12 | 23 | 0.914 | 1.038 | 0 |
+
+Interpretation:
+- Fastest throughput/latency so far.
+- Second bag shows more discrete/no-traj events than module 15, so this is better as an aggressive optional profile for further real-world validation.
+
 ## Speed/quality trend snapshot (selected checkpoints)
 
 | Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
@@ -265,11 +278,13 @@ Interpretation:
 | Early stable baseline | fix46/fix47 | 0.410–0.411 | 2.402–2.447 | 45–53 |
 | History tuned | fix50/fix51 | 0.610–0.613 | 1.591–1.603 | 90–90 |
 | Gap tuned (best) | fix56/fix57 | 0.836–0.844 | 1.150–1.153 | 125–126 |
+| Gap tuned (aggressive) | fix58/fix59 | 0.900–0.914 | 1.038–1.068 | 120–138 |
 
 ## Current accepted state
 
 - Keep behavior from `c97d22d8` + accepted module 5 optimization.
 - Keep behavior from `c97d22d8` + accepted module 5 optimization + accepted module 8 flag scaffold.
 - Accepted tuning options so far: `--num_history 2`, `--num_history 1`, `--plan_step_gap 8`, `--plan_step_gap 12`.
+- Accepted optional aggressive profile: `--plan_step_gap 16`.
 - Rejected optimization attempts are reverted from code.
 - Guardrail remains strict: if trajectory quality drops, discard that method.
