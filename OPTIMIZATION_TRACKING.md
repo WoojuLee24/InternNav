@@ -147,6 +147,42 @@ Interpretation:
 - Scaffold is functional (flags observed in server logs) and does not introduce transport/runtime failures.
 - Kept to enable controlled future A/B testing with explicit flags.
 
+## Module 9 attempt: KV-cache + reduced max tokens (`--kv-cache --max-new-tokens 64`)
+
+Status: rejected
+
+Before (post-module8 baseline):
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix42 | `my_camera_bag_20260310_035208` | 62 | 2 | 2 | 0.418 | 2.403 | 0 |
+| fix43 | `my_camera_bag_20260310_035611` | 54 | 10 | 10 | 0.419 | 2.404 | 0 |
+
+After:
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix44 | `my_camera_bag_20260310_035208` | 59 | 4 | 4 | 0.412 | 2.443 | 0 |
+| fix45 | `my_camera_bag_20260310_035611` | 44 | 20 | 20 | 0.419 | 2.407 | 0 |
+
+Interpretation:
+- No meaningful speed gain.
+- Trajectory quality degraded on both bags (especially second bag).
+- Rejected.
+
+## Module 10 attempt: reduced max tokens only (`--max-new-tokens 64`)
+
+Status: rejected (severe regression)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix40 | `my_camera_bag_20260310_035208` | 20 | 2 | 2 | 0.167 | 6.706 | 0 |
+| fix41 | `my_camera_bag_20260310_035611` | 20 | 7 | 7 | 0.184 | 5.631 | 0 |
+
+Interpretation:
+- Major slowdown and trajectory collapse.
+- Rejected immediately.
+
 ## Current accepted state
 
 - Keep behavior from `c97d22d8` + accepted module 5 optimization.
