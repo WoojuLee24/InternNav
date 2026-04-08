@@ -283,6 +283,10 @@ if __name__ == '__main__':
     parser.add_argument("--kv-cache", action="store_true", help="Enable KV-cache optimization (scaffold flag).")
     parser.add_argument("--tensorrt", action="store_true", help="Enable TensorRT optimization (scaffold flag).")
     parser.add_argument("--quantization", action="store_true", help="Enable quantization optimization (scaffold flag).")
+    parser.add_argument("--quant-method", type=str, default="dynamic", choices=["dynamic", "static", "qat"],
+                        help="Quantization method (safe mode currently supports dynamic CPU fallback).")
+    parser.add_argument("--tensorrt-engine", type=str, default="",
+                        help="Path to TensorRT engine (optional, safe fallback if unavailable).")
     parser.add_argument("--vision-cache", action="store_true", help="Enable vision-cache optimization (scaffold flag).")
     parser.add_argument("--max-new-tokens", type=int, default=128,
                         help="Max new tokens for language generation.")
@@ -299,6 +303,8 @@ if __name__ == '__main__':
         "kv_cache": bool(args.kv_cache),
         "tensorrt": bool(args.tensorrt),
         "quantization": bool(args.quantization),
+        "quant_method": str(args.quant_method),
+        "tensorrt_engine": str(args.tensorrt_engine),
         "vision_cache": bool(args.vision_cache),
         "methods": list(args.method),
     }

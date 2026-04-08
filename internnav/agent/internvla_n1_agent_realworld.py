@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn as nn
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 ROOT = Path(__file__).resolve().parents[2]
@@ -49,6 +50,12 @@ class InternVLAN1AsyncAgent:
         self.PLAN_STEP_GAP = args.plan_step_gap
         self.use_kv_cache = bool(getattr(args, 'kv_cache', False))
         self.max_new_tokens = int(getattr(args, 'max_new_tokens', 128))
+        self.use_tensorrt = bool(getattr(args, 'tensorrt', False))
+        self.use_quantization = bool(getattr(args, 'quantization', False))
+        self.quant_method = str(getattr(args, 'quant_method', 'dynamic'))
+        self.tensorrt_engine = getattr(args, 'tensorrt_engine', None)
+
+        self._init_safe_acceleration_modes()
 
         prompt = "You are an autonomous navigation assistant. Your task is to <instruction>. Where should you go next to stay on track? Please output the next waypoint's coordinates in the image. Please output STOP when you have successfully completed the task."
         answer = ""
@@ -88,6 +95,37 @@ class InternVLAN1AsyncAgent:
         self.output_pixel = None
         self.pixel_goal_rgb = None
         self.pixel_goal_depth = None
+
+    def _init_safe_acceleration_modes(self):
+        if self.use_tensorrt:
+            try:
+                import tensorrt  # noqa: F401
+                if self.tensorrt_engine and os.path.exists(self.tensorrt_engine):
+                    print(f"[TensorRT] Engine path configured: {self.tensorrt_engine} (integration pending)")
+                else:
+                    print("[TensorRT] Enabled but no valid engine path provided; fallback to PyTorch")
+            except Exception:
+                print("[TensorRT] Not available in runtime; fallback to PyTorch")
+
+        if self.use_quantization:
+            if self.device.type == 'cuda':
+                print("[Quantization] CUDA runtime detected; skip quantization to preserve behavior")
+                return
+
+            if self.quant_method != 'dynamic':
+                print(f"[Quantization] Unsupported method '{self.quant_method}' in safe mode; skip")
+                return
+
+            try:
+                self.model = torch.quantization.quantize_dynamic(
+                    self.model,
+                    {nn.Linear},
+                    dtype=torch.qint8,
+                )
+                self.model.eval()
+                print("[Quantization] Applied dynamic INT8 quantization (CPU mode)")
+            except Exception as e:
+                print(f"[Quantization] Failed to apply dynamic quantization: {repr(e)}")
 
     def reset(self):
         self.rgb_list = []

@@ -362,6 +362,53 @@ Interpretation:
 - Throughput rises strongly, but trajectory quality collapses.
 - Keep flag for optional demonstrations only; rejected for real navigation baseline.
 
+## Module 23 attempt: safe TensorRT flag path (`--tensorrt`, fallback-only)
+
+Status: accepted as experimental flag path (no TRT engine integration yet)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix74 | `my_camera_bag_20260310_035208` | 134 | 2 | 2 | 0.872 | 1.101 | 0 |
+| fix75 | `my_camera_bag_20260310_035611` | 130 | 6 | 10 | 0.887 | 1.072 | 0 |
+
+Runtime observation:
+- TensorRT package exists in runtime, but no engine path provided in current setup.
+- Safe fallback path is active (`fallback to PyTorch`) and stable.
+
+Interpretation:
+- Keep as safe experiment flag path.
+- Not counted as real TensorRT acceleration yet.
+
+## Module 24 attempt: safe quantization flag path (`--quantization --quant-method dynamic`)
+
+Status: accepted as experimental flag path (CUDA-safe skip)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix76 | `my_camera_bag_20260310_035208` | 90 | 31 | 76 | 1.052 | 0.893 | 0 |
+| fix77 | `my_camera_bag_20260310_035611` | 128 | 11 | 17 | 0.918 | 1.033 | 0 |
+
+Runtime observation:
+- CUDA-safe guard triggers (`CUDA runtime detected; skip quantization`).
+- Results are variable across bags; no actual INT8 acceleration applied yet.
+
+Interpretation:
+- Keep as safe experiment flag path.
+- Not counted as real quantization acceleration yet.
+
+## Module 25 attempt: lower S2 gap (`--plan_step_gap 10`) with accepted defaults
+
+Status: rejected
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix78 | `my_camera_bag_20260310_035208` | 36 | 55 | 158 | 1.231 | 0.755 | 0 |
+| fix79 | `my_camera_bag_20260310_035611` | 64 | 44 | 113 | 1.122 | 0.834 | 0 |
+
+Interpretation:
+- Speed increases strongly but trajectory behavior collapses.
+- Rejected.
+
 ## Speed/quality trend snapshot (selected checkpoints)
 
 | Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
@@ -373,6 +420,7 @@ Interpretation:
 | Resolution tuned (accepted) | fix64/fix65 | 0.874–0.890 | 1.068–1.087 | 129–133 |
 | Resolution tuned (too aggressive) | fix66/fix67 | 0.975–1.020 | 0.921–0.967 | 109–122 |
 | Over-aggressive combos | fix68–fix73 | 1.137–1.258 | 0.741–0.824 | 33–78 |
+| Low-gap revisit (rejected) | fix78/fix79 | 1.122–1.231 | 0.755–0.834 | 36–64 |
 
 ## Current accepted state
 
@@ -384,5 +432,6 @@ Interpretation:
 - Rejected but available for optional tests: `--resize_w 224 --resize_h 224`.
 - Rejected but available for optional tests: `--plan_step_gap 14/16` with resize256 combo, `--kv-cache`.
 - `--vision-cache` remains available as experimental flag but current implementation is rejected.
+- `--tensorrt` and `--quantization` are available and safe, but currently fallback/skip paths (no real backend acceleration integrated yet).
 - Rejected optimization attempts are reverted from code.
 - Guardrail remains strict: if trajectory quality drops, discard that method.
