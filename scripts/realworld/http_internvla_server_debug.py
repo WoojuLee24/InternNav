@@ -31,6 +31,7 @@ output_dir = ''
 save_dir = 'vis_debug/http_internvla_server_debug'
 os.makedirs(save_dir, exist_ok=True)
 agent_lock = threading.Lock()
+SERVER_MODE = "sync"
 
 
 @app.route("/eval_dual", methods=['POST'])
@@ -62,6 +63,9 @@ def eval_dual():
         # instruction = "Go straight along the walkway until you see a crosswalk. Go straight again until you see a second crosswalk. Turn right at the second crosswalk and go straight to the end of the crosswalk. Stop at the end of the crosswalk."
         instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
         policy_init = data['reset']
+        req_mode = data.get('mode', SERVER_MODE)
+        if req_mode != 'sync':
+            print(f"[Server] Requested mode '{req_mode}' not implemented yet; using sync")
         if policy_init:
             start_time = time.time()
             idx = 0
@@ -268,9 +272,15 @@ if __name__ == '__main__':
     parser.add_argument("--resize_h", type=int, default=384)
     parser.add_argument("--num_history", type=int, default=8)
     parser.add_argument("--plan_step_gap", type=int, default=4)
+    parser.add_argument("--mode", type=str, default="sync", choices=["sync", "async"],
+                        help="Execution mode. async is scaffold-only for now.")
     parser.add_argument("--calib", type=str, default="/home/gdr/gd_vln/workspace/src/InternNav/scripts/realworld/calib/calib_scout.txt",
                         help="Path to calibration file (e.g. calib/calib_scout.txt)")
     args = parser.parse_args()
+
+    if args.mode != "sync":
+        print(f"[Server] mode={args.mode} requested, but async path is not implemented yet. Falling back to sync.")
+    SERVER_MODE = "sync"
 
     calib = Calibration(args.calib)
     args.camera_intrinsic = np.array([

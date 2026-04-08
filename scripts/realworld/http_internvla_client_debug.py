@@ -45,6 +45,7 @@ first_running_time = 0.0
 last_pixel_goal = None
 last_s2_step = -1
 manager = None
+CLIENT_MODE = "sync"
 current_control_mode = ControlMode.MPC_Mode
 trajs_in_world = None
 calib = None
@@ -62,7 +63,7 @@ def dual_sys_eval(image_bytes, depth_bytes, front_image_bytes, url='http://127.0
     if manager:
         manager.get_logger().debug(f"[HTTP] Preparing request. idx: {http_idx + 1}, reset: {policy_init}")
 
-    data = {"reset": policy_init, "idx": http_idx}
+    data = {"reset": policy_init, "idx": http_idx, "mode": CLIENT_MODE}
     json_data = json.dumps(data)
 
     policy_init = False
@@ -716,6 +717,8 @@ class Go2Manager(Node):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--mode', type=str, default='sync', choices=['sync', 'async'],
+                        help='Execution mode. async is scaffold-only for now.')
     parser.add_argument('--odom_topic', type=str, default='/gdq/msg/gdq_odom', help='ROS2 odometry topic name')
     parser.add_argument('--calib', type=str, default='/home/gdr/gd_vln/workspace/src/InternNav/scripts/realworld/calib/calib_scout.txt',
                         help='Path to calibration file (e.g. calib/calib_r64.txt)')
@@ -728,6 +731,10 @@ if __name__ == '__main__':
     parser.add_argument('--subgoal_radius', type=float, default=0.3,
                         help='Subgoal marker sphere radius in meters (default: 0.3)')
     args = parser.parse_args()
+
+    if args.mode != 'sync':
+        print(f"[Client] mode={args.mode} requested, but async path is not implemented yet. Falling back to sync.")
+    CLIENT_MODE = 'sync'
 
     calib = Calibration(args.calib)
 
