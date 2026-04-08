@@ -323,6 +323,45 @@ Interpretation:
 - Speed improved further, but quality shifted too much into discrete/no-traj behavior.
 - Rejected as default; keep as optional experimental profile only.
 
+## Module 20 attempt: combine aggressive gap + accepted resize (`--plan_step_gap 16`, `--resize 256`)
+
+Status: rejected
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix68 | `my_camera_bag_20260310_035208` | 72 | 39 | 110 | 1.158 | 0.805 | 0 |
+| fix69 | `my_camera_bag_20260310_035611` | 78 | 36 | 101 | 1.137 | 0.822 | 0 |
+
+Interpretation:
+- Very high throughput, but severe behavior degradation (large shift to discrete/no-traj).
+- Rejected.
+
+## Module 21 attempt: intermediate gap + accepted resize (`--plan_step_gap 14`, `--resize 256`)
+
+Status: rejected
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix70 | `my_camera_bag_20260310_035208` | 69 | 40 | 110 | 1.144 | 0.824 | 0 |
+| fix71 | `my_camera_bag_20260310_035611` | 67 | 40 | 112 | 1.146 | 0.822 | 0 |
+
+Interpretation:
+- Similar degradation pattern as module 20.
+- Rejected.
+
+## Module 22 attempt: KV-cache with current accepted defaults (`--kv-cache`)
+
+Status: rejected
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix72 | `my_camera_bag_20260310_035208` | 51 | 47 | 136 | 1.193 | 0.780 | 0 |
+| fix73 | `my_camera_bag_20260310_035611` | 33 | 57 | 164 | 1.258 | 0.741 | 0 |
+
+Interpretation:
+- Throughput rises strongly, but trajectory quality collapses.
+- Keep flag for optional demonstrations only; rejected for real navigation baseline.
+
 ## Speed/quality trend snapshot (selected checkpoints)
 
 | Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
@@ -333,6 +372,7 @@ Interpretation:
 | Gap tuned (aggressive) | fix58/fix59 | 0.900–0.914 | 1.038–1.068 | 120–138 |
 | Resolution tuned (accepted) | fix64/fix65 | 0.874–0.890 | 1.068–1.087 | 129–133 |
 | Resolution tuned (too aggressive) | fix66/fix67 | 0.975–1.020 | 0.921–0.967 | 109–122 |
+| Over-aggressive combos | fix68–fix73 | 1.137–1.258 | 0.741–0.824 | 33–78 |
 
 ## Current accepted state
 
@@ -342,6 +382,7 @@ Interpretation:
 - Accepted optional aggressive profile: `--plan_step_gap 16`.
 - Accepted resolution tuning: `--resize_w 256 --resize_h 256` (default).
 - Rejected but available for optional tests: `--resize_w 224 --resize_h 224`.
+- Rejected but available for optional tests: `--plan_step_gap 14/16` with resize256 combo, `--kv-cache`.
 - `--vision-cache` remains available as experimental flag but current implementation is rejected.
 - Rejected optimization attempts are reverted from code.
 - Guardrail remains strict: if trajectory quality drops, discard that method.
