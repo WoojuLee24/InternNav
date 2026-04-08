@@ -95,10 +95,6 @@ def eval_dual():
         generate_time = t1 - t0
         print(f"dual sys step time: {generate_time}")
 
-        # 서버의 라우트 함수 내부
-        json_data = request.form['json']
-        data = json.loads(json_data)
-
         # 클라이언트에서 보낸 idx 추출
         image_id = data.get('idx', 0)
         filename = f"frame_{image_id:05d}"  # 예: frame_00001.jpg

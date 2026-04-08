@@ -69,8 +69,35 @@ Interpretation:
 - Even measurement-only thread changed runtime behavior and reduced trajectory responses vs baseline.
 - Reverted immediately to keep sync baseline healthy.
 
+## Module 4 attempt: remove unused `frame_data` deep-copy cache in planning loop
+
+Status: mixed (not accepted)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix26 | `my_camera_bag_20260310_035208` | 48 | 17 | 17 | 0.414 | 2.371 | 0 |
+| fix27 | `my_camera_bag_20260310_035611` | 36 | 26 | 26 | 0.413 | 2.446 | 0 |
+
+Interpretation:
+- One bag improved, one bag degraded notably in trajectory count.
+- Not robust across both rosbags, so not accepted.
+
+## Module 5 attempt: remove duplicate JSON parsing in server route
+
+Status: accepted
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix28 | `my_camera_bag_20260310_035208` | 50 | 13 | 13 | 0.420 | 2.403 | 0 |
+| fix29 | `my_camera_bag_20260310_035611` | 46 | 18 | 18 | 0.418 | 2.416 | 0 |
+
+Interpretation:
+- Better or equal trajectory behavior on both rosbags versus baseline.
+- Slight request-rate improvement with no server errors/failures.
+- Kept as safe optimization.
+
 ## Current accepted state
 
-- Keep behavior from `c97d22d8` (sync default with mode flags scaffold).
+- Keep behavior from `c97d22d8` + accepted module 5 optimization.
 - Rejected optimization attempts are reverted from code.
 - Guardrail remains strict: if trajectory quality drops, discard that method.
