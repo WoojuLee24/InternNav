@@ -271,6 +271,32 @@ Interpretation:
 - Fastest throughput/latency so far.
 - Second bag shows more discrete/no-traj events than module 15, so this is better as an aggressive optional profile for further real-world validation.
 
+## Module 17 attempt: simple vision-cache reuse (`--vision-cache`)
+
+Status: rejected (no cache benefit observed)
+
+Before (`--vision-cache` off, same baseline settings):
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix60 | `my_camera_bag_20260310_035208` | 128 | 1 | 3 | 0.840 | 1.146 | 0 |
+| fix61 | `my_camera_bag_20260310_035611` | 131 | 0 | 0 | 0.842 | 1.145 | 0 |
+
+After (`--vision-cache` on):
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix62 | `my_camera_bag_20260310_035208` | 126 | 3 | 5 | 0.849 | 1.133 | 0 |
+| fix63 | `my_camera_bag_20260310_035611` | 119 | 5 | 12 | 0.847 | 1.141 | 0 |
+
+Cache-hit observation:
+- Server log cache hits: `0` for both runs.
+
+Interpretation:
+- No effective cache hits, so no real acceleration mechanism was activated.
+- Slightly worse trajectory behavior on both bags.
+- Rejected as current implementation.
+
 ## Speed/quality trend snapshot (selected checkpoints)
 
 | Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
@@ -286,5 +312,6 @@ Interpretation:
 - Keep behavior from `c97d22d8` + accepted module 5 optimization + accepted module 8 flag scaffold.
 - Accepted tuning options so far: `--num_history 2`, `--num_history 1`, `--plan_step_gap 8`, `--plan_step_gap 12`.
 - Accepted optional aggressive profile: `--plan_step_gap 16`.
+- `--vision-cache` remains available as experimental flag but current implementation is rejected.
 - Rejected optimization attempts are reverted from code.
 - Guardrail remains strict: if trajectory quality drops, discard that method.
