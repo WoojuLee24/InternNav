@@ -490,6 +490,34 @@ Interpretation:
 - Keeps high trajectory quality close to best-quality runs while still substantially faster than early baseline.
 - Useful as a smoother-quality profile for deployment testing.
 
+## Module 31 attempt: runtime guard for GPU + FlashAttention-2
+
+Status: accepted (safety/consistency guard)
+
+What was added:
+- Runtime guard in agent initialization to enforce GPU execution for realworld debug pipeline.
+- Runtime guard to require `attn_impl=flash_attention_2` (unless explicitly disabled in future).
+- Startup log now records effective runtime: `device` and `attn_impl`.
+
+Validation:
+- `fix94` startup check confirms: `[Runtime] device=cuda:0 attn_impl=flash_attention_2`.
+
+Interpretation:
+- Ensures experiments are always on GPU with FlashAttention-2 active, matching performance-goal assumptions.
+
+## Module 32 attempt: reconfirm accepted baseline under FlashAttention guard
+
+Status: accepted (baseline remains valid)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix95 | `my_camera_bag_20260310_035208` | 87 | 33 | 79 | 1.053 | 0.892 | 0 |
+| fix96 | `my_camera_bag_20260310_035611` | 131 | 6 | 7 | 0.886 | 1.072 | 0 |
+
+Interpretation:
+- Guard works and pipeline remains operational on GPU + FlashAttention-2.
+- Metrics remain in expected fast regime; bag sensitivity remains, so keep quality-profile option (`resize320`).
+
 ## Speed/quality trend snapshot (selected checkpoints)
 
 | Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
@@ -506,6 +534,7 @@ Interpretation:
 | Look-down/token cuts (rejected) | fix86–fix89 | 1.092–1.563 | 0.581–0.859 | 0–80 |
 | Gap13 (rejected) | fix90/fix91 | 1.019–1.031 | 0.926–0.933 | 100–105 |
 | Resize320 (quality profile) | fix92/fix93 | 0.855–0.874 | 1.087–1.114 | 130–130 |
+| Flash-attn guarded baseline | fix95/fix96 | 0.886–1.053 | 0.892–1.072 | 87–131 |
 
 ## Current accepted state
 
@@ -521,5 +550,6 @@ Interpretation:
 - `--tensorrt` and `--quantization` are available and safe, but currently fallback/skip paths (no real backend acceleration integrated yet).
 - GPU-native `--quant-method bnb_8bit` is currently rejected due to dtype incompatibility in this model path.
 - `--disable-look-down` and reduced `--max-new-tokens` are rejected for quality reasons but retained as optional experiment flags.
+- GPU + FlashAttention-2 are now explicitly enforced for realworld debug experiments.
 - Rejected optimization attempts are reverted from code.
 - Guardrail remains strict: if trajectory quality drops, discard that method.

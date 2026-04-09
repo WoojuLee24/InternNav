@@ -28,6 +28,7 @@ DEFAULT_IMAGE_TOKEN = "<image>"
 class InternVLAN1AsyncAgent:
     def __init__(self, args):
         self.device = torch.device(args.device)
+        self.require_flash_attn = bool(getattr(args, 'require_flash_attn', True))
         # self.save_dir = "test_data/" + datetime.now().strftime("%Y%m%d_%H%M%S")
         self.save_dir = ROOT / "test_data" / datetime.now().strftime("%Y%m%d_%H%M%S")
         os.makedirs(self.save_dir, exist_ok=True)
@@ -40,6 +41,18 @@ class InternVLAN1AsyncAgent:
         )
         self.model.eval()
         self.model.to(self.device)
+
+        if self.device.type != 'cuda':
+            raise RuntimeError("GPU is required for realworld debug pipeline")
+
+        attn_impl = getattr(self.model.config, '_attn_implementation', None)
+        if attn_impl is None:
+            attn_impl = getattr(self.model.config, 'attn_implementation', None)
+        print(f"[Runtime] device={self.device} attn_impl={attn_impl}")
+        if self.require_flash_attn and attn_impl != 'flash_attention_2':
+            raise RuntimeError(
+                f"FlashAttention-2 required but got attn_impl={attn_impl}"
+            )
 
         self.processor = AutoProcessor.from_pretrained(args.model_path, use_fast=False)
         self.processor.tokenizer.padding_side = 'left'

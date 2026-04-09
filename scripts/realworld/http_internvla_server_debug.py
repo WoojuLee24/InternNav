@@ -290,6 +290,8 @@ if __name__ == '__main__':
     parser.add_argument("--vision-cache", action="store_true", help="Enable vision-cache optimization (scaffold flag).")
     parser.add_argument("--max-new-tokens", type=int, default=128,
                         help="Max new tokens for language generation.")
+    parser.add_argument("--require-flash-attn", action="store_true", default=True,
+                        help="Require FlashAttention-2 at runtime (enabled by default).")
     parser.add_argument("--method", action="append", default=[],
                         help="Additional optimization method tag (repeatable, scaffold only).")
     parser.add_argument("--calib", type=str, default="/home/gdr/gd_vln/workspace/src/InternNav/scripts/realworld/calib/calib_scout.txt",
