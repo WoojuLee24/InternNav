@@ -632,6 +632,32 @@ Interpretation:
 - New payload knobs are safe as experimental flags.
 - Current accepted default behavior remains robust.
 
+## Module 40 attempt: depth transport speed-up (`--depth-png-compress 0`)
+
+Status: rejected
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix115 | `my_camera_bag_20260310_035208` | 135 | 2 | 2 | 0.867 | 1.093 | 0 |
+| fix116 | `my_camera_bag_20260310_035611` | 51 | 48 | 136 | 1.191 | 0.780 | 0 |
+
+Interpretation:
+- One bag remains high-quality, the other collapses into no-traj/discrete-heavy behavior.
+- Too unstable; rejected.
+
+## Module 41 attempt: step-gap micro-tuning (`--plan_step_gap 11`)
+
+Status: rejected
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix117 | `my_camera_bag_20260310_035208` | 131 | 3 | 3 | 0.858 | 1.108 | 0 |
+| fix118 | `my_camera_bag_20260310_035611` | 50 | 47 | 134 | 1.172 | 0.796 | 0 |
+
+Interpretation:
+- Similar instability pattern to module 40.
+- Rejected.
+
 ## Speed/quality trend snapshot (selected checkpoints)
 
 | Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
@@ -656,6 +682,8 @@ Interpretation:
 | History2+resize256 (rejected) | fix105/fix106 | 0.986–0.988 | 0.965–0.966 | 93–94 |
 | Payload tuned (rejected) | fix109/fix110 | 1.171–1.173 | 0.793–0.795 | 54–57 |
 | Baseline reconfirmed | fix111/fix112 | 0.873–0.874 | 1.088–1.089 | 129–135 |
+| Depth PNG=0 (rejected) | fix115/fix116 | 0.867–1.191 | 0.780–1.093 | 51–135 |
+| Gap11 (rejected) | fix117/fix118 | 0.858–1.172 | 0.796–1.108 | 50–131 |
 
 ## Current accepted state
 
