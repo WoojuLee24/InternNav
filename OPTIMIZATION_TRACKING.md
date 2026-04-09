@@ -464,6 +464,32 @@ Interpretation:
 - Speed increases, but quality shifts too heavily toward no-traj/discrete behavior.
 - Rejected.
 
+## Module 29 attempt: fine-grained gap tuning (`--plan_step_gap 13`)
+
+Status: rejected
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix90 | `my_camera_bag_20260310_035208` | 105 | 21 | 54 | 1.019 | 0.933 | 0 |
+| fix91 | `my_camera_bag_20260310_035611` | 100 | 23 | 60 | 1.031 | 0.926 | 0 |
+
+Interpretation:
+- High speed but too much degradation versus accepted default profile.
+- Rejected.
+
+## Module 30 attempt: quality-oriented larger resolution (`--resize 320`)
+
+Status: accepted as optional quality profile (not default)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix92 | `my_camera_bag_20260310_035208` | 130 | 3 | 3 | 0.855 | 1.114 | 0 |
+| fix93 | `my_camera_bag_20260310_035611` | 130 | 4 | 8 | 0.874 | 1.087 | 0 |
+
+Interpretation:
+- Keeps high trajectory quality close to best-quality runs while still substantially faster than early baseline.
+- Useful as a smoother-quality profile for deployment testing.
+
 ## Speed/quality trend snapshot (selected checkpoints)
 
 | Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
@@ -478,6 +504,8 @@ Interpretation:
 | Low-gap revisit (rejected) | fix78/fix79 | 1.122–1.231 | 0.755–0.834 | 36–64 |
 | bnb 8-bit attempts (rejected) | fix82–fix85 | 1.438–1.568 | 0.438–0.497 | 0 |
 | Look-down/token cuts (rejected) | fix86–fix89 | 1.092–1.563 | 0.581–0.859 | 0–80 |
+| Gap13 (rejected) | fix90/fix91 | 1.019–1.031 | 0.926–0.933 | 100–105 |
+| Resize320 (quality profile) | fix92/fix93 | 0.855–0.874 | 1.087–1.114 | 130–130 |
 
 ## Current accepted state
 
@@ -486,6 +514,7 @@ Interpretation:
 - Accepted tuning options so far: `--num_history 2`, `--num_history 1`, `--plan_step_gap 8`, `--plan_step_gap 12`.
 - Accepted optional aggressive profile: `--plan_step_gap 16`.
 - Accepted resolution tuning: `--resize_w 256 --resize_h 256` (default).
+- Accepted optional quality profile: `--resize_w 320 --resize_h 320`.
 - Rejected but available for optional tests: `--resize_w 224 --resize_h 224`.
 - Rejected but available for optional tests: `--plan_step_gap 14/16` with resize256 combo, `--kv-cache`.
 - `--vision-cache` remains available as experimental flag but current implementation is rejected.
