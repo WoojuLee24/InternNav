@@ -56,6 +56,8 @@ CLIENT_OPT_FLAGS = {
     "vision_cache": False,
     "methods": [],
 }
+JPEG_QUALITY = 95
+DEPTH_PNG_COMPRESS = 6
 current_control_mode = ControlMode.MPC_Mode
 trajs_in_world = None
 calib = None
@@ -617,7 +619,7 @@ class Go2Manager(Node):
         self.rgb_forward_image = raw_image
         image = PIL_Image.fromarray(self.rgb_forward_image)
         image_bytes = io.BytesIO()
-        image.save(image_bytes, format='JPEG')
+        image.save(image_bytes, format='JPEG', quality=JPEG_QUALITY, optimize=False)
         image_bytes.seek(0)
         self.rgb_forward_bytes = image_bytes
         self.new_vis_image_arrived = True
@@ -631,7 +633,7 @@ class Go2Manager(Node):
         self.rgb_image = raw_image
         image = PIL_Image.fromarray(self.rgb_image)
         image_bytes = io.BytesIO()
-        image.save(image_bytes, format='JPEG')
+        image.save(image_bytes, format='JPEG', quality=JPEG_QUALITY, optimize=False)
         image_bytes.seek(0)
 
         raw_depth = self.cv_bridge.imgmsg_to_cv2(depth_msg, '16UC1')
@@ -643,7 +645,7 @@ class Go2Manager(Node):
         depth = (np.clip(self.depth_image * 10000.0, 0, 65535)).astype(np.uint16)
         depth = PIL_Image.fromarray(depth)
         depth_bytes = io.BytesIO()
-        depth.save(depth_bytes, format='PNG')
+        depth.save(depth_bytes, format='PNG', compress_level=DEPTH_PNG_COMPRESS)
         depth_bytes.seek(0)
 
         rgb_depth_rw_lock.acquire_write()
@@ -743,6 +745,10 @@ if __name__ == '__main__':
                         help='TensorRT engine path tag for experiments.')
     parser.add_argument('--tf32', action='store_true', help='Enable TF32 mode tag for experiments.')
     parser.add_argument('--vision-cache', action='store_true', help='Enable vision-cache optimization (scaffold flag).')
+    parser.add_argument('--jpeg-quality', type=int, default=95,
+                        help='JPEG quality for rgb payload (1-100).')
+    parser.add_argument('--depth-png-compress', type=int, default=6,
+                        help='PNG compress level for depth payload (0-9).')
     parser.add_argument('--method', action='append', default=[],
                         help='Additional optimization method tag (repeatable, scaffold only).')
     parser.add_argument('--odom_topic', type=str, default='/gdq/msg/gdq_odom', help='ROS2 odometry topic name')
@@ -761,6 +767,8 @@ if __name__ == '__main__':
     if args.mode != 'sync':
         print(f"[Client] mode={args.mode} requested, but async path is not implemented yet. Falling back to sync.")
     CLIENT_MODE = 'sync'
+    JPEG_QUALITY = max(1, min(100, int(args.jpeg_quality)))
+    DEPTH_PNG_COMPRESS = max(0, min(9, int(args.depth_png_compress)))
     CLIENT_OPT_FLAGS = {
         "kv_cache": bool(args.kv_cache),
         "tensorrt": bool(args.tensorrt),

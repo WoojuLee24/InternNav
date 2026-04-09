@@ -592,6 +592,46 @@ Interpretation:
 - Speed improves relative to conservative profiles, but quality degrades versus accepted current default.
 - Rejected.
 
+## Module 38 attempt: payload serialization tuning (JPEG/PNG compression knobs)
+
+Status: rejected as quality-preserving optimization
+
+What was added:
+- Client-side configurable transport encoding knobs:
+  - `--jpeg-quality` (1-100)
+  - `--depth-png-compress` (0-9)
+
+Baseline with explicit default encoding (`jpeg=95`, `png=6`):
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix107 | `my_camera_bag_20260310_035208` | 135 | 2 | 2 | 0.870 | 1.091 | 0 |
+| fix108 | `my_camera_bag_20260310_035611` | 46 | 50 | 142 | 1.198 | 0.781 | 0 |
+
+Tuned transport (`jpeg=80`, `png=1`):
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix109 | `my_camera_bag_20260310_035208` | 54 | 47 | 131 | 1.171 | 0.795 | 0 |
+| fix110 | `my_camera_bag_20260310_035611` | 57 | 45 | 128 | 1.173 | 0.793 | 0 |
+
+Interpretation:
+- Transport tuning improves speed but causes large and unstable quality degradation.
+- Rejected for default/recommended profiles.
+
+## Module 39 attempt: baseline reconfirm after payload knob integration
+
+Status: accepted (baseline remains stable)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix111 | `my_camera_bag_20260310_035208` | 129 | 6 | 8 | 0.874 | 1.089 | 0 |
+| fix112 | `my_camera_bag_20260310_035611` | 135 | 2 | 2 | 0.873 | 1.088 | 0 |
+
+Interpretation:
+- New payload knobs are safe as experimental flags.
+- Current accepted default behavior remains robust.
+
 ## Speed/quality trend snapshot (selected checkpoints)
 
 | Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
@@ -614,6 +654,8 @@ Interpretation:
 | Resize320 recheck (mixed) | fix101/fix102 | 0.904–1.031 | 0.914–1.059 | 76–118 |
 | Resize288 (rejected) | fix103/fix104 | 0.943–1.108 | 0.844–1.004 | 67–112 |
 | History2+resize256 (rejected) | fix105/fix106 | 0.986–0.988 | 0.965–0.966 | 93–94 |
+| Payload tuned (rejected) | fix109/fix110 | 1.171–1.173 | 0.793–0.795 | 54–57 |
+| Baseline reconfirmed | fix111/fix112 | 0.873–0.874 | 1.088–1.089 | 129–135 |
 
 ## Current accepted state
 
@@ -632,5 +674,6 @@ Interpretation:
 - GPU + FlashAttention-2 are now explicitly enforced for realworld debug experiments.
 - Cross-system tmux launcher is now environment-override friendly for reproducible experiments.
 - `--tf32` is currently rejected for quality despite speed gains.
+- `--jpeg-quality` and `--depth-png-compress` are available for transport experiments, but aggressive settings are rejected for quality.
 - Rejected optimization attempts are reverted from code.
 - Guardrail remains strict: if trajectory quality drops, discard that method.

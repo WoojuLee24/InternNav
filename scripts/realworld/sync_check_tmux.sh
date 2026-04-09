@@ -16,6 +16,8 @@ ROS_SETUP="${ROS_SETUP:-/opt/ros/jazzy/setup.bash}"
 SERVER_EXTRA_ARGS="${SERVER_EXTRA_ARGS:-}"
 CLIENT_EXTRA_ARGS="${CLIENT_EXTRA_ARGS:-}"
 BAG_PLAY_EXTRA_ARGS="${BAG_PLAY_EXTRA_ARGS:-}"
+JPEG_QUALITY="${JPEG_QUALITY:-95}"
+DEPTH_PNG_COMPRESS="${DEPTH_PNG_COMPRESS:-6}"
 SERVER_WARMUP_SEC="${SERVER_WARMUP_SEC:-70}"
 BAG_START_DELAY_SEC="${BAG_START_DELAY_SEC:-85}"
 
@@ -44,7 +46,7 @@ tmux send-keys -t "$SESSION_NAME":0.0 "$COMMON_PREFIX $SERVER_PYTHON scripts/rea
 tmux send-keys -t "$SESSION_NAME":0.1 "$COMMON_PREFIX $ROS_PYTHON scripts/realworld/scout_bridge.py 2>&1 | tee $RUN_DIR/scout_bridge.log" C-m
 
 # Pane 2: client (wait for model server warmup)
-tmux send-keys -t "$SESSION_NAME":0.2 "$COMMON_PREFIX sleep $SERVER_WARMUP_SEC; $ROS_PYTHON scripts/realworld/http_internvla_client_debug.py --mode sync --calib $CALIB_PATH $CLIENT_EXTRA_ARGS 2>&1 | tee $RUN_DIR/client.log" C-m
+tmux send-keys -t "$SESSION_NAME":0.2 "$COMMON_PREFIX sleep $SERVER_WARMUP_SEC; $ROS_PYTHON scripts/realworld/http_internvla_client_debug.py --mode sync --jpeg-quality $JPEG_QUALITY --depth-png-compress $DEPTH_PNG_COMPRESS --calib $CALIB_PATH $CLIENT_EXTRA_ARGS 2>&1 | tee $RUN_DIR/client.log" C-m
 
 # Pane 3: rosbag player
 tmux send-keys -t "$SESSION_NAME":0.3 "$COMMON_PREFIX sleep $BAG_START_DELAY_SEC; ros2 bag play $BAG_PATH --rate $RATE $BAG_PLAY_EXTRA_ARGS 2>&1 | tee $RUN_DIR/rosbag_play.log" C-m
@@ -53,7 +55,7 @@ echo "tmux session: $SESSION_NAME"
 echo "logs: $REPO_DIR/$RUN_DIR"
 echo "attach with: tmux attach -t $SESSION_NAME"
 echo "stop with: tmux kill-session -t $SESSION_NAME"
-echo "env overrides: REPO_DIR MODEL_PATH CALIB_PATH DEVICE RATE SERVER_PYTHON ROS_PYTHON ROS_SETUP SERVER_EXTRA_ARGS CLIENT_EXTRA_ARGS BAG_PLAY_EXTRA_ARGS"
+echo "env overrides: REPO_DIR MODEL_PATH CALIB_PATH DEVICE RATE SERVER_PYTHON ROS_PYTHON ROS_SETUP SERVER_EXTRA_ARGS CLIENT_EXTRA_ARGS BAG_PLAY_EXTRA_ARGS JPEG_QUALITY DEPTH_PNG_COMPRESS"
 
 if [ -z "${NO_ATTACH:-}" ]; then
   tmux attach -t "$SESSION_NAME"
