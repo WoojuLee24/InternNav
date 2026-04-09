@@ -566,6 +566,32 @@ Interpretation:
 - Performance/quality is sensitive and inconsistent across bags in current setup.
 - Keep as experimental flag profile, not a generally accepted profile.
 
+## Module 36 attempt: compromise resolution (`--resize 288`)
+
+Status: rejected
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix103 | `my_camera_bag_20260310_035208` | 67 | 39 | 107 | 1.108 | 0.844 | 0 |
+| fix104 | `my_camera_bag_20260310_035611` | 112 | 16 | 36 | 0.943 | 1.004 | 0 |
+
+Interpretation:
+- Improves speed, but quality is unstable and bag-sensitive.
+- Rejected as a robust default/profile.
+
+## Module 37 attempt: increase history (`--num_history 2`) with current defaults
+
+Status: rejected
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix105 | `my_camera_bag_20260310_035208` | 93 | 23 | 61 | 0.986 | 0.966 | 0 |
+| fix106 | `my_camera_bag_20260310_035611` | 94 | 22 | 60 | 0.988 | 0.965 | 0 |
+
+Interpretation:
+- Speed improves relative to conservative profiles, but quality degrades versus accepted current default.
+- Rejected.
+
 ## Speed/quality trend snapshot (selected checkpoints)
 
 | Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
@@ -586,6 +612,8 @@ Interpretation:
 | Current default reconfirmed | fix97/fix98 | 0.871–0.873 | 1.088–1.092 | 132–133 |
 | TF32 (rejected) | fix99/fix100 | 1.188–1.299 | 0.713–0.783 | 22–51 |
 | Resize320 recheck (mixed) | fix101/fix102 | 0.904–1.031 | 0.914–1.059 | 76–118 |
+| Resize288 (rejected) | fix103/fix104 | 0.943–1.108 | 0.844–1.004 | 67–112 |
+| History2+resize256 (rejected) | fix105/fix106 | 0.986–0.988 | 0.965–0.966 | 93–94 |
 
 ## Current accepted state
 
