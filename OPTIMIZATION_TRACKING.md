@@ -438,6 +438,32 @@ Interpretation:
 - Raw throughput appears high, but model behavior is invalid (trajectory output collapses to zero).
 - Rejected for real navigation use; keep flag for future low-level kernel compatibility work only.
 
+## Module 27 attempt: disable look-down second pass (`--disable-look-down`)
+
+Status: rejected
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix86 | `my_camera_bag_20260310_035208` | 0 | 72 | 247 | 1.563 | 0.581 | 0 |
+| fix87 | `my_camera_bag_20260310_035611` | 0 | 72 | 232 | 1.472 | 0.620 | 0 |
+
+Interpretation:
+- Strong speed increase but destroys trajectory output.
+- Rejected.
+
+## Module 28 attempt: reduce max tokens moderately (`--max-new-tokens 96`)
+
+Status: rejected
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix88 | `my_camera_bag_20260310_035208` | 42 | 53 | 151 | 1.224 | 0.758 | 0 |
+| fix89 | `my_camera_bag_20260310_035611` | 80 | 34 | 92 | 1.092 | 0.859 | 0 |
+
+Interpretation:
+- Speed increases, but quality shifts too heavily toward no-traj/discrete behavior.
+- Rejected.
+
 ## Speed/quality trend snapshot (selected checkpoints)
 
 | Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
@@ -451,6 +477,7 @@ Interpretation:
 | Over-aggressive combos | fix68–fix73 | 1.137–1.258 | 0.741–0.824 | 33–78 |
 | Low-gap revisit (rejected) | fix78/fix79 | 1.122–1.231 | 0.755–0.834 | 36–64 |
 | bnb 8-bit attempts (rejected) | fix82–fix85 | 1.438–1.568 | 0.438–0.497 | 0 |
+| Look-down/token cuts (rejected) | fix86–fix89 | 1.092–1.563 | 0.581–0.859 | 0–80 |
 
 ## Current accepted state
 
@@ -464,5 +491,6 @@ Interpretation:
 - `--vision-cache` remains available as experimental flag but current implementation is rejected.
 - `--tensorrt` and `--quantization` are available and safe, but currently fallback/skip paths (no real backend acceleration integrated yet).
 - GPU-native `--quant-method bnb_8bit` is currently rejected due to dtype incompatibility in this model path.
+- `--disable-look-down` and reduced `--max-new-tokens` are rejected for quality reasons but retained as optional experiment flags.
 - Rejected optimization attempts are reverted from code.
 - Guardrail remains strict: if trajectory quality drops, discard that method.
