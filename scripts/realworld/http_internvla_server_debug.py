@@ -288,7 +288,7 @@ if __name__ == '__main__':
     parser.add_argument("--tensorrt-engine", type=str, default="",
                         help="Path to TensorRT engine (optional, safe fallback if unavailable).")
     parser.add_argument("--vision-cache", action="store_true", help="Enable vision-cache optimization (scaffold flag).")
-    parser.add_argument("--max-new-tokens", type=int, default=128,
+    parser.add_argument("--max-new-tokens", type=int, default=80,
                         help="Max new tokens for language generation.")
     parser.add_argument("--require-flash-attn", action="store_true", default=True,
                         help="Require FlashAttention-2 at runtime (enabled by default).")

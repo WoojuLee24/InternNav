@@ -658,6 +658,32 @@ Interpretation:
 - Similar instability pattern to module 40.
 - Rejected.
 
+## Module 42 attempt: moderate token cap (`--max-new-tokens 112`)
+
+Status: accepted
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix119 | `my_camera_bag_20260310_035208` | 133 | 4 | 4 | 0.871 | 1.091 | 0 |
+| fix120 | `my_camera_bag_20260310_035611` | 131 | 6 | 6 | 0.872 | 1.090 | 0 |
+
+Interpretation:
+- Keeps quality nearly identical to current baseline.
+- Speed similar to baseline; retained as safe option.
+
+## Module 43 attempt: stronger token cap (`--max-new-tokens 80`)
+
+Status: accepted and promoted to default
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix121 | `my_camera_bag_20260310_035208` | 133 | 4 | 5 | 0.877 | 1.083 | 0 |
+| fix122 | `my_camera_bag_20260310_035611` | 130 | 6 | 9 | 0.886 | 1.071 | 0 |
+
+Interpretation:
+- Small but consistent speed gain while maintaining near-equivalent trajectory behavior.
+- Promoted as new default max token limit.
+
 ## Speed/quality trend snapshot (selected checkpoints)
 
 | Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
@@ -684,6 +710,7 @@ Interpretation:
 | Baseline reconfirmed | fix111/fix112 | 0.873–0.874 | 1.088–1.089 | 129–135 |
 | Depth PNG=0 (rejected) | fix115/fix116 | 0.867–1.191 | 0.780–1.093 | 51–135 |
 | Gap11 (rejected) | fix117/fix118 | 0.858–1.172 | 0.796–1.108 | 50–131 |
+| Max tokens tuned (accepted) | fix121/fix122 | 0.877–0.886 | 1.071–1.083 | 130–133 |
 
 ## Current accepted state
 
@@ -692,6 +719,7 @@ Interpretation:
 - Accepted tuning options so far: `--num_history 2`, `--num_history 1`, `--plan_step_gap 8`, `--plan_step_gap 12`.
 - Accepted optional aggressive profile: `--plan_step_gap 16`.
 - Accepted resolution tuning: `--resize_w 256 --resize_h 256` (default).
+- Accepted token cap: `--max-new-tokens 80` (default).
 - Accepted optional quality profile: `--resize_w 320 --resize_h 320`.
 - Rejected but available for optional tests: `--resize_w 224 --resize_h 224`.
 - Rejected but available for optional tests: `--plan_step_gap 14/16` with resize256 combo, `--kv-cache`.
