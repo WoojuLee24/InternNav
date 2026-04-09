@@ -52,6 +52,7 @@ CLIENT_OPT_FLAGS = {
     "quantization": False,
     "quant_method": "dynamic",
     "tensorrt_engine": "",
+    "tf32": False,
     "vision_cache": False,
     "methods": [],
 }
@@ -740,6 +741,7 @@ if __name__ == '__main__':
                         help='Quantization method tag for experiments.')
     parser.add_argument('--tensorrt-engine', type=str, default='',
                         help='TensorRT engine path tag for experiments.')
+    parser.add_argument('--tf32', action='store_true', help='Enable TF32 mode tag for experiments.')
     parser.add_argument('--vision-cache', action='store_true', help='Enable vision-cache optimization (scaffold flag).')
     parser.add_argument('--method', action='append', default=[],
                         help='Additional optimization method tag (repeatable, scaffold only).')
@@ -765,6 +767,7 @@ if __name__ == '__main__':
         "quantization": bool(args.quantization),
         "quant_method": str(args.quant_method),
         "tensorrt_engine": str(args.tensorrt_engine),
+        "tf32": bool(args.tf32),
         "vision_cache": bool(args.vision_cache),
         "methods": list(args.method),
     }

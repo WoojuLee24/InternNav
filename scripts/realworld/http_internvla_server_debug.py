@@ -292,6 +292,8 @@ if __name__ == '__main__':
                         help="Max new tokens for language generation.")
     parser.add_argument("--require-flash-attn", action="store_true", default=True,
                         help="Require FlashAttention-2 at runtime (enabled by default).")
+    parser.add_argument("--tf32", action="store_true",
+                        help="Enable TF32 matmul/cudnn where supported.")
     parser.add_argument("--method", action="append", default=[],
                         help="Additional optimization method tag (repeatable, scaffold only).")
     parser.add_argument("--calib", type=str, default="/home/gdr/gd_vln/workspace/src/InternNav/scripts/realworld/calib/calib_scout.txt",
@@ -307,6 +309,7 @@ if __name__ == '__main__':
         "quantization": bool(args.quantization),
         "quant_method": str(args.quant_method),
         "tensorrt_engine": str(args.tensorrt_engine),
+        "tf32": bool(args.tf32),
         "vision_cache": bool(args.vision_cache),
         "methods": list(args.method),
     }

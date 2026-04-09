@@ -540,6 +540,32 @@ Interpretation:
 - Current default profile remains stable and high-quality.
 - Launcher portability improves cross-system reproducibility for future ablations.
 
+## Module 34 attempt: enable TF32 (`--tf32`) with current default profile
+
+Status: rejected
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix99 | `my_camera_bag_20260310_035208` | 51 | 49 | 136 | 1.188 | 0.783 | 0 |
+| fix100 | `my_camera_bag_20260310_035611` | 22 | 64 | 182 | 1.299 | 0.713 | 0 |
+
+Interpretation:
+- Throughput/latency improve, but trajectory behavior degrades severely.
+- Rejected for navigation baseline.
+
+## Module 35 attempt: reconfirm quality profile (`--resize 320`) under current guard
+
+Status: unstable as global profile (kept experimental)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix101 | `my_camera_bag_20260310_035208` | 118 | 11 | 23 | 0.904 | 1.059 | 0 |
+| fix102 | `my_camera_bag_20260310_035611` | 76 | 31 | 86 | 1.031 | 0.914 | 0 |
+
+Interpretation:
+- Performance/quality is sensitive and inconsistent across bags in current setup.
+- Keep as experimental flag profile, not a generally accepted profile.
+
 ## Speed/quality trend snapshot (selected checkpoints)
 
 | Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
@@ -558,6 +584,8 @@ Interpretation:
 | Resize320 (quality profile) | fix92/fix93 | 0.855–0.874 | 1.087–1.114 | 130–130 |
 | Flash-attn guarded baseline | fix95/fix96 | 0.886–1.053 | 0.892–1.072 | 87–131 |
 | Current default reconfirmed | fix97/fix98 | 0.871–0.873 | 1.088–1.092 | 132–133 |
+| TF32 (rejected) | fix99/fix100 | 1.188–1.299 | 0.713–0.783 | 22–51 |
+| Resize320 recheck (mixed) | fix101/fix102 | 0.904–1.031 | 0.914–1.059 | 76–118 |
 
 ## Current accepted state
 
@@ -575,5 +603,6 @@ Interpretation:
 - `--disable-look-down` and reduced `--max-new-tokens` are rejected for quality reasons but retained as optional experiment flags.
 - GPU + FlashAttention-2 are now explicitly enforced for realworld debug experiments.
 - Cross-system tmux launcher is now environment-override friendly for reproducible experiments.
+- `--tf32` is currently rejected for quality despite speed gains.
 - Rejected optimization attempts are reverted from code.
 - Guardrail remains strict: if trajectory quality drops, discard that method.

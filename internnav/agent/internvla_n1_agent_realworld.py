@@ -29,6 +29,7 @@ class InternVLAN1AsyncAgent:
     def __init__(self, args):
         self.device = torch.device(args.device)
         self.require_flash_attn = bool(getattr(args, 'require_flash_attn', True))
+        self.use_tf32 = bool(getattr(args, 'tf32', False))
         # self.save_dir = "test_data/" + datetime.now().strftime("%Y%m%d_%H%M%S")
         self.save_dir = ROOT / "test_data" / datetime.now().strftime("%Y%m%d_%H%M%S")
         os.makedirs(self.save_dir, exist_ok=True)
@@ -44,6 +45,15 @@ class InternVLAN1AsyncAgent:
 
         if self.device.type != 'cuda':
             raise RuntimeError("GPU is required for realworld debug pipeline")
+
+        if self.use_tf32:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            try:
+                torch.set_float32_matmul_precision('high')
+            except Exception:
+                pass
+            print("[Runtime] TF32 enabled")
 
         attn_impl = getattr(self.model.config, '_attn_implementation', None)
         if attn_impl is None:
