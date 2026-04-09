@@ -518,6 +518,28 @@ Interpretation:
 - Guard works and pipeline remains operational on GPU + FlashAttention-2.
 - Metrics remain in expected fast regime; bag sensitivity remains, so keep quality-profile option (`resize320`).
 
+## Module 33 attempt: reproducibility + environment-portable tmux launcher
+
+Status: accepted (workflow improvement)
+
+What changed:
+- `scripts/realworld/sync_check_tmux.sh` now supports environment overrides:
+  - `REPO_DIR`, `MODEL_PATH`, `CALIB_PATH`, `DEVICE`, `RATE`
+  - `SERVER_PYTHON`, `ROS_PYTHON`, `ROS_SETUP`
+  - `SERVER_EXTRA_ARGS`, `CLIENT_EXTRA_ARGS`, `BAG_PLAY_EXTRA_ARGS`
+- This makes it easier to run the same benchmark pipeline across different machines after pull.
+
+Reconfirm runs under current guarded default:
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix97 | `my_camera_bag_20260310_035208` | 132 | 3 | 4 | 0.871 | 1.092 | 0 |
+| fix98 | `my_camera_bag_20260310_035611` | 133 | 4 | 5 | 0.873 | 1.088 | 0 |
+
+Interpretation:
+- Current default profile remains stable and high-quality.
+- Launcher portability improves cross-system reproducibility for future ablations.
+
 ## Speed/quality trend snapshot (selected checkpoints)
 
 | Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
@@ -535,6 +557,7 @@ Interpretation:
 | Gap13 (rejected) | fix90/fix91 | 1.019–1.031 | 0.926–0.933 | 100–105 |
 | Resize320 (quality profile) | fix92/fix93 | 0.855–0.874 | 1.087–1.114 | 130–130 |
 | Flash-attn guarded baseline | fix95/fix96 | 0.886–1.053 | 0.892–1.072 | 87–131 |
+| Current default reconfirmed | fix97/fix98 | 0.871–0.873 | 1.088–1.092 | 132–133 |
 
 ## Current accepted state
 
@@ -551,5 +574,6 @@ Interpretation:
 - GPU-native `--quant-method bnb_8bit` is currently rejected due to dtype incompatibility in this model path.
 - `--disable-look-down` and reduced `--max-new-tokens` are rejected for quality reasons but retained as optional experiment flags.
 - GPU + FlashAttention-2 are now explicitly enforced for realworld debug experiments.
+- Cross-system tmux launcher is now environment-override friendly for reproducible experiments.
 - Rejected optimization attempts are reverted from code.
 - Guardrail remains strict: if trajectory quality drops, discard that method.
