@@ -383,7 +383,15 @@ def main(config, model_class, model_config_class, debug=False):
             else:
                 print('[Val] ValidationCallback registered (every epoch)')
 
-        trainer.train()
+        train_result = trainer.train()
+        m = train_result.metrics
+        if not (dist.is_initialized() and dist.get_rank() != 0):
+            print(
+                f"[Summary]"
+                f" samples/s={m.get('train_samples_per_second', float('nan')):.2f}"
+                f" steps/s={m.get('train_steps_per_second', float('nan')):.4f}"
+                f" loss={m.get('train_loss', float('nan')):.4f}"
+            )
         if train_logger:
             for handler in train_logger.handlers:
                 handler.flush()
