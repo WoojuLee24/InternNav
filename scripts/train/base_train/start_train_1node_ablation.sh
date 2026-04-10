@@ -37,18 +37,18 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # ---- GRID: values to sweep ---------------------------------
 # 여러 값 → sweep, 값 하나 → 고정, 빈 배열 () → base config 사용
 SCENE_SCALE_LIST=(0.1)       # e.g. (0.01 0.1 1.0)
-NUM_WORKERS_LIST=(4)        # e.g. (2 4 8 16)
+NUM_WORKERS_LIST=(2 4 8)        # e.g. (2 4 8 16)
 PREFETCH_FACTOR_LIST=(1)      # e.g. (1 2 4)
-BATCH_SIZE_LIST=(32)          # e.g. (16 32 64)
+BATCH_SIZE_LIST=(32 64 128)          # e.g. (16 32 64)
 PERSISTENT_WORKERS_LIST=(True) # e.g. (True False)
 PRELOAD_LIST=(False)          # e.g. (True False)
 BF16_LIST=(False)             # e.g. (True False)
 TF32_LIST=(False)             # e.g. (True False)
 USE_SCIPY_KDTREE_LIST=(True)  # e.g. (True False)
-USE_NPY_OBSTACLE_LIST=(True False)  # e.g. (True False)
-USE_NPZ_PARQUET_LIST=(True False)  # e.g. (True False)
-USE_KDTREE_CACHE_LIST=(True False)  # e.g. (True False)
-USE_PARQUET_CACHE_LIST=(True False)  # e.g. (True False)
+USE_NPY_OBSTACLE_LIST=(True)  # e.g. (True False)
+USE_NPZ_PARQUET_LIST=(True)  # e.g. (True False)
+USE_KDTREE_CACHE_LIST=(False)  # e.g. (True False)
+USE_PARQUET_CACHE_LIST=(False)  # e.g. (True False)
 
 
 # ---- GENERATE COMBINATIONS via Python ----------------------
@@ -138,19 +138,21 @@ for COMBO in "${COMBOS[@]}"; do
     TOTAL=$((LAUNCH_END - LAUNCH_START))
     WALL=$(printf '%02d:%02d:%02d' $((TOTAL/3600)) $((TOTAL%3600/60)) $((TOTAL%60)))
 
-    SPEED_LAST=$(grep '\[Speed\] step=' "$LOGFILE" | tail -1)
-    SPEED_10=$(grep '\[Speed\] step=' "$LOGFILE" | tail -10)
-    echo "${SPEED_10:-n/a}" > "$LOG_DIR/${NAME}_speed.log"
+    SUMMARY_LINE=$(grep '\[Summary\]' "$LOGFILE" | tail -1)
+    SAMPLES_PER_SEC=$(echo "$SUMMARY_LINE" | grep -oP 'samples/s=\K[0-9.]+' || echo "n/a")
+    STEPS_PER_SEC=$(echo "$SUMMARY_LINE"   | grep -oP 'steps/s=\K[0-9.]+' || echo "n/a")
+    TRAIN_LOSS=$(echo "$SUMMARY_LINE"      | grep -oP 'loss=\K[0-9.]+' || echo "n/a")
 
     echo "------------------------------------------------------------"
     echo "  Wall time    : ${TOTAL}s  ($WALL)"
     echo "  Exit code    : $EXIT_CODE"
-    echo "  Speed (last 10 steps):"
-    echo "${SPEED_10:-    n/a}"
+    echo "  samples/s    : ${SAMPLES_PER_SEC}"
+    echo "  steps/s      : ${STEPS_PER_SEC}"
+    echo "  loss         : ${TRAIN_LOSS}"
     echo "  Log          : $LOGFILE"
     echo "------------------------------------------------------------"
 
-    RESULTS+=("$NAME  exit=$EXIT_CODE  wall=${WALL}  ${SPEED_LAST:-speed=n/a}")
+    RESULTS+=("$NAME  exit=$EXIT_CODE  wall=${WALL}  samples/s=${SAMPLES_PER_SEC}  steps/s=${STEPS_PER_SEC}  loss=${TRAIN_LOSS}")
 done
 
 # ---- SUMMARY -----------------------------------------------
