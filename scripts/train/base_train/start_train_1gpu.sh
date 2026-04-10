@@ -4,6 +4,7 @@
 NAME=navdp_1gpu
 MODEL=navdp_1gpu
 DEBUG_FLAG=""
+IL_OVERRIDES='{}'
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -19,6 +20,10 @@ while [[ $# -gt 0 ]]; do
         --debug)
             DEBUG_FLAG="--debug"
             shift
+            ;;
+        --il-overrides)
+            IL_OVERRIDES="$2"
+            shift 2
             ;;
         *)
             echo "Unknown parameter: $1"
@@ -88,11 +93,13 @@ if [[ "$MODEL" == "navdp" || "$MODEL" == "navdp_1gpu" ]]; then
         scripts/train/base_train/train.py \
         --name "$NAME" \
         --model-name "$MODEL" \
+        --il-overrides "$IL_OVERRIDES" \
         $DEBUG_FLAG
 else
     echo "Using python to start $MODEL training, using $NUM_GPUS GPUs (CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES)"
     python scripts/train/base_train/train.py \
         --name "$NAME" \
         --model-name "$MODEL" \
+        --il-overrides "$IL_OVERRIDES" \
         $DEBUG_FLAG
 fi

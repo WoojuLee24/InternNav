@@ -124,9 +124,11 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-04-06 07:21_
+_Last updated: 2026-04-10 08:14_
 
-### [43613c81] 2026-04-06 — [chore] mv run_queue.sh
+### [843eca90] 2026-04-10 — [chore] val_use_original_files mode
+
+### [fd2d28b7] 2026-04-06 — [chore] mv run_queue.sh
 
 ### [f7ec314c] 2026-04-06 — [chore] move run_queue.sh
 
@@ -137,5 +139,3 @@ _Last updated: 2026-04-06 07:21_
 ### [dafaced6] 2026-04-05 — [chore] edit param for 1node ablation
 
 ### [dae9f923] 2026-04-05 — [chore] ablation 1 node
-
-### [b6d7fd04] 2026-04-05 — [chore] ablation 1 node

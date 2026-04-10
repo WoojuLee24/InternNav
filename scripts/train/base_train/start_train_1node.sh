@@ -3,6 +3,7 @@
 # Default values
 NAME=navdp_1node
 MODEL=navdp_1node
+IL_OVERRIDES='{}'
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -13,6 +14,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --model)
             MODEL="$2"
+            shift 2
+            ;;
+        --il-overrides)
+            IL_OVERRIDES="$2"
             shift 2
             ;;
         *)
@@ -82,10 +87,12 @@ if [[ "$MODEL" == "navdp" || "$MODEL" == "navdp_1node" ]]; then
         --master_port=29500 \
         scripts/train/base_train/train.py \
         --name "$NAME" \
-        --model-name "$MODEL"
+        --model-name "$MODEL" \
+        --il-overrides "$IL_OVERRIDES"
 else
     echo "Using python to start $MODEL training, using $NUM_GPUS GPUs (CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES)"
     python scripts/train/base_train/train.py \
         --name "$NAME" \
-        --model-name "$MODEL"
+        --model-name "$MODEL" \
+        --il-overrides "$IL_OVERRIDES"
 fi

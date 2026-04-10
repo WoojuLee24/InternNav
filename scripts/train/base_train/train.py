@@ -43,6 +43,7 @@ class TrainCfg(BaseModel):
     save_checkpoints: bool = True
     save_every_epoch: bool = False
     il_overrides: str = '{}'  # JSON override for il config, e.g. '{"lr_scheduler_type":"cosine","lr_eta_min":1e-6}'
+    val_use_original_files: bool = False  # If True, val dataset loads original .ply/.parquet instead of pre-converted .npy/.npz
 
 
 class CheckpointFormatCallback(TrainerCallback):
@@ -188,6 +189,8 @@ def main(config, model_class, model_config_class, debug=False):
                 random_digit=config.il.random_digit,
                 prior_sample=config.il.prior_sample,
                 use_scipy_kdtree=getattr(config.il, 'use_scipy_kdtree', False),
+                use_npy_obstacle=getattr(config.il, 'use_npy_obstacle', False),
+                use_npz_parquet=getattr(config.il, 'use_npz_parquet', False),
             )
         else:
             if '3dgs' in config.il.lmdb_features_dir or '3dgs' in config.il.lmdb_features_dir:
@@ -236,6 +239,7 @@ def main(config, model_class, model_config_class, debug=False):
         if val_ratio and val_ratio > 0:
             if config.model_name == 'navdp':
                 # Re-create dataset with val split (uses cached preload JSON)
+                _val_original = getattr(config.il, 'val_use_original_files', False)
                 val_dataset = NavDP_Base_Datset(
                     config.il.root_dir,
                     config.il.dataset_navdp,
@@ -251,6 +255,8 @@ def main(config, model_class, model_config_class, debug=False):
                     is_train=False,
                     val_ratio=val_ratio,
                     use_scipy_kdtree=getattr(config.il, 'use_scipy_kdtree', False),
+                    use_npy_obstacle=False if _val_original else getattr(config.il, 'use_npy_obstacle', False),
+                    use_npz_parquet=False if _val_original else getattr(config.il, 'use_npz_parquet', False),
                 )
                 # Also rebuild train_dataset with val excluded
                 train_dataset = NavDP_Base_Datset(
@@ -268,6 +274,8 @@ def main(config, model_class, model_config_class, debug=False):
                     is_train=True,
                     val_ratio=val_ratio,
                     use_scipy_kdtree=getattr(config.il, 'use_scipy_kdtree', False),
+                    use_npy_obstacle=getattr(config.il, 'use_npy_obstacle', False),
+                    use_npz_parquet=getattr(config.il, 'use_npz_parquet', False),
                 )
             elif config.model_name in ['cma', 'seq2seq']:
                 # Split lmdb_keys: last val_ratio fraction → val
