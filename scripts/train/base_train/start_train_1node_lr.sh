@@ -5,18 +5,11 @@ NAME=navdp_1node_lr
 MODEL=navdp_1node
 IL_OVERRIDES='{}'  # JSON override, e.g. '{"lr_scheduler_type":"cosine","lr_eta_min":1e-6}'
 
-"""
-  IL_OVERRIDES = '{"lr_scheduler_type":"linear","lr_end_factor":0.5,"lr_total_iters":10000}'        
-                                                   
-  # 더 길게 decay (30k, 10배 감소)                 
-  IL_OVERRIDES = '{"lr_scheduler_type":"linear","lr_end_factor":0.1,"lr_total_iters":30000}'        
-                                                   
-  # cosine (전체 step에 걸쳐 1e-6까지)
-  IL_OVERRIDES = '{"lr_scheduler_type":"cosine","lr_eta_min":1e-6}'                                 
-                                                   
-  # lr 자체 + cosine
-  IL_OVERRIDES = '{"lr":5e-5,"lr_scheduler_type":"cosine","lr_eta_min":1e-7}'
-"""
+# IL_OVERRIDES examples:
+#   '{"lr_scheduler_type":"linear","lr_end_factor":0.5,"lr_total_iters":10000}'
+#   '{"lr_scheduler_type":"linear","lr_end_factor":0.1,"lr_total_iters":30000}'  # 더 길게 decay (30k, 10배 감소)
+#   '{"lr_scheduler_type":"cosine","lr_eta_min":1e-6}'                           # cosine (전체 step에 걸쳐 1e-6까지)
+#   '{"lr":5e-5,"lr_scheduler_type":"cosine","lr_eta_min":1e-7}'                 # lr 자체 + cosine
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
