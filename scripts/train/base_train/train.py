@@ -239,7 +239,7 @@ def main(config, model_class, model_config_class, debug=False):
         if val_ratio and val_ratio > 0:
             if config.model_name == 'navdp':
                 # Re-create dataset with val split (uses cached preload JSON)
-                _val_original = getattr(config.il, 'val_use_original_files', False)
+                _val_original = getattr(config.il, 'val_use_original_files', True)
                 val_dataset = NavDP_Base_Datset(
                     config.il.root_dir,
                     config.il.dataset_navdp,
