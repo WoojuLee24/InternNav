@@ -124,18 +124,18 @@ Evaluation configs reference paths like `data/scene_data/mp3d_pe`, `data/vln_pe/
 
 ## Recent Development Log
 <!-- AUTO-UPDATED by post-commit hook - DO NOT EDIT MANUALLY -->
-_Last updated: 2026-04-10 08:14_
+_Last updated: 2026-04-10 13:27_
 
-### [843eca90] 2026-04-10 — [chore] val_use_original_files mode
+### [059c92ed] 2026-04-10 — [feat] validation is set to the original files
+
+### [5e666cf5] 2026-04-10 — [feat] convert parquet and pointcloud in parallel
+
+### [90e1638f] 2026-04-10 — [chore] add summary for ablation
+
+### [2a5b68e8] 2026-04-10 — [feat] run_queue to train continously
+
+### [d56e5356] 2026-04-10 — [chore] val_use_original_files mode
 
 ### [fd2d28b7] 2026-04-06 — [chore] mv run_queue.sh
 
 ### [f7ec314c] 2026-04-06 — [chore] move run_queue.sh
-
-### [8295a3e6] 2026-04-06 — [feat] 1. lr_scheduler, 2. run_queue
-
-### [e7942488] 2026-04-06 — [chore] edit default ply, parquet setting as npy, npz
-
-### [dafaced6] 2026-04-05 — [chore] edit param for 1node ablation
-
-### [dae9f923] 2026-04-05 — [chore] ablation 1 node
