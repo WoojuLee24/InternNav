@@ -19,6 +19,7 @@ def generate(root_dir: str, output: str):
     trajectory_rgb_path = []
     trajectory_depth_path = []
     trajectory_afford_path = []
+    trajectory_scene_key = []
     # Each entry: {"scene": scene_id, "reason": str, "episode_idx": int or None}
     skip_log = []
 
@@ -82,6 +83,7 @@ def generate(root_dir: str, output: str):
                     trajectory_rgb_path.append(episode_rgb_path)
                     trajectory_depth_path.append(episode_depth_path)
                     trajectory_afford_path.append(afford_dir)
+                    trajectory_scene_key.append(scene_id)
                 except Exception as e:
                     skip_episode(scene_id, episode_idx, str(e))
                     continue
@@ -93,6 +95,7 @@ def generate(root_dir: str, output: str):
         'trajectory_rgb_path': trajectory_rgb_path,
         'trajectory_depth_path': trajectory_depth_path,
         'trajectory_afford_path': trajectory_afford_path,
+        'trajectory_scene_key': trajectory_scene_key,
     }
     with open(output, 'w') as f:
         json.dump(save_dict, f, indent=4)
