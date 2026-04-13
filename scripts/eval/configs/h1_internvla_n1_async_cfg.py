@@ -16,7 +16,7 @@ eval_cfg = EvalCfg(
         model_settings={
             'env_num': 1,
             'sim_num': 1,
-            'model_path': "checkpoints/InternVLA-N1", # "checkpoints/InternVLA-N1-DualVLN",
+            'model_path': "/ws/src/InternNav/checkpoints/InternVLA-N1-w-NavDP", # "checkpoints/InternVLA-N1-DualVLN",
             'camera_intrinsic': [[585.0, 0.0, 320.0], [0.0, 585.0, 240.0], [0.0, 0.0, 1.0]],
             'width': 640,
             'height': 480,
@@ -40,7 +40,7 @@ eval_cfg = EvalCfg(
         env_type='internutopia',
         env_settings={
             'use_fabric': False,  # Please set use_fabric=False due to the render delay;
-            'headless': True,
+            'headless': False, #  True,
         },
     ),
     task=TaskCfg(
@@ -53,12 +53,12 @@ eval_cfg = EvalCfg(
         },
         scene=SceneCfg(
             scene_type='mp3d',
-            scene_data_dir='data/scene_data/mp3d_pe',
+            scene_data_dir='/ws/src/InternNav/data/InternData-N1-v0.5-mini/scene_data/mp3d_pe',
         ),
         robot_name='h1',
         robot_flash=True,  # If robot_flash is True, the mode is flash (set world_pose directly); else you choose physical mode.
         flash_collision=False,  # If flash_collision is True, the robot will stop when collision detected.
-        robot_usd_path='data/Embodiments/vln-pe/h1/h1_internvla.usd',
+        robot_usd_path='/ws/src/InternNav/data/InternData-N1-v0.5-mini/Embodiments/vln-pe/h1/h1_internvla.usd',
         camera_resolution=[640, 480],  # (W,H)
         camera_prim_path='torso_link/h1_1_25_down_30',
         one_step_stand_still=True,  # For dual-system, please keep this param True.
@@ -66,7 +66,7 @@ eval_cfg = EvalCfg(
     dataset=EvalDatasetCfg(
         dataset_type="mp3d",
         dataset_settings={
-            'base_data_dir': 'data/vln_pe/raw_data/r2r',
+            'base_data_dir': '/ws/src/InternNav/data/InternData-N1-v0.5-mini/vln_pe/raw_data/r2r',
             'split_data_types': ['val_unseen'],  # 'val_seen'
             'filter_stairs': True,  # For iros challenge, this is False; For results in the paper, this is True.
             # 'selected_scans': ['zsNo4HB9uLZ'],
@@ -77,6 +77,7 @@ eval_cfg = EvalCfg(
     eval_settings={
         'save_to_json': True,
         'vis_output': True,
-        'use_agent_server': True,  # If use_agent_server=True, please start the agent server first.
+        'show_rgb': True,
+        'use_agent_server': False, # True,  # If use_agent_server=True, please start the agent server first.
     },
 )

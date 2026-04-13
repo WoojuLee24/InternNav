@@ -63,6 +63,7 @@ class VLNDistributedEvaluator(DistributedEvaluator):
         self.robot_flash = config.task.robot_flash
         self.save_to_json = config.eval_settings['save_to_json']
         self.vis_output = config.eval_settings['vis_output']
+        self.show_rgb = config.eval_settings.get('show_rgb', False)
         self.visualize_util = VisualizeUtil(self.task_name, fps=6)
 
         end_time = time()
@@ -301,6 +302,65 @@ class VLNDistributedEvaluator(DistributedEvaluator):
 
             if env_terminate:
                 break
+
+            # show live RGB from env 0
+            if self.show_rgb:
+                import cv2
+                for i, ob in enumerate(obs):
+                    if ob is None or 'rgb' not in ob:
+                        continue
+                    frame = cv2.cvtColor(ob['rgb'].copy(), cv2.COLOR_RGB2BGR)
+                    h, w = frame.shape[:2]
+
+                    # overlay instruction text
+                    if 'instruction' in ob:
+                        font = cv2.FONT_HERSHEY_SIMPLEX
+                        font_scale, thickness = 0.45, 1
+                        words = ob['instruction'].split()
+                        lines, cur = [], ''
+                        for word in words:
+                            trial = (cur + ' ' + word).strip()
+                            (tw, _), _ = cv2.getTextSize(trial, font, font_scale, thickness)
+                            if tw > w - 10 and cur:
+                                lines.append(cur)
+                                cur = word
+                            else:
+                                cur = trial
+                        if cur:
+                            lines.append(cur)
+                        for j, line in enumerate(lines):
+                            y = 14 + j * 16
+                            cv2.rectangle(frame, (0, y - 12), (w, y + 4), (0, 0, 0), -1)
+                            cv2.putText(frame, line, (5, y), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+
+                    # overlay trajectory minimap (reference path + current robot position)
+                    info = reset_info[i] if i < len(reset_info) else None
+                    if info is not None and 'reference_path' in info.data and 'globalgps' in ob:
+                        ref_pts = np.array(info.data['reference_path'])[:, :2]
+                        cur_xy = np.array(ob['globalgps'])[:2]
+                        all_pts = np.vstack([ref_pts, cur_xy.reshape(1, 2)])
+                        mn, mx = all_pts.min(0), all_pts.max(0)
+                        span = np.maximum(mx - mn, 1e-6)
+                        map_sz, pad = 150, 10
+                        scale = (map_sz - 2 * pad) / span.max()
+
+                        def to_px(pt):
+                            px = int((pt[0] - mn[0]) * scale) + pad
+                            py = map_sz - pad - int((pt[1] - mn[1]) * scale)
+                            return (int(np.clip(px, 0, map_sz - 1)), int(np.clip(py, 0, map_sz - 1)))
+
+                        mmap = np.full((map_sz, map_sz, 3), 40, dtype=np.uint8)
+                        for k in range(len(ref_pts) - 1):
+                            cv2.line(mmap, to_px(ref_pts[k]), to_px(ref_pts[k + 1]), (0, 200, 0), 1)
+                        for pt in ref_pts:
+                            cv2.circle(mmap, to_px(pt), 2, (0, 255, 0), -1)
+                        cv2.circle(mmap, to_px(cur_xy), 5, (0, 80, 255), -1)
+                        x0, y0 = w - map_sz - 5, h - map_sz - 5
+                        frame[y0:y0 + map_sz, x0:x0 + map_sz] = mmap
+
+                    cv2.imshow('Robot RGB', frame)
+                    cv2.waitKey(1)
+                    break
 
             # save step obs
             if self.vis_output:
