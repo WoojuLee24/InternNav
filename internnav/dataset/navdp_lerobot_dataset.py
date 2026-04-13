@@ -35,6 +35,38 @@ def print(*args, **kwargs):
 builtins.print = print
 
 
+def _stratified_scene_split(tdd, trp, tdp, tap, scene_keys, val_ratio, is_train):
+    """Scene-level stratified val split.
+
+    Per group, holds out the last ceil(n_scenes * val_ratio) scenes entirely.
+    Falls back to flat tail-split if scene_keys is empty/None (backward compat).
+    """
+    from collections import OrderedDict
+
+    if not scene_keys:
+        n_val = max(1, int(len(tdd) * val_ratio))
+        idx = list(range(len(tdd) - n_val)) if is_train else list(range(len(tdd) - n_val, len(tdd)))
+        return [tdd[i] for i in idx], [trp[i] for i in idx], [tdp[i] for i in idx], [tap[i] for i in idx]
+
+    # collect ordered unique scenes per group
+    group_to_scenes = OrderedDict()
+    for sk in scene_keys:
+        group = sk.split('/')[0]
+        if group not in group_to_scenes:
+            group_to_scenes[group] = []
+        if sk not in group_to_scenes[group]:
+            group_to_scenes[group].append(sk)
+
+    # per group, last n_val_scenes go to val
+    val_scene_keys = set()
+    for group, scenes in group_to_scenes.items():
+        n_val_scenes = max(1, int(len(scenes) * val_ratio))
+        val_scene_keys.update(scenes[-n_val_scenes:])
+
+    idx = [i for i, sk in enumerate(scene_keys) if (sk not in val_scene_keys) == is_train]
+    return [tdd[i] for i in idx], [trp[i] for i in idx], [tdp[i] for i in idx], [tap[i] for i in idx]
+
+
 class NavDP_Base_Datset(Dataset):
     def __init__(
         self,
@@ -74,6 +106,7 @@ class NavDP_Base_Datset(Dataset):
         self.trajectory_rgb_path = []
         self.trajectory_depth_path = []
         self.trajectory_afford_path = []
+        self.trajectory_scene_key = []
         self.random_digit = random_digit
         self.prior_sample = prior_sample
         self.pixel_channel = pixel_channel
@@ -130,6 +163,7 @@ class NavDP_Base_Datset(Dataset):
                             self.trajectory_rgb_path.append(episode_rgb_path)
                             self.trajectory_depth_path.append(episode_depth_path)
                             self.trajectory_afford_path.append(afford_dir)
+                            self.trajectory_scene_key.append(f"{group_dir}/{scene_dir}")
                         except Exception as e:
                             print(f"Error processing episode {episode_idx}: {e}")
                             continue
@@ -139,6 +173,7 @@ class NavDP_Base_Datset(Dataset):
                 'trajectory_rgb_path': self.trajectory_rgb_path,
                 'trajectory_depth_path': self.trajectory_depth_path,
                 'trajectory_afford_path': self.trajectory_afford_path,
+                'trajectory_scene_key': self.trajectory_scene_key,
             }
            
             _is_dist = _dist.is_available() and _dist.is_initialized()
@@ -149,20 +184,14 @@ class NavDP_Base_Datset(Dataset):
             if _is_dist:
                 _dist.barrier()  # wait for rank 0 to finish writing before all ranks read
 
-            # split train / val before replication
+            # split train / val before replication (scene-level stratified)
             if val_ratio and val_ratio > 0:
-                n_base = len(self.trajectory_data_dir)
-                n_val = max(1, int(n_base * val_ratio))
-                if is_train:
-                    self.trajectory_data_dir = self.trajectory_data_dir[:-n_val]
-                    self.trajectory_rgb_path = self.trajectory_rgb_path[:-n_val]
-                    self.trajectory_depth_path = self.trajectory_depth_path[:-n_val]
-                    self.trajectory_afford_path = self.trajectory_afford_path[:-n_val]
-                else:
-                    self.trajectory_data_dir = self.trajectory_data_dir[-n_val:]
-                    self.trajectory_rgb_path = self.trajectory_rgb_path[-n_val:]
-                    self.trajectory_depth_path = self.trajectory_depth_path[-n_val:]
-                    self.trajectory_afford_path = self.trajectory_afford_path[-n_val:]
+                self.trajectory_data_dir, self.trajectory_rgb_path, self.trajectory_depth_path, self.trajectory_afford_path = \
+                    _stratified_scene_split(
+                        self.trajectory_data_dir, self.trajectory_rgb_path,
+                        self.trajectory_depth_path, self.trajectory_afford_path,
+                        self.trajectory_scene_key, val_ratio, is_train,
+                    )
 
             # replicate the data 50 times (training only)
             if is_train:
@@ -179,13 +208,11 @@ class NavDP_Base_Datset(Dataset):
             _trp = load_dict['trajectory_rgb_path']
             _tdp = load_dict['trajectory_depth_path']
             _tap = load_dict['trajectory_afford_path']
+            _tsk = load_dict.get('trajectory_scene_key', [])  # backward compat
             if val_ratio and val_ratio > 0:
-                n_base = len(_tdd)
-                n_val = max(1, int(n_base * val_ratio))
-                if is_train:
-                    _tdd, _trp, _tdp, _tap = _tdd[:-n_val], _trp[:-n_val], _tdp[:-n_val], _tap[:-n_val]
-                else:
-                    _tdd, _trp, _tdp, _tap = _tdd[-n_val:], _trp[-n_val:], _tdp[-n_val:], _tap[-n_val:]
+                _tdd, _trp, _tdp, _tap = _stratified_scene_split(
+                    _tdd, _trp, _tdp, _tap, _tsk, val_ratio, is_train,
+                )
             if is_train:
                 self._n_base_episodes = len(_tdd)
                 self.trajectory_data_dir = _tdd * 50

@@ -218,7 +218,6 @@ def main(config, model_class, model_config_class, debug=False):
                 batch_size=config.il.batch_size,
             )
             collate_fn = cma_collate_fn
-
         elif config.model_name == 'rdp':
             policy_trainer = RDPTrainer
             train_dataset = RDP_LerobotDataset(
