@@ -684,6 +684,87 @@ Interpretation:
 - Small but consistent speed gain while maintaining near-equivalent trajectory behavior.
 - Promoted as new default max token limit.
 
+## Module 44 attempt: Track-1 timing distribution evaluation (offline parser)
+
+Status: accepted (measurement-quality upgrade)
+
+What was added:
+- New evaluator script: `scripts/realworld/eval_track1_metrics.py`
+- Outputs per-run timing distributions from existing logs:
+  - client HTTP latency: mean/p50/p90/p99
+  - server S1 inference time: mean/p50/p90/p99
+  - server S2 inference time: mean/p50/p90/p99
+  - server dual-step time: mean/p50/p90/p99
+- Report artifacts:
+  - `docs/research_outputs/track1_fix121_fix122.md`
+  - `docs/research_outputs/track1_fix121_fix122.json`
+
+Evaluation runs (current default profile):
+
+| Run | req_count | traj_count | no_traj_count | discrete_count | http_mean_s | http_p50_s | http_p90_s | http_p99_s | s1_mean_s | s1_p90_s | s2_mean_s | s2_p90_s | dual_mean_s | dual_p90_s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| fix121 | 138 | 133 | 4 | 5 | 1.083 | 0.797 | 2.213 | 2.261 | 0.288 | 0.289 | 0.536 | 1.033 | 1.033 | 2.190 |
+| fix122 | 139 | 130 | 6 | 9 | 1.071 | 0.794 | 2.224 | 2.273 | 0.289 | 0.291 | 0.507 | 1.044 | 1.024 | 2.201 |
+
+Interpretation:
+- This module does not change runtime behavior; it improves measurement fidelity for Track-1.
+- Timing distributions confirm bursty latency behavior (p90/p99 much higher than p50), guiding next optimization focus.
+- Accepted as required instrumentation for deeper sync-to-async research.
+
+## Module 45 attempt: Track-1 latency-tail correlation analysis (offline parser)
+
+Status: accepted (bottleneck diagnosis upgrade)
+
+What was added:
+- New analysis script: `scripts/realworld/analyze_track1_tail.py`
+- Aligns client HTTP latencies with server-side request-order timing summaries.
+- Reports whether latency tail windows correlate with S2 refresh activity and longer dual-step durations.
+- Report artifacts:
+  - `docs/research_outputs/track1_tail_fix121_fix122.md`
+  - `docs/research_outputs/track1_tail_fix121_fix122.json`
+
+Evaluation runs (current default profile):
+
+| Run | aligned_count | lat_mean_s | lat_p90_s | tail_count | tail_has_s2_ratio | body_has_s2_ratio | tail_dual_mean_s | body_dual_mean_s | tail_s2_mean_s | body_s2_mean_s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| fix121 | 138 | 1.083 | 2.213 | 14 | 0.214 | 0.097 | 1.195 | 0.949 | 0.196 | 0.098 |
+| fix122 | 139 | 1.071 | 2.224 | 14 | 0.357 | 0.064 | 1.216 | 0.950 | 0.432 | 0.068 |
+
+Interpretation:
+- Tail windows are more likely to include S2 activity than body windows on both runs.
+- Tail windows also show higher dual-step means than body windows.
+- This supports focusing next optimizations on S2 cadence/decode control rather than only transport-level tuning.
+- Accepted as Track-1 diagnostic evidence to guide Track-2 candidates.
+
+## Module 46 attempt: E01 lightweight telemetry thread (`--telemetry-interval 5`)
+
+Status: rejected (quality instability across bags)
+
+What was changed:
+- Added optional client telemetry thread with low-frequency counters:
+  - `http_hz`, `traj_hz`
+  - cumulative `http/traj/no_traj/discrete/fail` counters
+- New flag in client:
+  - `--telemetry-interval` (0 disables, >0 enables periodic telemetry logs)
+
+Protocol fix note:
+- Initial E01 attempt mistakenly used `BAG_PLAY_EXTRA_ARGS="--once"`, but this ROS2 bag version does not support `--once`.
+- That invalid attempt produced zero-request runs and was discarded.
+- Re-ran E01 after cleanup with valid bag-play args and strict process isolation.
+
+Validated runs:
+
+| Run | Rosbag | req_count | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| fix124 | `my_camera_bag_20260310_035208` | 234 | 226 | 4 | 8 | 2.302 | 0.378 | 0 |
+| fix125 | `my_camera_bag_20260310_035611` | 46 | 25 | 3 | 21 | 2.612 | 0.342 | 0 |
+
+Interpretation:
+- Bag1 shows very fast throughput with strong trajectory output.
+- Bag2 shows severe shift to discrete behavior and large trajectory drop versus accepted baseline profile.
+- Not robust across both bags; rejected per strict guardrail.
+- Keep `--telemetry-interval` as optional diagnostic-only flag, not default.
+
 ## Speed/quality trend snapshot (selected checkpoints)
 
 | Stage | Representative runs | req_hz (range) | http_avg_latency_s (range) | traj_count (range) |
