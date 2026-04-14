@@ -149,33 +149,38 @@ class DAT_RGBD_Patch_Backbone(nn.Module):
         self.project_layer = nn.Linear(384, embed_size)
 
     def forward(self, images, depths):
+        model_dtype = next(self.rgb_model.parameters()).dtype
         if len(images.shape) == 4:
-            tensor_images = images.to(dtype=self.input_dtype).permute(0, 3, 1, 2)
+            tensor_images = images.to(dtype=model_dtype).permute(0, 3, 1, 2)
             tensor_images = tensor_images.reshape(-1, 3, self.image_size, self.image_size)
+            preprocess_mean = torch.tensor([0.485, 0.456, 0.406], dtype=tensor_images.dtype, device=tensor_images.device)
+            preprocess_std = torch.tensor([0.229, 0.224, 0.225], dtype=tensor_images.dtype, device=tensor_images.device)
             tensor_norm_images = (
-                tensor_images - self.preprocess_mean.reshape(1, 3, 1, 1).to(images.device)
-            ) / self.preprocess_std.to(images.device).reshape(1, 3, 1, 1)
+                tensor_images - preprocess_mean.reshape(1, 3, 1, 1)
+            ) / preprocess_std.reshape(1, 3, 1, 1)
             image_token = self.rgb_model.get_intermediate_layers(tensor_norm_images)[0]
         elif len(images.shape) == 5:
             B, T, H, W, C = images.shape
-            tensor_images = images.to(dtype=self.input_dtype).permute(0, 1, 4, 2, 3)
+            tensor_images = images.to(dtype=model_dtype).permute(0, 1, 4, 2, 3)
             tensor_images = tensor_images.reshape(-1, 3, self.image_size, self.image_size)
+            preprocess_mean = torch.tensor([0.485, 0.456, 0.406], dtype=tensor_images.dtype, device=tensor_images.device)
+            preprocess_std = torch.tensor([0.229, 0.224, 0.225], dtype=tensor_images.dtype, device=tensor_images.device)
             tensor_norm_images = (
-                tensor_images - self.preprocess_mean.to(images.device).reshape(1, 3, 1, 1)
-            ) / self.preprocess_std.to(images.device).reshape(1, 3, 1, 1)
+                tensor_images - preprocess_mean.reshape(1, 3, 1, 1)
+            ) / preprocess_std.reshape(1, 3, 1, 1)
             image_token = self.rgb_model.get_intermediate_layers(tensor_norm_images)[0].reshape(B, T * 256, -1)
 
         if not self.finetune:
             image_token = image_token.detach()
 
         if len(depths.shape) == 4:
-            tensor_depths = depths.to(dtype=self.input_dtype).permute(0, 3, 1, 2)
+            tensor_depths = depths.to(dtype=model_dtype).permute(0, 3, 1, 2)
             tensor_depths = tensor_depths.reshape(-1, 1, self.image_size, self.image_size)
             tensor_depths = torch.cat([tensor_depths, tensor_depths, tensor_depths], dim=1)
             depth_token = self.depth_model.get_intermediate_layers(tensor_depths)[0]
         elif len(depths.shape) == 5:
             B, T, H, W, C = depths.shape
-            tensor_depths = depths.to(dtype=self.input_dtype).permute(0, 1, 4, 2, 3)
+            tensor_depths = depths.to(dtype=model_dtype).permute(0, 1, 4, 2, 3)
             tensor_depths = tensor_depths.reshape(-1, 1, self.image_size, self.image_size)
             tensor_depths = torch.cat([tensor_depths, tensor_depths, tensor_depths], dim=1)
             depth_token = self.depth_model.get_intermediate_layers(tensor_depths)[0].reshape(B, T * 256, -1)

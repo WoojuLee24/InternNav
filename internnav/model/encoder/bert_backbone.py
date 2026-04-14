@@ -7,7 +7,32 @@ import torch.nn as nn
 try:
     from transformers.modeling_utils import apply_chunking_to_forward
 except ImportError:
-    from transformers.pytorch_utils import apply_chunking_to_forward
+    def apply_chunking_to_forward(forward_fn, chunk_size, chunk_dim, *input_tensors, **kwargs):
+        """
+        This function is a fallback when the original apply_chunking_to_forward is not available.
+        It chunks the input tensors along the given dimension and applies the forward function.
+        """
+        if len(input_tensors) == 0:
+            raise ValueError("You have to give at least one input Tensor to the module")
+
+        tensor_shape = input_tensors[0].shape[chunk_dim]
+        if tensor_shape % chunk_size != 0:
+            raise ValueError(
+                f"`chunk_size` ({chunk_size}) must be a divisor of dimension {chunk_dim} "
+                f"({tensor_shape} size of the tensor)."
+            )
+
+        num_chunks = tensor_shape // chunk_size
+        input_tensors_tuple = tuple(input_tensors)
+        ret = tuple(
+            forward_fn(*input_tensors_tuple[i * chunk_size:(i + 1) * chunk_size], **kwargs)
+            for i in range(num_chunks)
+        )
+
+        if len(ret) == 1:
+            return ret[0]
+
+        return torch.cat(ret, dim=chunk_dim)
 
 
 def gelu(x):

@@ -1,7 +1,6 @@
 import argparse
 import json
 import os
-import threading
 import time
 from datetime import datetime
 import sys
@@ -30,109 +29,95 @@ start_time = time.time()
 output_dir = ''
 save_dir = 'vis_debug/http_internvla_server_debug'
 os.makedirs(save_dir, exist_ok=True)
-agent_lock = threading.Lock()
-SERVER_MODE = "sync"
-SERVER_OPT_FLAGS = {
-    "kv_cache": False,
-    "tensorrt": False,
-    "quantization": False,
-    "vision_cache": False,
-    "methods": [],
-}
 
 
 @app.route("/eval_dual", methods=['POST'])
 def eval_dual():
     global idx, output_dir, start_time
-    try:
+    start_time = time.time()
+
+    image_file = request.files['image']
+    depth_file = request.files['depth']
+    json_data = request.form['json']
+    data = json.loads(json_data)
+
+    image = Image.open(image_file.stream)
+    image = image.convert('RGB')
+    image = np.asarray(image)
+
+    depth = Image.open(depth_file.stream)
+    depth = depth.convert('I')
+    depth = np.asarray(depth)
+    depth = depth.astype(np.float32) / 10000.0
+    print(f"read http data cost {time.time() - start_time}")
+
+    camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+    #instruction = "Turn around and walk out of this office. Turn towards your slight right at the chair. Move forward to the walkway and go near the red bin. You can see an open door on your right side, go inside the open door. Stop at the computer monitor"
+    #instruction = "Turn around and walk out of this office. Turn towards your slight right at the chair. Move forward to the walkway and go near the red bin. You can see an open door on your right side, go inside the open door. Stop at the computer monitor"
+    # instruction = "Stop. Just stop. Move forward one step. Move forward two step. Turn right and stop."
+    # instruction = "Go straight along the walkway and turn right at the crosswalk. Go straight to the end of the crosswalk and stop."
+    # instruction = "Go straight along the walkway until you see a crosswalk. Go straight again until you see a second crosswalk. Turn right at the second crosswalk and go straight to the end of the crosswalk. Stop at the end of the crosswalk."
+    # instruction = "Exit the door, Then stop."  # 1
+    instruction = "Exit the door,  then Turn left and go straight until you find small fire extinguisher. Then stop."  # 2
+    # instruction = "Exit the door,  then Turn left and go straight until bathroom on right side. Then stop."  # 3
+    # instruction = "Exit the door,  then Turn left and go straight until you see exit sign. Then stop."  # 4
+    # instruction = "Exit the door,  then Turn left and go straight until you find staircase to the right side. Then stop."  # 5
+    policy_init = data['reset']
+    if policy_init:
         start_time = time.time()
+        idx = 0
+        output_dir = 'output/runs' + datetime.now().strftime('%m-%d-%H%M')
+        os.makedirs(output_dir, exist_ok=True)
+        print("init reset model!!!")
+        agent.reset()
 
-        image_file = request.files['image']
-        depth_file = request.files['depth']
-        json_data = request.form['json']
-        data = json.loads(json_data)
+    idx += 1
 
-        image = Image.open(image_file.stream)
-        image = image.convert('RGB')
-        image = np.asarray(image)
+    look_down = False
+    t0 = time.time()
+    dual_sys_output = {}
 
-        depth = Image.open(depth_file.stream)
-        depth = depth.convert('I')
-        depth = np.asarray(depth)
-        depth = depth.astype(np.float32) / 10000.0
-        print(f"read http data cost {time.time() - start_time}")
+    dual_sys_output = agent.step(
+        image, depth, camera_pose, instruction, intrinsic=args.camera_intrinsic, look_down=look_down
+    )
+    if dual_sys_output.output_action is not None and dual_sys_output.output_action == [5]:
+        look_down = True
+        dual_sys_output = agent.step(
+            image, depth, camera_pose, instruction, intrinsic=args.camera_intrinsic, look_down=look_down
+        )
 
-        camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
-        #instruction = "Turn around and walk out of this office. Turn towards your slight right at the chair. Move forward to the walkway and go near the red bin. You can see an open door on your right side, go inside the open door. Stop at the computer monitor"
-        #instruction = "Turn around and walk out of this office. Turn towards your slight right at the chair. Move forward to the walkway and go near the red bin. You can see an open door on your right side, go inside the open door. Stop at the computer monitor"
-        # instruction = "Stop. Just stop. Move forward one step. Move forward two step. Turn right and stop."
-        # instruction = "Go straight along the walkway and turn right at the crosswalk. Go straight to the end of the crosswalk and stop."
-        # instruction = "Go straight along the walkway until you see a crosswalk. Go straight again until you see a second crosswalk. Turn right at the second crosswalk and go straight to the end of the crosswalk. Stop at the end of the crosswalk."
-        instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
-        policy_init = data['reset']
-        req_mode = data.get('mode', SERVER_MODE)
-        if req_mode != 'sync':
-            print(f"[Server] Requested mode '{req_mode}' not implemented yet; using sync")
-        req_opts = data.get('optimizations', {})
-        if req_opts:
-            print(f"[Server] Received optimization request (scaffold): {req_opts}")
-        if policy_init:
-            start_time = time.time()
-            idx = 0
-            output_dir = 'output/runs' + datetime.now().strftime('%m-%d-%H%M')
-            os.makedirs(output_dir, exist_ok=True)
-            print("init reset model!!!")
-            with agent_lock:
-                agent.reset()
+    t1 = time.time()
+    generate_time = t1 - t0
+    print(f"dual sys step time: {generate_time}")
+    
+    # 서버의 라우트 함수 내부
+    json_data = request.form['json']
+    data = json.loads(json_data)
 
-        idx += 1
+    # 클라이언트에서 보낸 idx 추출
+    image_id = data.get('idx', 0) 
+    filename = f"frame_{image_id:05d}"  # 예: frame_00001.jpg
 
-        look_down = False
-        t0 = time.time()
-        dual_sys_output = {}
+    # image_id = int(time.time() * 1000) 
+    # filename = f"rec_{image_id}.jpg"
 
-        with agent_lock:
-            dual_sys_output = agent.step(
-                image, depth, camera_pose, instruction, intrinsic=args.camera_intrinsic, look_down=look_down
-            )
-            if dual_sys_output.output_action is not None and dual_sys_output.output_action == [5]:
-                look_down = True
-                dual_sys_output = agent.step(
-                    image, depth, camera_pose, instruction, intrinsic=args.camera_intrinsic, look_down=look_down
-                )
+    json_output = {}
+    if dual_sys_output.output_action is not None:
+        json_output['discrete_action'] = dual_sys_output.output_action
+        # annotate_image(image_id, image, agent.llm_output, dual_sys_output.output_trajectory, dual_sys_output.output_pixel, save_dir, filename)
 
-        t1 = time.time()
-        generate_time = t1 - t0
-        print(f"dual sys step time: {generate_time}")
-
-        # 클라이언트에서 보낸 idx 추출
-        image_id = data.get('idx', 0)
-        filename = f"frame_{image_id:05d}"  # 예: frame_00001.jpg
-
-        # image_id = int(time.time() * 1000)
-        # filename = f"rec_{image_id}.jpg"
-
-        json_output = {}
-        if dual_sys_output.output_action is not None:
-            json_output['discrete_action'] = dual_sys_output.output_action
-            # annotate_image(image_id, image, agent.llm_output, dual_sys_output.output_trajectory, dual_sys_output.output_pixel, save_dir, filename)
-
-        elif dual_sys_output.output_trajectory is not None:
-            json_output['trajectory'] = dual_sys_output.output_trajectory.tolist()
-            if dual_sys_output.output_pixel is not None:
-                json_output['pixel_goal'] = dual_sys_output.output_pixel
-                # annotate_image(image_id, image, 'traj', dual_sys_output.output_trajectory.tolist(), dual_sys_output.output_pixel, save_dir, filename)
-            else:
-                # annotate_image(image_id, image, 'traj_cached_latent', dual_sys_output.output_trajectory.tolist(), dual_sys_output.output_pixel, save_dir, filename)
-                pass
+    else:
+        json_output['trajectory'] = dual_sys_output.output_trajectory.tolist()
+        if dual_sys_output.output_pixel is not None:
+            json_output['pixel_goal'] = dual_sys_output.output_pixel
+            # annotate_image(image_id, image, 'traj', dual_sys_output.output_trajectory.tolist(), dual_sys_output.output_pixel, save_dir, filename)
         else:
-            json_output['status'] = 'waiting'
+            # annotate_image(image_id, image, 'traj_cached_latent', dual_sys_output.output_trajectory.tolist(), dual_sys_output.output_pixel, save_dir, filename)
+            pass
+        
 
-        # print(f"json_output {json_output}")
-        return jsonify(json_output)
-    except Exception as e:
-        print(f"[Server] eval_dual exception: {repr(e)}")
-        return jsonify({'status': 'waiting', 'error': str(e)})
+    # print(f"json_output {json_output}")
+    return jsonify(json_output)
 
 
 
@@ -274,47 +259,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--model_path", type=str, default="checkpoints/InternVLA-N1-w-NavDP")
-    parser.add_argument("--resize_w", type=int, default=256)
-    parser.add_argument("--resize_h", type=int, default=256)
-    parser.add_argument("--num_history", type=int, default=1)
-    parser.add_argument("--plan_step_gap", type=int, default=12)
-    parser.add_argument("--mode", type=str, default="sync", choices=["sync", "async"],
-                        help="Execution mode. async is scaffold-only for now.")
-    parser.add_argument("--kv-cache", action="store_true", help="Enable KV-cache optimization (scaffold flag).")
-    parser.add_argument("--tensorrt", action="store_true", help="Enable TensorRT optimization (scaffold flag).")
-    parser.add_argument("--quantization", action="store_true", help="Enable quantization optimization (scaffold flag).")
-    parser.add_argument("--quant-method", type=str, default="dynamic", choices=["dynamic", "static", "qat"],
-                        help="Quantization method (safe mode currently supports dynamic CPU fallback).")
-    parser.add_argument("--tensorrt-engine", type=str, default="",
-                        help="Path to TensorRT engine (optional, safe fallback if unavailable).")
-    parser.add_argument("--vision-cache", action="store_true", help="Enable vision-cache optimization (scaffold flag).")
-    parser.add_argument("--max-new-tokens", type=int, default=80,
-                        help="Max new tokens for language generation.")
-    parser.add_argument("--require-flash-attn", action="store_true", default=True,
-                        help="Require FlashAttention-2 at runtime (enabled by default).")
-    parser.add_argument("--tf32", action="store_true",
-                        help="Enable TF32 matmul/cudnn where supported.")
-    parser.add_argument("--method", action="append", default=[],
-                        help="Additional optimization method tag (repeatable, scaffold only).")
+    parser.add_argument("--resize_w", type=int, default=224)  # Optimized for speed
+    parser.add_argument("--resize_h", type=int, default=224)  # Optimized for speed
+    parser.add_argument("--num_history", type=int, default=8)
+    parser.add_argument("--plan_step_gap", type=int, default=4)
     parser.add_argument("--calib", type=str, default="/home/gdr/gd_vln/workspace/src/InternNav/scripts/realworld/calib/calib_scout.txt",
                         help="Path to calibration file (e.g. calib/calib_scout.txt)")
     args = parser.parse_args()
-
-    if args.mode != "sync":
-        print(f"[Server] mode={args.mode} requested, but async path is not implemented yet. Falling back to sync.")
-    SERVER_MODE = "sync"
-    SERVER_OPT_FLAGS = {
-        "kv_cache": bool(args.kv_cache),
-        "tensorrt": bool(args.tensorrt),
-        "quantization": bool(args.quantization),
-        "quant_method": str(args.quant_method),
-        "tensorrt_engine": str(args.tensorrt_engine),
-        "tf32": bool(args.tf32),
-        "vision_cache": bool(args.vision_cache),
-        "methods": list(args.method),
-    }
-    if any([args.kv_cache, args.tensorrt, args.quantization, args.vision_cache, len(args.method) > 0]):
-        print(f"[Server] Optimization flags enabled (scaffold only): {SERVER_OPT_FLAGS}")
 
     calib = Calibration(args.calib)
     args.camera_intrinsic = np.array([
@@ -333,15 +284,14 @@ if __name__ == '__main__':
     #     "hello",
     #     args.camera_intrinsic,
     # )
-    # Warmup can trigger CUDA asserts on some checkpoints/runtime combos; skip by default.
-    if os.environ.get("INTERNNAV_SERVER_WARMUP", "0") == "1":
-        agent.step(
-            np.zeros((480, 640, 3), dtype=np.uint8),
-            np.zeros((480, 640)),
-            np.eye(4),
-            "hello",
-            args.camera_intrinsic,
-        )
-        agent.reset()
+    # Patch: type error fix for first call
+    agent.step(
+        np.zeros((480, 640, 3), dtype=np.uint8),
+        np.zeros((480, 640)),
+        np.eye(4),
+        "hello",
+        args.camera_intrinsic,
+    )
+    agent.reset()
 
     app.run(host='0.0.0.0', port=5802)

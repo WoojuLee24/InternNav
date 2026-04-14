@@ -25,8 +25,21 @@ class InternVLAN1ModelConfig(Qwen2_5_VLConfig):
     model_type = "internvla_n1"
 
     def __init__(self, **kwargs):
+        hidden_size = kwargs.get('hidden_size', 3584)
+        n_query = kwargs.get('n_query', 4)
+        system1 = kwargs.get('system1', 'navdp_async')
+        model_cfg = kwargs.get('model_cfg', None)
+        vocab_size = kwargs.get('vocab_size', 151668)
+        
         super().__init__(**kwargs)
-        self.model_cfg = kwargs.get('model_cfg', None)
+        
+        # Qwen2_5_VLConfig stores hidden_size in text_config
+        # We also expose it at the top level for InternVLA code
+        self.hidden_size = hidden_size
+        self.n_query = n_query
+        self.system1 = system1
+        self.model_cfg = model_cfg
+        self.vocab_size = vocab_size
 
 
 class InternVLAN1Model(InternVLAN1MetaModel, Qwen2_5_VLModel):
@@ -39,84 +52,13 @@ class InternVLAN1Model(InternVLAN1MetaModel, Qwen2_5_VLModel):
 class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1MetaForCausalLM):
     config_class = InternVLAN1ModelConfig
 
-    @staticmethod
-    def _resolve_hidden_size(config):
-        hidden_size = getattr(config, "hidden_size", None)
-        if hidden_size is not None:
-            return hidden_size
-        text_cfg = getattr(config, "text_config", None)
-        if text_cfg is not None:
-            text_hidden = getattr(text_cfg, "hidden_size", None)
-            if text_hidden is not None:
-                return text_hidden
-        raise AttributeError("InternVLAN1 config missing hidden_size/text_config.hidden_size")
-
-    @staticmethod
-    def _resolve_vocab_size(config):
-        vocab_size = getattr(config, "vocab_size", None)
-        if vocab_size is not None:
-            return vocab_size
-        text_cfg = getattr(config, "text_config", None)
-        if text_cfg is not None:
-            text_vocab = getattr(text_cfg, "vocab_size", None)
-            if text_vocab is not None:
-                return text_vocab
-        raise AttributeError("InternVLAN1 config missing vocab_size/text_config.vocab_size")
-
-    def _embed_tokens(self, input_ids):
-        embed_tokens = getattr(self.model, "embed_tokens", None)
-        if embed_tokens is not None:
-            return embed_tokens(input_ids)
-        if hasattr(self.model, "get_input_embeddings"):
-            emb = self.model.get_input_embeddings()
-            if emb is not None:
-                return emb(input_ids)
-        if hasattr(self, "get_input_embeddings"):
-            emb = self.get_input_embeddings()
-            if emb is not None:
-                return emb(input_ids)
-        raise AttributeError("No token embedding module found for InternVLAN1 model")
-
-    def _get_visual_tower(self):
-        visual = getattr(self, "visual", None)
-        if visual is not None:
-            return visual
-        visual = getattr(self.model, "visual", None)
-        if visual is not None:
-            return visual
-        raise AttributeError("No visual tower found for InternVLAN1 model")
-
-    @staticmethod
-    def _normalize_visual_embeds(visual_outputs):
-        image_embeds = visual_outputs
-        if hasattr(image_embeds, "last_hidden_state"):
-            image_embeds = image_embeds.last_hidden_state
-        if torch.is_tensor(image_embeds) and image_embeds.dim() == 3:
-            image_embeds = image_embeds.flatten(0, 1)
-        return image_embeds
-
-    @staticmethod
-    def _align_feature_tokens(embeds, expected_tokens):
-        if not torch.is_tensor(embeds) or embeds.dim() != 2:
-            return embeds
-        n = embeds.shape[0]
-        if expected_tokens <= 0 or n == expected_tokens:
-            return embeds
-        if n % expected_tokens == 0:
-            r = n // expected_tokens
-            return embeds.reshape(expected_tokens, r, embeds.shape[1]).mean(dim=1)
-        if n > expected_tokens:
-            return embeds[:expected_tokens]
-        repeat = (expected_tokens + n - 1) // n
-        return embeds.repeat(repeat, 1)[:expected_tokens]
-
     def __init__(self, config):
         Qwen2_5_VLForConditionalGeneration.__init__(self, config)
         config.model_type == "internvla_n1"
 
         self.model = InternVLAN1Model(config)
         self.rope_deltas = None
-        self.lm_head = nn.Linear(self._resolve_hidden_size(config), self._resolve_vocab_size(config), bias=False)
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -125,6 +67,56 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
 
     def get_model(self):
         return self.model
+
+    def _embed_input_ids(self, input_ids: torch.LongTensor) -> torch.Tensor:
+        model = self.get_model()
+        language_model = getattr(model, "language_model", None)
+
+        if language_model is not None:
+            lm_embed_tokens = getattr(language_model, "embed_tokens", None)
+            if callable(lm_embed_tokens):
+                return lm_embed_tokens(input_ids)
+
+            lm_get_input_embeddings = getattr(language_model, "get_input_embeddings", None)
+            if callable(lm_get_input_embeddings):
+                lm_embedder = lm_get_input_embeddings()
+                if lm_embedder is not None:
+                    return lm_embedder(input_ids)
+
+        model_embed_tokens = getattr(model, "embed_tokens", None)
+        if callable(model_embed_tokens):
+            return model_embed_tokens(input_ids)
+
+        model_get_input_embeddings = getattr(model, "get_input_embeddings", None)
+        if callable(model_get_input_embeddings):
+            model_embedder = model_get_input_embeddings()
+            if model_embedder is not None:
+                return model_embedder(input_ids)
+
+        fallback_embedder = self.get_input_embeddings()
+        if fallback_embedder is not None:
+            return fallback_embedder(input_ids)
+
+        raise AttributeError("No valid token embedding module found")
+
+    def _get_rope_index_compat(self, input_ids, image_grid_thw):
+        rope_fn = getattr(self, "get_rope_index", None)
+        if callable(rope_fn):
+            return rope_fn(input_ids, image_grid_thw)
+
+        model_rope_fn = getattr(self.get_model(), "get_rope_index", None)
+        if callable(model_rope_fn):
+            return model_rope_fn(input_ids, image_grid_thw)
+
+        batch_size, seq_length = input_ids.shape
+        device = input_ids.device
+        position_ids = torch.arange(seq_length, device=device).view(1, -1).expand(batch_size, -1)
+        position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
+        return position_ids, None
+
+    @property
+    def visual(self):
+        return self.model.visual
 
     def forward(
         self,
@@ -197,14 +189,16 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if inputs_embeds is None:
-            inputs_embeds = self._embed_tokens(input_ids)
+            inputs_embeds = self._embed_input_ids(input_ids)
+
             if pixel_values is not None:
-                visual_tower = self._get_visual_tower()
-                pixel_values = pixel_values.type(visual_tower.dtype)
-                image_embeds = visual_tower(pixel_values, grid_thw=image_grid_thw)
-                image_embeds = self._normalize_visual_embeds(image_embeds)
+                pixel_values = pixel_values.type(self.visual.dtype)
+                image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
+                if hasattr(image_embeds, 'pooler_output'):
+                    image_embeds = image_embeds.pooler_output
+                elif hasattr(image_embeds, 'last_hidden_state'):
+                    image_embeds = image_embeds.last_hidden_state
                 n_image_tokens = (input_ids == self.config.image_token_id).sum().item()
-                image_embeds = self._align_feature_tokens(image_embeds, n_image_tokens)
                 n_image_features = image_embeds.shape[0]
                 if n_image_tokens != n_image_features:
                     raise ValueError(
@@ -220,12 +214,13 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
                 inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
 
             if pixel_values_videos is not None:
-                visual_tower = self._get_visual_tower()
-                pixel_values_videos = pixel_values_videos.type(visual_tower.dtype)
-                video_embeds = visual_tower(pixel_values_videos, grid_thw=video_grid_thw)
-                video_embeds = self._normalize_visual_embeds(video_embeds)
+                pixel_values_videos = pixel_values_videos.type(self.visual.dtype)
+                video_embeds = self.visual(pixel_values_videos, grid_thw=video_grid_thw)
+                if hasattr(video_embeds, 'pooler_output'):
+                    video_embeds = video_embeds.pooler_output
+                elif hasattr(video_embeds, 'last_hidden_state'):
+                    video_embeds = video_embeds.last_hidden_state
                 n_video_tokens = (input_ids == self.config.video_token_id).sum().item()
-                video_embeds = self._align_feature_tokens(video_embeds, n_video_tokens)
                 n_video_features = video_embeds.shape[0]
                 if n_video_tokens != n_video_features:
                     raise ValueError(
@@ -397,23 +392,26 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
     def generate_latents(self, input_ids, pixel_values, image_grid_thw):
         input_ids.to(self.get_model().device)
         with torch.no_grad():
-            text_embeds = self._embed_tokens(input_ids)
+            text_embeds = self._embed_input_ids(input_ids)
         latent_queries = self.get_model().latent_queries.repeat(text_embeds.shape[0], 1, 1)
         image_idx = input_ids == IMAGE_TOKEN_INDEX
         N_QUERY = self.get_n_query()
         input_ids = torch.cat([input_ids, torch.tensor([[TRAJ_TOKEN_INDEX] * N_QUERY]).to(input_ids.device)], dim=1)
 
-        visual_tower = self._get_visual_tower()
-        pixel_values = pixel_values.type(visual_tower.dtype)
-        image_embeds = visual_tower(pixel_values, grid_thw=image_grid_thw)
-        image_embeds = self._normalize_visual_embeds(image_embeds)
-        image_embeds = self._align_feature_tokens(image_embeds, int(image_idx.sum().item())).unsqueeze(0)
+        pixel_values = pixel_values.type(self.visual.dtype)
+        image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
+        if hasattr(image_embeds, 'pooler_output'):
+            image_embeds = image_embeds.pooler_output
+        elif hasattr(image_embeds, 'last_hidden_state'):
+            image_embeds = image_embeds.last_hidden_state
+        if image_embeds.ndim == 3 and image_embeds.shape[0] == 1:
+            image_embeds = image_embeds.squeeze(0)
 
         text_embeds[image_idx] = image_embeds.to(text_embeds.device)[: image_idx.sum(), :]
 
         text_embeds = torch.cat([text_embeds, latent_queries], dim=1)
 
-        position_ids, _ = self.get_rope_index(input_ids, image_grid_thw)
+        position_ids, _ = self._get_rope_index_compat(input_ids, image_grid_thw)
         with torch.no_grad():
             outputs = self.model(
                 inputs_embeds=text_embeds,

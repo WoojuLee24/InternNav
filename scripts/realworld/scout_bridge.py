@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import time
 
 import rclpy
@@ -11,8 +12,21 @@ from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 
 class ScoutBridge(Node):
-    def __init__(self):
+    def __init__(self, speed_profile='MEDIUM', max_linear_override=None, max_angular_override=None):
         super().__init__('scout_bridge')
+
+        profiles = {
+            # Keep bridge limits slightly stricter than client limits
+            # so final robot command is always safety-bounded.
+            'SAFE': (0.10, 0.18),
+            'MEDIUM': (0.25, 0.30),
+            'FAST': (0.50, 0.45),
+            'FASTER': (0.65, 0.60),
+            'FASTEST': (0.80, 0.75),
+        }
+        p_linear, p_angular = profiles[speed_profile]
+        resolved_linear = max_linear_override if max_linear_override is not None else p_linear
+        resolved_angular = max_angular_override if max_angular_override is not None else p_angular
 
         # If user passes --ros-args -p use_sim_time:=true, ROS may already declare it.
         try:
@@ -29,8 +43,8 @@ class ScoutBridge(Node):
         # Safety
         self.declare_parameter('deadman_timeout_sec', 0.5)
         self.declare_parameter('publish_stop_on_timeout', True)
-        self.declare_parameter('max_linear_x', 0.6)
-        self.declare_parameter('max_angular_z', 0.8)
+        self.declare_parameter('max_linear_x', float(resolved_linear))
+        self.declare_parameter('max_angular_z', float(resolved_angular))
 
         odom_in = str(self.get_parameter('odom_in').value)
         odom_out = str(self.get_parameter('odom_out').value)
@@ -64,6 +78,9 @@ class ScoutBridge(Node):
         self.get_logger().info(f'cmd:  {cmd_in} -> {cmd_out}')
         self.get_logger().info(
             f'deadman_timeout_sec={self.deadman_timeout_sec} publish_stop_on_timeout={self.publish_stop_on_timeout}'
+        )
+        self.get_logger().info(
+            f'speed_profile={speed_profile} max_linear_x={self.max_linear_x} max_angular_z={self.max_angular_z}'
         )
 
     def _odom_cb(self, msg: Odometry):
@@ -103,8 +120,18 @@ class ScoutBridge(Node):
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Scout cmd_vel bridge with safety speed profiles')
+    parser.add_argument('--speed-profile', type=str, default='MEDIUM', choices=['SAFE', 'MEDIUM', 'FAST', 'FASTER', 'FASTEST'])
+    parser.add_argument('--max-linear-x', type=float, default=None, help='Override max linear speed (m/s)')
+    parser.add_argument('--max-angular-z', type=float, default=None, help='Override max angular speed (rad/s)')
+    args, _ = parser.parse_known_args()
+
     rclpy.init()
-    node = ScoutBridge()
+    node = ScoutBridge(
+        speed_profile=args.speed_profile,
+        max_linear_override=args.max_linear_x,
+        max_angular_override=args.max_angular_z,
+    )
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

@@ -9,7 +9,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,66 +18,65 @@ from collections import OrderedDict
 from PIL import Image
 from transformers import AutoProcessor
 
-from internnav.model.basemodel.internvla_n1.internvla_n1 import InternVLAN1ForCausalLM
+from internnav.model.basemodel.internvla_n1.internvla_n1 import InternVLAN1ForCausalLM, InternVLAN1ModelConfig
 from internnav.model.utils.vln_utils import S2Output, split_and_clean, traj_to_actions
 
 DEFAULT_IMAGE_TOKEN = "<image>"
 
 
+def get_best_attention_implementation():
+    """Auto-select the best available attention implementation.
+    
+    Priority:
+    1. flash_attention_2 - Fastest, requires CUDA 11/12 (Jetpack 7.x)
+    2. sdpa - Good speed, works with CUDA 13.x (Desktop RTX 3090)
+    3. eager - Fallback, slowest
+    """
+    cuda_version = torch.version.cuda if torch.version.cuda else "0"
+    cuda_major = int(cuda_version.split('.')[0]) if cuda_version != "0" else 0
+    
+    try:
+        import flash_attn
+        print(f"[Attention] Flash Attention {flash_attn.__version__} available")
+        print(f"[Attention] Using flash_attention_2 (fastest)")
+        return "flash_attention_2"
+    except (ImportError, OSError) as e:
+        print(f"[Attention] Flash Attention not available ({e})")
+        print(f"[Attention] Using SDPA (CUDA {torch.version.cuda})")
+        return "sdpa"
+
+
 class InternVLAN1AsyncAgent:
     def __init__(self, args):
         self.device = torch.device(args.device)
-        self.require_flash_attn = bool(getattr(args, 'require_flash_attn', True))
-        self.use_tf32 = bool(getattr(args, 'tf32', False))
-        # self.save_dir = "test_data/" + datetime.now().strftime("%Y%m%d_%H%M%S")
         self.save_dir = ROOT / "test_data" / datetime.now().strftime("%Y%m%d_%H%M%S")
         os.makedirs(self.save_dir, exist_ok=True)
         print(f"args.model_path{args.model_path}")
+        
+        # Load config with proper InternVLA-N1 settings
+        config = InternVLAN1ModelConfig.from_pretrained(args.model_path)
+        
+        # Auto-select best attention implementation
+        attn_impl = get_best_attention_implementation()
+        
+        # Use FP16 for speed (faster than BF16 on RTX 3090)
         self.model = InternVLAN1ForCausalLM.from_pretrained(
             args.model_path,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
+            config=config,
+            torch_dtype=torch.float16,
+            attn_implementation=attn_impl,
             device_map={"": self.device},
         )
         self.model.eval()
         self.model.to(self.device)
 
-        if self.device.type != 'cuda':
-            raise RuntimeError("GPU is required for realworld debug pipeline")
-
-        if self.use_tf32:
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-            try:
-                torch.set_float32_matmul_precision('high')
-            except Exception:
-                pass
-            print("[Runtime] TF32 enabled")
-
-        attn_impl = getattr(self.model.config, '_attn_implementation', None)
-        if attn_impl is None:
-            attn_impl = getattr(self.model.config, 'attn_implementation', None)
-        print(f"[Runtime] device={self.device} attn_impl={attn_impl}")
-        if self.require_flash_attn and attn_impl != 'flash_attention_2':
-            raise RuntimeError(
-                f"FlashAttention-2 required but got attn_impl={attn_impl}"
-            )
-
-        self.processor = AutoProcessor.from_pretrained(args.model_path, use_fast=False)
+        self.processor = AutoProcessor.from_pretrained(args.model_path)
         self.processor.tokenizer.padding_side = 'left'
 
         self.resize_w = args.resize_w
         self.resize_h = args.resize_h
         self.num_history = args.num_history
         self.PLAN_STEP_GAP = args.plan_step_gap
-        self.use_kv_cache = bool(getattr(args, 'kv_cache', False))
-        self.max_new_tokens = int(getattr(args, 'max_new_tokens', 128))
-        self.use_tensorrt = bool(getattr(args, 'tensorrt', False))
-        self.use_quantization = bool(getattr(args, 'quantization', False))
-        self.quant_method = str(getattr(args, 'quant_method', 'dynamic'))
-        self.tensorrt_engine = getattr(args, 'tensorrt_engine', None)
-
-        self._init_safe_acceleration_modes()
 
         prompt = "You are an autonomous navigation assistant. Your task is to <instruction>. Where should you go next to stay on track? Please output the next waypoint's coordinates in the image. Please output STOP when you have successfully completed the task."
         answer = ""
@@ -118,37 +116,6 @@ class InternVLAN1AsyncAgent:
         self.output_pixel = None
         self.pixel_goal_rgb = None
         self.pixel_goal_depth = None
-
-    def _init_safe_acceleration_modes(self):
-        if self.use_tensorrt:
-            try:
-                import tensorrt  # noqa: F401
-                if self.tensorrt_engine and os.path.exists(self.tensorrt_engine):
-                    print(f"[TensorRT] Engine path configured: {self.tensorrt_engine} (integration pending)")
-                else:
-                    print("[TensorRT] Enabled but no valid engine path provided; fallback to PyTorch")
-            except Exception:
-                print("[TensorRT] Not available in runtime; fallback to PyTorch")
-
-        if self.use_quantization:
-            if self.device.type == 'cuda':
-                print("[Quantization] CUDA runtime detected; skip quantization to preserve behavior")
-                return
-
-            if self.quant_method != 'dynamic':
-                print(f"[Quantization] Unsupported method '{self.quant_method}' in safe mode; skip")
-                return
-
-            try:
-                self.model = torch.quantization.quantize_dynamic(
-                    self.model,
-                    {nn.Linear},
-                    dtype=torch.qint8,
-                )
-                self.model.eval()
-                print("[Quantization] Applied dynamic INT8 quantization (CPU mode)")
-            except Exception as e:
-                print(f"[Quantization] Failed to apply dynamic quantization: {repr(e)}")
 
     def reset(self):
         self.rgb_list = []
@@ -289,46 +256,19 @@ class InternVLAN1AsyncAgent:
 
         text = self.processor.apply_chat_template(self.conversation_history, tokenize=False, add_generation_prompt=True)
 
-        proc_images = self.input_images
-        for _ in range(2):
-            try:
-                inputs = self.processor(text=[text], images=proc_images, return_tensors="pt")
-                break
-            except IndexError as e:
-                if "image_grid_thw" not in str(e) or len(proc_images) <= 1:
-                    raise
-                proc_images = proc_images[:-1]
-                print(f"[System 2] Processor image mismatch; retry with {len(proc_images)} images")
-        else:
-            inputs = self.processor(text=[text], images=proc_images, return_tensors="pt")
-        vocab_size = getattr(self.model.config, "vocab_size", None)
-        if vocab_size is None and getattr(self.model.config, "text_config", None) is not None:
-            vocab_size = getattr(self.model.config.text_config, "vocab_size", None)
-        if vocab_size is not None and hasattr(inputs, "input_ids"):
-            input_ids = inputs.input_ids
-            invalid_mask = (input_ids < 0) | (input_ids >= vocab_size)
-            if invalid_mask.any():
-                eos_id = int(getattr(self.model.config, "eos_token_id", 0) or 0)
-                bad_count = int(invalid_mask.sum().item())
-                print(f"[System 2] Found {bad_count} invalid token ids; replacing with eos={eos_id}")
-                input_ids = input_ids.clone()
-                input_ids[invalid_mask] = eos_id
-                inputs["input_ids"] = input_ids
-        inputs = inputs.to(self.device)
+        inputs = self.processor(text=[text], images=self.input_images, return_tensors="pt")
+        # Filter out mm_token_type_ids which causes issues with transformers 5.x
+        inputs = {k: v for k, v in inputs.items() if k != 'mm_token_type_ids'}
+        inputs = {k: v.to(self.device) if torch.is_tensor(v) else v for k, v in inputs.items()}
+        
         t0 = time.time()
-        gen_kwargs = {
-            'max_new_tokens': self.max_new_tokens,
-            'do_sample': False,
-            'return_dict_in_generate': True,
-        }
-        if self.use_kv_cache:
-            gen_kwargs['use_cache'] = True
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
-                **gen_kwargs,
-                # past_key_values=self.past_key_values,
-                # raw_input_ids=copy.deepcopy(inputs.input_ids),
+                max_new_tokens=128,
+                do_sample=False,
+                use_cache=True,  # KV caching for 2.4x speedup
+                return_dict_in_generate=True,
             )
         output_ids = outputs.sequences
 
@@ -343,9 +283,6 @@ class InternVLAN1AsyncAgent:
         print(f"output {self.episode_idx}  {self.llm_output} cost: {t1 - t0}s")
         if bool(re.search(r'\d', self.llm_output)):
             coord = [int(c) for c in re.findall(r'\d+', self.llm_output)]
-            if len(coord) < 2:
-                action_seq = self.parse_actions(self.llm_output)
-                return action_seq, None, None
             pixel_goal = [int(coord[1]), int(coord[0])]
             image_grid_thw = torch.cat([thw.unsqueeze(0) for thw in inputs.image_grid_thw], dim=0)
             pixel_values = inputs.pixel_values

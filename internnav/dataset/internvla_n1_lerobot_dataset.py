@@ -14,11 +14,7 @@ import transformers
 from decord import VideoReader
 from PIL import Image
 from torch.utils.data import Dataset
-try:
-    from torchcodec.decoders import VideoDecoder
-    TORCHCODEC_AVAILABLE = True
-except (ImportError, RuntimeError):
-    TORCHCODEC_AVAILABLE = False
+from torchcodec.decoders import VideoDecoder
 from transformers.image_utils import to_numpy_array
 
 from .rope2d import get_rope_index_2, get_rope_index_25
@@ -384,13 +380,12 @@ class LazySupervisedDataset(Dataset):
                 print(f"Decord attempt {decord_attempts + 1} failed: {e}")
                 decord_attempts += 1
 
-        if TORCHCODEC_AVAILABLE:
-            torchcodec_video = None
-            try:
-                torchcodec_video = self.video_torchcodec(video_file)
-                return torchcodec_video
-            except Exception as e:
-                print(f"torchcodec attempt failed: {e}")
+        torchcodec_video = None
+        try:
+            torchcodec_video = self.video_torchcodec(video_file)
+            return torchcodec_video
+        except Exception as e:
+            print(f"torchcodec attempt failed: {e}")
 
     def video_decord(self, video_file):
         if not os.path.exists(video_file):
