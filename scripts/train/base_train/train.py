@@ -360,7 +360,14 @@ def main(config, model_class, model_config_class, debug=False):
             else:
                 print('[Val] ValidationCallback registered (every epoch)')
 
-        trainer.train()
+        resume_ckpt = None
+        if getattr(config.il, 'resume', False):
+            resume_ckpt = os.path.join(config.output_dir, 'checkpoint-latest')
+            if not os.path.isdir(resume_ckpt):
+                raise ValueError(f'resume=true but checkpoint not found: {resume_ckpt}')
+            print(f'[Resume] Resuming training from {resume_ckpt}')
+
+        trainer.train(resume_from_checkpoint=resume_ckpt)
         if train_logger:
             for handler in train_logger.handlers:
                 handler.flush()
