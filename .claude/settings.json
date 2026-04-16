@@ -6,12 +6,26 @@
       "Bash(git status*)",
       "Bash(pytest tests/*)",
       "Bash(nvidia-smi)",
-      "Bash(ros2 topic*)"
+      "Bash(ros2 topic*)",
+      "Bash(sed:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(echo:*)",
+      "Bash(which:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)"
     ],
     "deny": [
       "Bash(git push --force*)",
       "Bash(git reset --hard*)",
-      "Bash(rm -rf*)"
+      "Bash(rm -rf*)",
+      "Bash(rm:*)",
+      "Bash(sudo:*)"
     ]
   }
 }

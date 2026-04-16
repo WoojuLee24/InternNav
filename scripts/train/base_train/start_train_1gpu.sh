@@ -6,6 +6,10 @@ MODEL=navdp_1gpu
 DEBUG_FLAG=""
 IL_OVERRIDES='{}'
 
+# This allows the script to use aliases defined in the current shell
+#shopt -s expand_aliases
+#alias torchrun='/workspace/isaaclab/_isaac_sim/python.sh -m torch.distributed.run'
+
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -80,6 +84,7 @@ export TORCH_CPP_LOG_LEVEL=INFO
 export NCCL_DEBUG=INFO
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export NCCL_P2P_DISABLE=1
 
 # Check if model is rdp to use python, otherwise use torchrun
 if [[ "$MODEL" == "navdp" || "$MODEL" == "navdp_1gpu" ]]; then

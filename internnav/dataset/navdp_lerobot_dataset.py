@@ -343,8 +343,8 @@ class NavDP_Base_Datset(Dataset):
 
         coordinate = np.array([-target_point[1], target_point[0], camera_extrinsic[2, 3] * 0.8])
         camera_coordinate = np.matmul(camera_extrinsic[0:3, 0:3], coordinate[:, None])
-        pixel_coord_x = camera_intrinsic[0, 2] + (camera_coordinate[0] / camera_coordinate[2]) * camera_intrinsic[0, 0]
-        pixel_coord_y = camera_intrinsic[1, 2] + (-camera_coordinate[1] / camera_coordinate[2]) * camera_intrinsic[1, 1]
+        pixel_coord_x = (camera_intrinsic[0, 2] + (camera_coordinate[0] / camera_coordinate[2]) * camera_intrinsic[0, 0]).item()
+        pixel_coord_y = (camera_intrinsic[1, 2] + (-camera_coordinate[1] / camera_coordinate[2]) * camera_intrinsic[1, 1]).item()
         pixel_mask = np.zeros_like(image)
         visible_flag = False
 
