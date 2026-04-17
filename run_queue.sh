@@ -15,7 +15,7 @@ while true; do
     LINE_NUM=$(grep -n -m1 '^\s*[^#]' "$QUEUE_FILE" 2>/dev/null | cut -d: -f1)
 
     if [ -z "$LINE_NUM" ]; then
-        log "Queue empty, waiting 30s..."
+        printf "\r[$(date '+%Y-%m-%d %H:%M:%S')] Queue empty, waiting 30s..."
         sleep 30
         continue
     fi

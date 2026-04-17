@@ -3,11 +3,14 @@
 defaults:
   - /habitat: habitat_config_base
   - /habitat/task: vln_r2r
-  - /habitat/simulator/agents@habitat.simulator.agents.main_agent: rgbd_agent
+  - /habitat/simulator/sensor_setups@habitat.simulator.agents.main_agent: rgbd_agent  # agents -> sensor_setups in habitat 0.3.x
   - /habitat/dataset/vln: mp3d_r2r
   - /habitat/task/lab_sensors:
     - gps_sensor
     - compass_sensor
+  - /habitat/task/actions:  # look_up/look_down must be explicitly listed in habitat 0.3.x
+    - look_up
+    - look_down
   - _self_
 
 habitat:
@@ -32,8 +35,8 @@ habitat:
             max_depth: 10.0
     forward_step_size: 0.25
     turn_angle: 15
-    tilt_angle: 15
-    action_space_config: "v1"
+    # tilt_angle: 15  # moved to per-action config in habitat 0.3.x
+    # action_space_config: "v1"  # removed in habitat 0.3.x
     habitat_sim_v0:
       gpu_device_id: 0
   task:
@@ -53,22 +56,24 @@ habitat:
     actions:
       stop:
         type: StopAction
-        agent_index: 0
+        # agent_index: 0  # removed in habitat 0.3.x
       move_forward:
         type: MoveForwardAction
-        agent_index: 0
+        # agent_index: 0  # removed in habitat 0.3.x
       turn_left:
         type: TurnLeftAction
-        agent_index: 0
+        # agent_index: 0  # removed in habitat 0.3.x
       turn_right:
         type: TurnRightAction
-        agent_index: 0
+        # agent_index: 0  # removed in habitat 0.3.x
       look_up:
         type: LookUpAction
-        agent_index: 0
+        tilt_angle: 30
+        # agent_index: 0  # removed in habitat 0.3.x
       look_down:
         type: LookDownAction
-        agent_index: 0
+        tilt_angle: 30
+        # agent_index: 0  # removed in habitat 0.3.x
 
   dataset:
     type: R2RVLN-v1

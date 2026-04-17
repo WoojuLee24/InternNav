@@ -32,8 +32,8 @@ habitat:
             max_depth: 10.0
     forward_step_size: 0.25
     turn_angle: 30
-    tilt_angle: 15
-    action_space_config: "v1"
+    # tilt_angle: 15  # removed in habitat 0.3.x
+    # action_space_config: "v1"  # removed in habitat 0.3.x
     habitat_sim_v0:
       allow_sliding: True
       gpu_device_id: 0
@@ -54,22 +54,22 @@ habitat:
     actions:
       stop:
         type: StopAction
-        agent_index: 0
+        # agent_index: 0  # removed in habitat 0.3.x
       move_forward:
         type: MoveForwardAction
-        agent_index: 0
+        # agent_index: 0  # removed in habitat 0.3.x
       turn_left:
         type: TurnLeftAction
-        agent_index: 0
+        # agent_index: 0  # removed in habitat 0.3.x
       turn_right:
         type: TurnRightAction
-        agent_index: 0
+        # agent_index: 0  # removed in habitat 0.3.x
       look_up:
         type: LookUpAction
-        agent_index: 0
+        # agent_index: 0  # removed in habitat 0.3.x
       look_down:
         type: LookDownAction
-        agent_index: 0
+        # agent_index: 0  # removed in habitat 0.3.x
 
   dataset:
     type: dialog

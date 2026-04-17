@@ -40,7 +40,7 @@ eval_cfg = EvalCfg(
         env_type='internutopia',
         env_settings={
             'use_fabric': False,  # Please set use_fabric=False due to the render delay;
-            'headless': False, #  True,
+            'headless': True,
         },
     ),
     task=TaskCfg(
@@ -76,8 +76,8 @@ eval_cfg = EvalCfg(
     eval_type='vln_distributed',
     eval_settings={
         'save_to_json': True,
-        'vis_output': True,
-        'show_rgb': True,
+        'vis_output': False, # True,
+        'show_rgb': False, # True,
         'use_agent_server': False, # True,  # If use_agent_server=True, please start the agent server first.
     },
 )

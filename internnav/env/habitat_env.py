@@ -23,6 +23,11 @@ class HabitatEnv(base.Env):
                 "Habitat modules could not be imported. " "Make sure both repositories are installed and on PYTHONPATH."
             ) from e
 
+        # Unset DISPLAY so habitat_sim uses EGL with the CUDA device directly.
+        # With DISPLAY set, EGL enumerates the X11 display device which doesn't
+        # match the CUDA device index, causing WindowlessContext creation to fail.
+        os.environ.pop("DISPLAY", None)
+
         super().__init__(env_config, task_config)
         self.config = env_config.env_settings['habitat_config']
         self._env = Env(self.config)
