@@ -260,4 +260,11 @@ class NavDPTrainer(BaseTrainer):
         os.makedirs(output_dir, exist_ok=True)
         torch.save(model_to_save.state_dict(), output_dir + "navdp.ckpt")
 
+        # save optimizer, scheduler, and trainer state for proper resume
+        if self.optimizer is not None:
+            torch.save(self.optimizer.state_dict(), output_dir + "optimizer.pt")
+        if self.lr_scheduler is not None:
+            torch.save(self.lr_scheduler.state_dict(), output_dir + "scheduler.pt")
+        self.state.save_to_json(output_dir + "trainer_state.json")
+
         print(f"Saving model to {output_dir} (is DDP: {hasattr(self.model, 'module')})")
