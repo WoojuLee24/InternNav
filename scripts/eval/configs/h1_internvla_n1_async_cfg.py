@@ -16,7 +16,7 @@ eval_cfg = EvalCfg(
         model_settings={
             'env_num': 1,
             'sim_num': 1,
-            'model_path': "/ws/src/InternNav/checkpoints/InternVLA-N1-w-NavDP", # "checkpoints/InternVLA-N1-DualVLN",
+            'model_path': "/ws/src/InternNav/checkpoints/InternVLA-N1-w-NavDP", # "/home/irteam/git/InternNav/checkpoints/InternVLA-N1-w-NavDP", # 
             'camera_intrinsic': [[585.0, 0.0, 320.0], [0.0, 585.0, 240.0], [0.0, 0.0, 1.0]],
             'width': 640,
             'height': 480,

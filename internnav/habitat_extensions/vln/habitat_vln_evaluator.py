@@ -580,10 +580,16 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             if 'ndtw' in metrics:
                 ndtw.append(metrics["ndtw"])
 
+            n = len(sucs)
+            running_sr = sum(sucs) / n
+            running_spl = sum(spls) / n
+            running_ne = sum(nes) / n
+            process_bar.set_postfix(SR=f"{running_sr:.3f}", SPL=f"{running_spl:.3f}", NE=f"{running_ne:.2f}")
             print(
-                f"scene_episode {scene_id}_{episode_id:04d} success: {metrics['success']}, "
-                f"spl: {metrics['spl']}, os: {metrics['oracle_success']}, "
-                f"ne: {metrics['distance_to_goal']}"
+                f"[{n}] {scene_id}_{episode_id:04d} | "
+                f"success={metrics['success']:.0f} spl={metrics['spl']:.3f} "
+                f"os={metrics['oracle_success']:.0f} ne={metrics['distance_to_goal']:.2f} | "
+                f"running SR={running_sr:.3f} SPL={running_spl:.3f} NE={running_ne:.2f}"
             )
 
             # Write per-episode progress.json entry (still per-rank)
@@ -899,10 +905,16 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             if 'ndtw' in metrics:
                 ndtw.append(metrics["ndtw"])
 
+            n = len(sucs)
+            running_sr = sum(sucs) / n
+            running_spl = sum(spls) / n
+            running_ne = sum(nes) / n
+            process_bar.set_postfix(SR=f"{running_sr:.3f}", SPL=f"{running_spl:.3f}", NE=f"{running_ne:.2f}")
             print(
-                f"scene_episode {scene_id}_{episode_id:04d} success: {metrics['success']}, "
-                f"spl: {metrics['spl']}, os: {metrics['oracle_success']}, "
-                f"ne: {metrics['distance_to_goal']}"
+                f"[{n}] {scene_id}_{episode_id:04d} | "
+                f"success={metrics['success']:.0f} spl={metrics['spl']:.3f} "
+                f"os={metrics['oracle_success']:.0f} ne={metrics['distance_to_goal']:.2f} | "
+                f"running SR={running_sr:.3f} SPL={running_spl:.3f} NE={running_ne:.2f}"
             )
 
             # Write per-episode result.json entry (still per-rank)
