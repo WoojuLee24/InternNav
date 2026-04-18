@@ -146,6 +146,20 @@ class DistributedEvaluator(Evaluator):
             with open(out_path, "a") as f:
                 f.write(json.dumps(result_all) + "\n")
 
+            if self.eval_config.eval_settings.get("use_wandb", False):
+                try:
+                    import wandb
+
+                    if wandb.run is None:
+                        wandb.init(
+                            project=self.eval_config.eval_settings.get("wandb_project", "internnav"),
+                            name=self.eval_config.eval_settings.get("wandb_run_name", None),
+                            config=self.eval_config.eval_settings,
+                        )
+                    wandb.log(result_all)
+                except ImportError:
+                    print("[Warning] wandb not installed. Skipping wandb logging.")
+
         return result_all
 
     # ================= ABSTRACT HOOKS =================

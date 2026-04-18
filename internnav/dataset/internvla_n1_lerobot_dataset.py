@@ -190,6 +190,40 @@ def rank0_print(*args):
         print(*args)
 
 
+def _stratified_scene_split_index(scene_keys, val_ratio, is_train):
+    """Return sample indices for train or val split using scene-level stratification.
+
+    scene_keys: per-sample list of "dataset/scene_id" strings, or None for unknown.
+    None entries fall back to flat tail-split (for datasets without scene info).
+    """
+    import math
+    from collections import OrderedDict
+
+    known_idx = [i for i, sk in enumerate(scene_keys) if sk is not None]
+    unknown_idx = [i for i, sk in enumerate(scene_keys) if sk is None]
+
+    group_to_scenes = OrderedDict()
+    for i in known_idx:
+        group = scene_keys[i].split('/')[0]
+        if group not in group_to_scenes:
+            group_to_scenes[group] = []
+        if scene_keys[i] not in group_to_scenes[group]:
+            group_to_scenes[group].append(scene_keys[i])
+
+    val_scene_set = set()
+    for group, scenes in group_to_scenes.items():
+        n_val_scenes = max(1, math.ceil(len(scenes) * val_ratio))
+        val_scene_set.update(scenes[-n_val_scenes:])
+
+    known_result = [i for i in known_idx if (scene_keys[i] not in val_scene_set) == is_train]
+
+    n_unk = len(unknown_idx)
+    n_val_unk = max(1, int(n_unk * val_ratio)) if n_unk > 0 else 0
+    unknown_result = unknown_idx[:n_unk - n_val_unk] if is_train else unknown_idx[n_unk - n_val_unk:]
+
+    return known_result + unknown_result
+
+
 def preprocess_qwen_2_visual(
     sources,
     tokenizer: transformers.PreTrainedTokenizer,
@@ -844,6 +878,7 @@ class NavPixelGoalDataset(Dataset):
         self.num_future_steps = data_args.num_future_steps
 
         self.list_data_dict = []
+        self.scene_keys = []
 
         for data in dataset_list:
             sampling_rate = data.get("sampling_rate", 1.0)
@@ -952,6 +987,14 @@ class NavPixelGoalDataset(Dataset):
                 rank0_print(f"dataset name: {data}")
 
             self.list_data_dict.extend(list_data_dict)
+            dataset_name = data_path.rstrip('/').split('/')[-1]
+            batch_scene_keys = []
+            for item in list_data_dict:
+                item_data_path, video_path = item[1], item[2]
+                rel = video_path[len(item_data_path):].lstrip('/')
+                scene_id = rel.split('/')[0]
+                batch_scene_keys.append(f"{dataset_name}/{scene_id}")
+            self.scene_keys.extend(batch_scene_keys)
 
         self.num_history = data_args.num_history
         self.idx2actions = {0: 'STOP', 1: "↑", 2: "←", 3: "→", 5: "↓"}
@@ -1387,11 +1430,20 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, dat
     eval_dataset = None
     val_ratio = getattr(data_args, "val_ratio", 0.0)
     if val_ratio > 0.0:
-        n_total = len(full_dataset)
-        n_val = max(1, int(n_total * val_ratio))
-        n_train = n_total - n_val
-        train_dataset, eval_dataset = torch.utils.data.random_split(
-            full_dataset, [n_train, n_val], generator=torch.Generator().manual_seed(42)
+        all_scene_keys = []
+        for ds in train_datasets:
+            if hasattr(ds, "scene_keys"):
+                all_scene_keys.extend(ds.scene_keys)
+            else:
+                all_scene_keys.extend([None] * len(ds))
+
+        train_indices = _stratified_scene_split_index(all_scene_keys, val_ratio, is_train=True)
+        val_indices   = _stratified_scene_split_index(all_scene_keys, val_ratio, is_train=False)
+        train_dataset = torch.utils.data.Subset(full_dataset, train_indices)
+        eval_dataset  = torch.utils.data.Subset(full_dataset, val_indices)
+        rank0_print(
+            f"Stratified split: {len(train_indices)} train / {len(val_indices)} val "
+            f"({len(set(sk for sk in all_scene_keys if sk))} unique scenes)"
         )
     else:
         train_dataset = full_dataset
