@@ -25,6 +25,12 @@ def parse_args():
         action="store_true",
         help="suppress debug/info logs and show only progress + metrics on console",
     )
+    parser.add_argument(
+        "--model_path",
+        type=str,
+        default=None,
+        help="override agent.model_settings.model_path in the config (e.g. a training checkpoint)",
+    )
     return parser.parse_args()
 
 
@@ -105,6 +111,13 @@ def main():
     if args.quiet:
         apply_quiet_mode()
     evaluator_cfg = load_eval_cfg(args.config, attr_name='eval_cfg')
+
+    if args.model_path is not None:
+        import os
+        evaluator_cfg.agent.model_settings['model_path'] = args.model_path
+        ckpt_name = os.path.basename(args.model_path.rstrip('/'))
+        evaluator_cfg.eval_settings.setdefault('wandb_run_name', ckpt_name)
+        evaluator_cfg.eval_settings.setdefault('output_path', f"./logs/eval/{ckpt_name}")
 
     # fill in evaluator default config
     if evaluator_cfg.eval_type == 'vln_distributed':

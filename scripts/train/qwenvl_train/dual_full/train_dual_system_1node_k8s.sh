@@ -21,6 +21,10 @@ grad_accum_steps=8  # 1 node x 8 GPUs x 2 x 8 = 128 effective batch (same as 8 n
 max_pixels=313600
 min_pixels=3136
 
+# Validation configuration
+val_ratio=0.1          # fraction of data for validation (0.0 to disable)
+val_interval_steps=500  # evaluate every N steps
+
 # Dataset configuration
 vln_datasets=r2r_125cm_0_30%30,r2r_60cm_15_15%30,rxr_125cm_0_30%30,rxr_60cm_15_15%30,scalevln_125cm_0_30%30,scalevln_60cm_30_30%30
 
@@ -66,10 +70,14 @@ torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --gradient_accumulation_steps ${grad_accum_steps} \
     --max_pixels ${max_pixels} \
     --min_pixels ${min_pixels} \
-    --eval_strategy "no" \
+    --eval_strategy "steps" \
+    --eval_steps ${val_interval_steps} \
     --save_strategy "steps" \
     --save_steps 5000 \
-    --save_total_limit 5 \
+    --save_total_limit 2 \
+    --metric_for_best_model eval_loss \
+    --greater_is_better False \
+    --load_best_model_at_end True \
     --learning_rate ${lr} \
     --weight_decay 0 \
     --warmup_ratio 0.003 \
@@ -82,3 +90,31 @@ torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --dataloader_num_workers 8 \
     --run_name ${run_name} \
     --report_to wandb
+
+# Auto-eval on best checkpoint after training (master node only)
+if [ "${NODE_RANK}" = "0" ]; then
+    best_ckpt=$(python -c "
+import json, glob, os
+state_files = glob.glob('${output_dir}/checkpoint-*/trainer_state.json')
+best = None
+best_loss = float('inf')
+for f in state_files:
+    s = json.load(open(f))
+    ckpt = os.path.dirname(f)
+    loss = s.get('best_metric')
+    if loss is not None and loss < best_loss:
+        best_loss = loss
+        best = ckpt
+if best:
+    print(best)
+" 2>/dev/null)
+
+    if [ -n "${best_ckpt}" ]; then
+        echo "[Eval] Best checkpoint: ${best_ckpt}"
+        cp "${output_dir}/preprocessor_config.json" "${best_ckpt}/" 2>/dev/null || true
+        cp "${system2_ckpt}/chat_template.json" "${best_ckpt}/" 2>/dev/null || true
+        bash scripts/eval/bash/eval_dual_system_8gpu.sh --model_path "${best_ckpt}" --quiet
+    else
+        echo "[Eval] No best checkpoint found, skipping eval."
+    fi
+fi

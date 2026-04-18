@@ -32,5 +32,9 @@ eval_cfg = EvalCfg(
         # distributed settings
         "port": "2333",  # communication port
         "dist_url": "env://",  # url for distributed setup
+        # wandb settings
+        "use_wandb": True,
+        "wandb_project": "internnav",
+        "wandb_run_name": "habitat_dual_system_mini_single",
     },
 )

@@ -42,6 +42,7 @@ class DataArguments:
     num_future_steps: Optional[int] = field(default=4)
     max_dialog_turns: Optional[int] = field(default=6)
     val_ratio: float = field(default=0.0, metadata={"help": "Fraction of dataset to use for validation. 0.0 disables validation."})
+    val_max_samples: int = field(default=0, metadata={"help": "Max number of validation samples. 0 = unlimited."})
 
 
 @dataclass
