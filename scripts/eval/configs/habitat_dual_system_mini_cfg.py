@@ -18,12 +18,12 @@ eval_cfg = EvalCfg(
     env=EnvCfg(
         env_type='habitat',
         env_settings={
-            'config_path': 'scripts/eval/configs/vln_r2r.yaml',
+            'config_path': 'scripts/eval/configs/vln_r2r_mini.yaml',
         },
     ),
     eval_type='habitat_vln',
     eval_settings={
-        "output_path": "./logs/habitat/test_dual_system",
+        "output_path": "./logs/habitat/test_dual_system_mini",
         "save_video": False,
         "epoch": 0,
         "max_steps_per_episode": 500,

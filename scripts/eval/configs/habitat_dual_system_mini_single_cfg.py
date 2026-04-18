@@ -6,7 +6,7 @@ eval_cfg = EvalCfg(
         model_name='internvla_n1',
         model_settings={
             "mode": "dual_system",  # inference mode: dual_system or system2
-            'model_path': "/home/irteam/git/InternNav/checkpoints/InternVLA-N1-w-NavDP",
+            'model_path': "/ws/src/InternNav/checkpoints/InternVLA-N1-w-NavDP", # "/home/irteam/git/InternNav/checkpoints/InternVLA-N1-w-NavDP", # 
             "num_history": 8,
             "resize_w": 384,  # image resize width
             "resize_h": 384,  # image resize height
@@ -18,16 +18,19 @@ eval_cfg = EvalCfg(
     env=EnvCfg(
         env_type='habitat',
         env_settings={
-            'config_path': 'scripts/eval/configs/vln_r2r.yaml',
+            # habitat sim specifications - agent, sensors, tasks, measures etc. are defined in the habitat config file
+            'config_path': 'scripts/eval/configs/vln_r2r_mini.yaml',
         },
     ),
     eval_type='habitat_vln',
     eval_settings={
-        "output_path": "./logs/habitat/test_dual_system",
-        "save_video": False,
-        "epoch": 0,
-        "max_steps_per_episode": 500,
-        "port": "2333",
-        "dist_url": "env://",
+        # all current parse args
+        "output_path": "./logs/habitat/test_dual_system",  # output directory for logs/results
+        "save_video": False,  # whether to save videos
+        "epoch": 0,  # epoch number for logging
+        "max_steps_per_episode": 500,  # maximum steps per episode
+        # distributed settings
+        "port": "2333",  # communication port
+        "dist_url": "env://",  # url for distributed setup
     },
 )
