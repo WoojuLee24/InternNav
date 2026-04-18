@@ -3,19 +3,16 @@
 defaults:
   - /habitat: habitat_config_base
   - /habitat/task: vln_r2r
-  - /habitat/simulator/sensor_setups@habitat.simulator.agents.main_agent: rgbd_agent  # agents -> sensor_setups in habitat 0.3.x
+  - /habitat/simulator/agents@habitat.simulator.agents.main_agent: rgbd_agent
   - /habitat/dataset/vln: mp3d_r2r
   - /habitat/task/lab_sensors:
     - gps_sensor
     - compass_sensor
-  - /habitat/task/actions:  # look_up/look_down must be explicitly listed in habitat 0.3.x
-    - look_up
-    - look_down
   - _self_
 
 habitat:
   environment:
-    max_episode_steps: 5000
+    max_episode_steps: 50000
     iterator_options:
       max_scene_repeat_steps: 50000
       shuffle: False
@@ -35,7 +32,7 @@ habitat:
             max_depth: 10.0
     forward_step_size: 0.25
     turn_angle: 15
-    # tilt_angle: 15  # moved to per-action config in habitat 0.3.x
+    # tilt_angle: 15  # removed in habitat 0.3.x
     # action_space_config: "v1"  # removed in habitat 0.3.x
     habitat_sim_v0:
       gpu_device_id: 0
@@ -51,8 +48,11 @@ habitat:
         type: SPL
       oracle_success:
         type: OracleSuccess
+        # success_distance: 3.0
       oracle_navigation_error:
         type: OracleNavigationError
+      ndtw:
+        type: NDTW
     actions:
       stop:
         type: StopAction
@@ -68,15 +68,13 @@ habitat:
         # agent_index: 0  # removed in habitat 0.3.x
       look_up:
         type: LookUpAction
-        tilt_angle: 30
         # agent_index: 0  # removed in habitat 0.3.x
       look_down:
         type: LookDownAction
-        tilt_angle: 30
         # agent_index: 0  # removed in habitat 0.3.x
 
   dataset:
     type: R2RVLN-v1
     split: val_unseen
-    scenes_dir: data/InternData-N1/scene_data/mp3d_ce
-    data_path: data/InternData-N1/vln_ce/raw_data/r2r/{split}/{split}.json.gz
+    scenes_dir: data/InternData-N1-v0.5-mini/scene_data/mp3d_ce
+    data_path: data/InternData-N1-v0.5-mini/vln_ce/raw_data/rxr/{split}/{split}_guide_en.json.gz
