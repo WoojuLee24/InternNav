@@ -606,10 +606,10 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             if 'ndtw' in metrics:
                 result['ndtw'] = metrics['ndtw']
 
-            # save current progress
-            os.makedirs(self.output_path, exist_ok=True)
-            with open(os.path.join(self.output_path, 'progress.json'), 'a') as f:
-                f.write(json.dumps(result) + "\n")
+            if self.rank == 0:
+                os.makedirs(self.output_path, exist_ok=True)
+                with open(os.path.join(self.output_path, 'progress.json'), 'a') as f:
+                    f.write(json.dumps(result) + "\n")
 
             # save video
             if self.save_video and metrics['success'] == 1.0:
@@ -931,9 +931,10 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             if 'ndtw' in metrics:
                 result['ndtw'] = metrics['ndtw']
 
-            os.makedirs(self.output_path, exist_ok=True)
-            with open(os.path.join(self.output_path, 'progress.json'), 'a') as f:
-                f.write(json.dumps(result) + "\n")
+            if self.rank == 0:
+                os.makedirs(self.output_path, exist_ok=True)
+                with open(os.path.join(self.output_path, 'progress.json'), 'a') as f:
+                    f.write(json.dumps(result) + "\n")
             if self.save_video and metrics['success'] == 1.0:
                 images_to_video(
                     vis_frames,
