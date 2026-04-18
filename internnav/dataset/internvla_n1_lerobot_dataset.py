@@ -1439,6 +1439,9 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, dat
 
         train_indices = _stratified_scene_split_index(all_scene_keys, val_ratio, is_train=True)
         val_indices   = _stratified_scene_split_index(all_scene_keys, val_ratio, is_train=False)
+        val_max_samples = getattr(data_args, "val_max_samples", 0)
+        if val_max_samples > 0:
+            val_indices = val_indices[:val_max_samples]
         train_dataset = torch.utils.data.Subset(full_dataset, train_indices)
         eval_dataset  = torch.utils.data.Subset(full_dataset, val_indices)
         rank0_print(

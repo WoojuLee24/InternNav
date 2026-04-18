@@ -156,7 +156,7 @@ class DistributedEvaluator(Evaluator):
                             name=self.eval_config.eval_settings.get("wandb_run_name", None),
                             config=self.eval_config.eval_settings,
                         )
-                    wandb.log(result_all)
+                    wandb.log({f"test/{k}": v for k, v in result_all.items()})
                 except ImportError:
                     print("[Warning] wandb not installed. Skipping wandb logging.")
 
