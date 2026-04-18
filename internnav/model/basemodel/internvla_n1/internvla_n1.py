@@ -50,7 +50,7 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
         self.post_init()
 
         for name, value in (("_resnet_mean", _RESNET_MEAN), ("_resnet_std", _RESNET_STD)):
-            self.register_buffer(name, torch.FloatTensor(value).view(1, 1, 3, 1, 1), persistent=True) # True
+            self.register_buffer(name, torch.FloatTensor(value).view(1, 1, 3, 1, 1), persistent=False) # True
 
     def get_model(self):
         return self.model
