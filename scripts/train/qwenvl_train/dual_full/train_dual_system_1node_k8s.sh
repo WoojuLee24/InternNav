@@ -23,7 +23,7 @@ min_pixels=3136
 
 # Validation configuration
 val_ratio=0.1          # fraction of data for validation (0.0 to disable)
-val_interval_steps=500  # evaluate every N steps
+val_interval_steps=$((500 * 4 / batch_size))  # scale by batch_size (standard: 500 steps at batch_size=4)
 
 # Dataset configuration
 vln_datasets=r2r_125cm_0_30%30,r2r_60cm_15_15%30,rxr_125cm_0_30%30,rxr_60cm_15_15%30,scalevln_125cm_0_30%30,scalevln_60cm_30_30%30
@@ -73,7 +73,7 @@ torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --eval_strategy "steps" \
     --eval_steps ${val_interval_steps} \
     --save_strategy "steps" \
-    --save_steps 5000 \
+    --save_steps $((val_interval_steps * 2)) \
     --save_total_limit 2 \
     --metric_for_best_model eval_loss \
     --greater_is_better False \
