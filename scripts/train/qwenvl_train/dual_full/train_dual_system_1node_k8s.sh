@@ -63,6 +63,7 @@ torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --pixel_goal_only True \
     --system1 ${system1} \
     \
+    --val_ratio ${val_ratio} \
     --output_dir ${output_dir} \
     --num_train_epochs 3.0 \
     --per_device_train_batch_size ${batch_size} \
