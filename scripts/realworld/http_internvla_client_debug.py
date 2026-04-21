@@ -61,15 +61,17 @@ DEPTH_PNG_COMPRESS = 6
 current_control_mode = ControlMode.MPC_Mode
 trajs_in_world = None
 calib = None
+async_started = False
 
 desired_v, desired_w = 0.0, 0.0
 rgb_depth_rw_lock = ReadWriteLock()
 odom_rw_lock = ReadWriteLock()
 mpc_rw_lock = ReadWriteLock()
 
+async_pending_request = None
 
 def dual_sys_eval(image_bytes, depth_bytes, front_image_bytes, url='http://127.0.0.1:5802/eval_dual'):
-    global policy_init, http_idx, first_running_time
+    global policy_init, http_idx, first_running_time, async_started, async_pending_request
     
     # [LOG] HTTP 요청 준비
     if manager:
@@ -89,6 +91,20 @@ def dual_sys_eval(image_bytes, depth_bytes, front_image_bytes, url='http://127.0
         'depth': ('depth_image', depth_bytes, 'image/png'),
     }
     start = time.time()
+    
+    # Use async endpoint if mode is async
+    if CLIENT_MODE == 'async':
+        if not async_started:
+            url_async = url.replace('/eval_dual', '/eval_dual_async')
+            try:
+                resp = requests.post(url_async, files=files, data={'json': json.dumps({'mode': 'start_async'})}, timeout=10)
+                async_started = True
+                if manager:
+                    manager.get_logger().info(f"[Async] Started async backend")
+            except Exception as e:
+                if manager:
+                    manager.get_logger().error(f"[Async] Failed to start: {e}")
+        url = url.replace('/eval_dual', '/eval_dual_async')
     
     try:
         response = requests.post(url, files=files, data={'json': json_data}, timeout=100)
@@ -764,9 +780,9 @@ if __name__ == '__main__':
                         help='Subgoal marker sphere radius in meters (default: 0.3)')
     args = parser.parse_args()
 
-    if args.mode != 'sync':
-        print(f"[Client] mode={args.mode} requested, but async path is not implemented yet. Falling back to sync.")
-    CLIENT_MODE = 'sync'
+    CLIENT_MODE = args.mode
+    if args.mode == 'async':
+        print(f"[Client] Using async mode")
     JPEG_QUALITY = max(1, min(100, int(args.jpeg_quality)))
     DEPTH_PNG_COMPRESS = max(0, min(9, int(args.depth_png_compress)))
     CLIENT_OPT_FLAGS = {

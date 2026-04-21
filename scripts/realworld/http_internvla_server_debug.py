@@ -1,12 +1,13 @@
 import argparse
+import copy
 import json
 import os
+import queue
 import threading
 import time
 from datetime import datetime
 import sys
 from pathlib import Path
-
 import numpy as np
 from flask import Flask, jsonify, request
 from PIL import Image, ImageDraw, ImageFont
@@ -32,6 +33,34 @@ save_dir = 'vis_debug/http_internvla_server_debug'
 os.makedirs(save_dir, exist_ok=True)
 agent_lock = threading.Lock()
 SERVER_MODE = "sync"
+
+# Async infrastructure
+import queue
+s2_request_queue = queue.Queue()
+s2_output_queue = queue.Queue()
+async_thread_running = False
+
+def s2_background_worker():
+    """Background thread for S2 (planning) - runs asynchronously"""
+    global s2_output_queue
+    while async_thread_running:
+        try:
+            if not s2_request_queue.empty():
+                request_data = s2_request_queue.get(timeout=0.1)
+                image, depth, camera_pose, instruction, intrinsic, look_down, req_id = request_data
+                
+                with agent_lock:
+                    agent.step(
+                        image, depth, camera_pose, instruction, intrinsic=intrinsic, look_down=look_down
+                    )
+                
+                s2_output_queue.put((req_id, agent.output_action, agent.output_latent, agent.output_pixel))
+        except queue.Empty:
+            continue
+        except Exception as e:
+            print(f"[S2 Worker] Error: {e}")
+
+async_thread = None
 SERVER_OPT_FLAGS = {
     "kv_cache": False,
     "tensorrt": False,
@@ -132,6 +161,69 @@ def eval_dual():
         return jsonify(json_output)
     except Exception as e:
         print(f"[Server] eval_dual exception: {repr(e)}")
+        return jsonify({'status': 'waiting', 'error': str(e)})
+
+
+@app.route("/eval_dual_async", methods=['POST'])
+def eval_dual_async():
+    """Async endpoint - decouples S1 (control) from S2 (planning)"""
+    global idx, output_dir, start_time, async_thread_running
+    try:
+        start_time = time.time()
+
+        image_file = request.files['image']
+        depth_file = request.files['depth']
+        json_data = request.form['json']
+        data = json.loads(json_data)
+
+        image = Image.open(image_file.stream)
+        image = image.convert('RGB')
+        image = np.asarray(image)
+
+        depth = Image.open(depth_file.stream)
+        depth = depth.convert('I')
+        depth = np.asarray(depth)
+        depth = depth.astype(np.float32) / 10000.0
+
+        camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+        instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
+        
+        req_mode = data.get('mode', 'async')
+        image_id = data.get('idx', 0)
+        
+        if req_mode == 'start_async':
+            if not async_thread_running:
+                async_thread_running = True
+                async_thread = threading.Thread(target=s2_background_worker, daemon=True)
+                async_thread.start()
+                print("[Server] Started async S2 background thread")
+            return jsonify({'status': 'started'})
+        
+        if req_mode == 'stop_async':
+            async_thread_running = False
+            return jsonify({'status': 'stopped'})
+        
+        look_down = False
+        dual_sys_output = {}
+        
+        # Queue request for background S2 thread
+        req_id = idx
+        s2_request_queue.put((image, depth, camera_pose, instruction, args.camera_intrinsic, look_down, req_id))
+        
+        # Immediately return latest cached output (S1 can run from cached latent)
+        with agent_lock:
+            if agent.output_action is not None:
+                dual_sys_output.output_action = copy.deepcopy(agent.output_action)
+                agent.output_action = None
+                json_output = {'discrete_action': dual_sys_output.output_action}
+            elif agent.output_latent is not None:
+                json_output = {'status': 'latent_cached'}
+            else:
+                json_output = {'status': 'waiting'}
+
+        return jsonify(json_output)
+    except Exception as e:
+        print(f"[Server] eval_dual_async exception: {repr(e)}")
         return jsonify({'status': 'waiting', 'error': str(e)})
 
 
@@ -300,9 +392,9 @@ if __name__ == '__main__':
                         help="Path to calibration file (e.g. calib/calib_scout.txt)")
     args = parser.parse_args()
 
-    if args.mode != "sync":
-        print(f"[Server] mode={args.mode} requested, but async path is not implemented yet. Falling back to sync.")
-    SERVER_MODE = "sync"
+    SERVER_MODE = args.mode
+    if args.mode == 'async':
+        print(f"[Server] Using async mode")
     SERVER_OPT_FLAGS = {
         "kv_cache": bool(args.kv_cache),
         "tensorrt": bool(args.tensorrt),
