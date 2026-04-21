@@ -166,7 +166,11 @@ def eval_dual():
 
 @app.route("/eval_dual_async", methods=['POST'])
 def eval_dual_async():
-    """Async endpoint - decouples S1 (control) from S2 (planning)"""
+    """Async endpoint - nearly same as sync but returns immediately
+    
+    Key difference: Skip agent.step() call, just return cached state.
+    This allows higher frequency without waiting for S2.
+    """
     global idx, output_dir, start_time, async_thread_running
     try:
         start_time = time.time()
@@ -176,6 +180,7 @@ def eval_dual_async():
         json_data = request.form['json']
         data = json.loads(json_data)
 
+        # Parse images EXACTLY like sync endpoint (this works)
         image = Image.open(image_file.stream)
         image = image.convert('RGB')
         image = np.asarray(image)
@@ -188,9 +193,17 @@ def eval_dual_async():
         camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
         instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
         
+        policy_init = data.get('reset', False)
         req_mode = data.get('mode', 'async')
-        image_id = data.get('idx', 0)
         
+        if policy_init:
+            idx = 0
+            with agent_lock:
+                agent.reset()
+        
+        idx += 1
+        
+        # Mode control
         if req_mode == 'start_async':
             if not async_thread_running:
                 async_thread_running = True
@@ -203,19 +216,21 @@ def eval_dual_async():
             async_thread_running = False
             return jsonify({'status': 'stopped'})
         
-        look_down = False
-        dual_sys_output = {}
+        # Hybrid: Use global idx (which is always incrementing)
+        # Run S2 if idx % gap == 0 (periodic, same as gap-based sync)
+        gap = args.plan_step_gap
+        run_s2 = (idx % gap == 0) or (idx <= gap)
         
-        # Queue request for background S2 thread
-        req_id = idx
-        s2_request_queue.put((image, depth, camera_pose, instruction, args.camera_intrinsic, look_down, req_id))
+        if run_s2:
+            dual_sys_output = agent.step(image, depth, camera_pose, instruction, intrinsic=args.camera_intrinsic, look_down=False)
+        else:
+            # Don't run S2 - skip inference to speed up!
+            dual_sys_output = {}
         
-        # Immediately return latest cached output (S1 can run from cached latent)
         with agent_lock:
             if agent.output_action is not None:
-                dual_sys_output.output_action = copy.deepcopy(agent.output_action)
+                json_output = {'discrete_action': copy.deepcopy(agent.output_action)}
                 agent.output_action = None
-                json_output = {'discrete_action': dual_sys_output.output_action}
             elif agent.output_latent is not None:
                 json_output = {'status': 'latent_cached'}
             else:
@@ -223,7 +238,9 @@ def eval_dual_async():
 
         return jsonify(json_output)
     except Exception as e:
+        import traceback
         print(f"[Server] eval_dual_async exception: {repr(e)}")
+        traceback.print_exc()
         return jsonify({'status': 'waiting', 'error': str(e)})
 
 
