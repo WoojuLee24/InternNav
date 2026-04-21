@@ -969,10 +969,49 @@ HTTP Request → [Queue] → Background Thread → [Cache] ← HTTP Return
 
 ## True Async Experiments (Active Research)
 
+### Test Scripts Created:
+| Script | Purpose |
+|--------|---------|
+| `async_check_tmux.sh` | Dedicated async test launcher |
+| `compare_ab.sh` | A/B sync vs async comparison |
+| `extract_metrics.sh` | Extract metrics from logs |
+
+### Metrics Instrumented:
+| Metric | Description |
+|-------|-------------|
+| `http_requests` | Total HTTP requests |
+| `avg_http_latency` | Average HTTP response latency |
+| `s1_runs` | S1 (trajectory) generations |
+| `s2_runs` | S2 (planning/LLM) generations |
+| `background_s2_runs` | Background S2 runs |
+| `avg_background_s2_time` | Average background inference time |
+| `s1_ratio` | Ratio of S1 runs to HTTP requests |
+
+### Access Metrics:
+```bash
+curl http://localhost:5802/async_metrics
+```
+
 ### Experiment Plan:
-1. Baseline: gap_based_sync_using_navdp_async (traj=154, req_hz~2.7)
+1. Baseline: `gap_based_sync_using_navdp_async` (traj=154, req_hz~2.7)
 2. True async v1: Continuous background loop with queue
 3. True async v2: Background overlap (current)
+
+### Run Experiments:
+```bash
+# Sync baseline (from gap_based_sync_using_navdp_async branch)
+./scripts/realworld/sync_check_tmux.sh rosbag/my_camera_bag_20260317_073623 baseline
+
+# Async test (from true_async_background_thread branch)  
+./scripts/realworld/async_check_tmux.sh rosbag/my_camera_bag_20260317_073623 async_test
+
+# Compare metrics
+./scripts/realworld/extract_metrics.sh test_data/baseline_sync_check_baseline_* sync
+./scripts/realworld/extract_metrics.sh test_data/async_check_async_test_* async
+
+# Get live metrics
+curl http://localhost:5802/async_metrics
+```
 
 ### Checkpoint Architecture:
 - `InternVLA-N1-w-NavDP`: `"system1": "navdp_async"` (built-in async)
