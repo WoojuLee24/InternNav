@@ -39,33 +39,92 @@ import queue
 import threading
 import concurrent.futures
 
-s2_request_queue = queue.Queue()
-s2_output_queue = queue.Queue()
+s2_request_queue = queue.Queue(maxsize=1)
+s2_output_queue = queue.Queue(maxsize=1)
 async_thread_running = False
 s2_executor = None  # Thread pool for async S2
 
-def run_s2_background(image, depth, camera_pose, instruction, intrinsic):
-    """Run S2 in background thread - non-blocking from HTTP perspective
+# Cached output from background loop
+async_cached_trajectory = None
+async_cached_action = None
+
+def async_continuous_loop():
+    """Background thread: continuously runs step() and caches output
     
-    agent.step() internally updates:
-    - self.output_action
-    - self.output_latent  
-    - self.output_pixel
-    - self.pixel_goal_rgb / pixel_goal_depth
-    These are shared state that HTTP reads from.
+    This achieves TRUE async:
+    - Loop runs step() in background
+    - Caches trajectory for HTTP to return immediately
+    - HTTP never waits for inference!
     """
+    global async_cached_trajectory, async_cached_action, async_thread_running
+    
+    instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
+    camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+    
+    while async_thread_running:
+        try:
+            # Wait for new frame data from queue (non-blocking with timeout)
+            try:
+                image, depth = s2_request_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            
+            # Run step() in background - this runs both S2 and S1
+            with agent_lock:
+                dual_output = agent.step(
+                    image, 
+                    depth, 
+                    camera_pose, 
+                    instruction, 
+                    intrinsic=args.camera_intrinsic, 
+                    look_down=False
+                )
+                
+                # Cache the output for HTTP
+                if dual_output.output_action is not None:
+                    async_cached_action = dual_output.output_action
+                elif dual_output.output_trajectory is not None:
+                    async_cached_trajectory = dual_output.output_trajectory.tolist()
+            
+            s2_request_queue.task_done()
+            
+        except Exception as e:
+            print(f"[Async Loop] Error: {e}")
+            time.sleep(0.1)
+
+def run_s2_background(image, depth, camera_pose, instruction, intrinsic):
+    """Feed input to background queue and return immediately"""
     try:
-        agent.step(image, depth, camera_pose, instruction, intrinsic=intrinsic, look_down=False)
+        # Non-blocking put - if queue full, drop the old frame and add new one
+        try:
+            s2_request_queue.put_nowait((image, depth))
+        except queue.Full:
+            try:
+                s2_request_queue.get_nowait()
+                s2_request_queue.put_nowait((image, depth))
+            except queue.Empty:
+                s2_request_queue.put((image, depth), timeout=0.01)
     except Exception as e:
-        print(f"[S2 Background] Error: {e}")
+        print(f"[S2 Background] Queue error: {e}")
 
 def ensure_async_thread():
     """Ensure background S2 thread is running"""
-    global s2_executor, async_thread_running
+    global s2_executor, async_thread_running, async_continuous_thread
     if s2_executor is None:
-        s2_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="S2_")
         async_thread_running = True
-        print("[Server] Started S2 background executor")
+        s2_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="S2_")
+        async_continuous_thread = threading.Thread(target=async_continuous_loop, daemon=True)
+        async_continuous_thread.start()
+        print("[Server] Started async continuous loop")
+
+def stop_async_loop():
+    """Stop the background async loop"""
+    global async_thread_running, s2_executor
+    async_thread_running = False
+    if s2_executor:
+        s2_executor.shutdown(wait=False)
+        s2_executor = None
+    print("[Server] Stopped async loop")
 
 async_thread = None
 SERVER_OPT_FLAGS = {
@@ -173,20 +232,17 @@ def eval_dual():
 
 @app.route("/eval_dual_async", methods=['POST'])
 def eval_dual_async():
-    """Async endpoint - TRUE async with background S2 and immediate return
+    """TRUE async endpoint - background continuously runs step(), HTTP returns cached immediately
     
-    Architecture:
-    1. HTTP request triggers S2 in BACKGROUND (non-blocking)
-    2. HTTP returns IMMEDIATELY with cached S1 output
-    3. Background S2 populates agent state for NEXT request
-    
-    This achieves true async decoupling!
+    Architecture (TRUE async):
+    - Background thread: continuously runs step() in a loop, populates cache
+    - HTTP thread: returns cached output IMMEDIATELY, never waits
+    - This achieves TRUE async decoupling!
     """
     global idx, output_dir, start_time, async_thread_running
     try:
         start_time = time.time()
 
-        # Parse images using sync endpoint code (works)
         image_file = request.files['image']
         depth_file = request.files['depth']
         json_data = request.form['json']
@@ -207,53 +263,40 @@ def eval_dual_async():
         policy_init = data.get('reset', False)
         req_mode = data.get('mode', 'async')
         
-        # Reset handling
         if policy_init:
             idx = 0
             with agent_lock:
                 agent.reset()
+                async_cached_trajectory = None
+            ensure_async_thread()
+            return jsonify({'status': 'reset'})
         
         idx += 1
         
-        # Start/Stop async background thread
         if req_mode == 'start_async':
             ensure_async_thread()
             return jsonify({'status': 'started'})
         
         if req_mode == 'stop_async':
-            if s2_executor:
-                s2_executor.shutdown(wait=False)
+            stop_async_loop()
             return jsonify({'status': 'stopped'})
         
-        # Ensure background thread exists
         ensure_async_thread()
         
-        # Determine if S2 should run (gap-based, same as sync logic)
-        gap = args.plan_step_gap
-        current_ep = getattr(agent, 'episode_idx', idx)
-        last_s2_idx = getattr(agent, 'last_s2_idx', 0)
-        run_s2 = (current_ep - last_s2_idx > gap) or (idx <= gap)
+        # Submit incoming frame to background processing queue
+        try:
+            s2_request_queue.put_nowait((image, depth))
+        except queue.Full:
+            pass  # Queue full - frame will be dropped, but we still return cached
         
-        # KEY FIX: Always run S1 synchronously for each request!
-        # Background S2 is for NEXT request's cache
-        # This ensures we ALWAYS have output for THIS request
+        # ===== HTTP PATH: Return cached trajectory IMMEDIATELY =====
         with agent_lock:
-            # Run step - this runs BOTH S2 (if gap passed) and S1 synchronously
-            dual_sys_output = agent.step(image, depth, camera_pose, instruction, intrinsic=args.camera_intrinsic, look_down=False)
-        
-        # ALSO submit to background for NEXT request (pre-populate cache)
-        if run_s2 and s2_executor:
-            # Submit S2 only to background for future cache population
-            # (But we already ran above, so this is double - but safe)
-            s2_executor.submit(run_s2_background, image, depth, camera_pose, instruction, args.camera_intrinsic)
-        
-        # Return result from synchronous step
-        json_output = {}
-        with agent_lock:
-            if dual_sys_output.output_action is not None:
-                json_output = {'discrete_action': dual_sys_output.output_action}
-            elif dual_sys_output.output_trajectory is not None:
-                json_output = {'trajectory': dual_sys_output.output_trajectory.tolist()}
+            if async_cached_trajectory is not None:
+                json_output = {'trajectory': async_cached_trajectory}
+                async_cached_trajectory = None  # Consume the cache
+            elif async_cached_action is not None:
+                json_output = {'discrete_action': async_cached_action}
+                async_cached_action = None
             else:
                 json_output = {'status': 'waiting'}
 
