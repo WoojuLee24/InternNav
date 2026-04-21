@@ -928,3 +928,58 @@ The current gap-based sync mode IS our best async implementation.
 **Recommendation: Keep sync (gap-based) as the async implementation!**
 
 Next: Commit final working version and close async experiments.
+
+---
+
+## Branch Architecture
+
+### Saved Branches (NEVER to be modified):
+
+| Branch | Commit | Purpose | Status |
+|--------|--------|---------|--------|
+| `baseline_from_41b05702` | 41b05702 | Clean sync baseline | ✅ Preserved |
+| `gap_based_sync_using_navdp_async` | 41b05702 | Gap-based navdp_async | ✅ Preserved |
+| `async_impl_v1` | a12351ae | Original async research | ✅ Preserved |
+
+### Active Branch: `true_async_background_thread`
+
+#### Latest commits:
+```
+2a6e42b3 feat(realworld): simple async with background overlap
+74b0f891 feat(realworld): true async with background continuous loop
+```
+
+#### Current approach (2a6e42b3):
+- Run step() sync for current request
+- ALSO trigger background for next frame (overlap processing)
+- Achieves partial async benefit
+
+#### Earlier approach (74b0f891):
+- Queue-based architecture
+- Background thread continuously processes from queue
+- HTTP returns cached output immediately
+- Issue: First requests have no cache
+
+#### Architecture:
+```
+HTTP Request → [Queue] → Background Thread → [Cache] ← HTTP Return
+```
+
+---
+
+## True Async Experiments (Active Research)
+
+### Experiment Plan:
+1. Baseline: gap_based_sync_using_navdp_async (traj=154, req_hz~2.7)
+2. True async v1: Continuous background loop with queue
+3. True async v2: Background overlap (current)
+
+### Checkpoint Architecture:
+- `InternVLA-N1-w-NavDP`: `"system1": "navdp_async"` (built-in async)
+- `InternVLA-N1-DualVLN`: `"system1": "nextdit_async"` (async diffusion)
+
+### Next Steps:
+1. Test current `true_async_background_thread` with rosbags
+2. Compare with baseline (gap-based sync)
+3. If better: merge or create new accepted branch
+4. If not: document findings and close async research
