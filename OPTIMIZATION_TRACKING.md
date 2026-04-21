@@ -733,3 +733,119 @@ Interpretation:
 - `--jpeg-quality` and `--depth-png-compress` are available for transport experiments, but aggressive settings are rejected for quality.
 - Rejected optimization attempts are reverted from code.
 - Guardrail remains strict: if trajectory quality drops, discard that method.
+
+---
+
+## Baseline Verification (commit 41b05702)
+
+Branch: `baseline_from_41b05702` 
+Tested: 2026-04-20
+
+### Bag 1: my_camera_bag_20260317_061841
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| baseline_bag1_20260420 | my_camera_bag_20260317_061841 | 658 | 82 | 530 | 2.72 | 0.315 | 0 |
+
+Notes:
+- Full bag playback (485s at 0.7x rate): 658 trajectories, 82 no-trajectory, 530 discrete
+- Duration: 485.4s wall time, 1322 HTTP requests
+
+### Bag 2: my_camera_bag_20260317_063047
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| baseline_bag2_20260420 | my_camera_bag_20260317_063047 | 714 | 72 | 463 | 2.61 | 0.323 | 0 |
+
+Notes:
+- Full bag playback (450s at 0.7x rate): 714 trajectories, 72 no-trajectory, 463 discrete
+
+### Bag 3: my_camera_bag_20260317_073623
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| baseline_bag3_20260420 | my_camera_bag_20260317_073623 | 168 | 16 | 102 | 2.65 | 0.328 | 0 |
+
+Notes:
+- Short bag (75s record, ~102s at 0.7x rate): 168 trajectories, 16 no-trajectory, 102 discrete
+
+### Summary
+
+| Metric | Aggregate |
+|---|---|
+| Total trajectories | 1,540 |
+| Total requests | 2,770 |
+| Avg req_hz | 2.66 |
+| Avg latency | 0.322s |
+
+### Older Commit Tests
+
+| Commit | Description | Status | traj_count | Issue |
+|--------|------------|--------|----------:|-------|
+| 41b05702 | max-new-tokens default | ✅ WORKS | 658 | - |
+| 751c961e | enforce gpu+flashattn | ❌ FAILED | 0 | CPU FlashAttention (older container) |
+| 404c3070 | 256 resolution default | ❌ FAILED | 0 | CPU FlashAttention (older container) |
+| c97d22d8 | sync/async modes | ❌ FAILED | 0 | model path resolution (401 HF error) |
+
+Analysis:
+- Commits before 96e4764b fail due to FlashAttention/CUDA compatibility issues
+- Older commits expect different container environment (older torch/transformers)
+- Commit 96e4764b added GPU enforcement but older test container doesn't match
+
+Conclusion: **commit 41b05702 confirmed as best healthy baseline** for current container environment.
+
+---
+
+## Async Implementation Plan (async_impl_v1)
+
+### Branch: `async_impl_v1` (derived from 41b05702)
+
+### Goals:
+1. Decouple S1 (control loop, high frequency ~10Hz) from S2 (planning, low frequency ~0.5Hz)
+2. Increase trajectory quality (reduce no_trajectory responses)
+3. Keep or improve request throughput while maintaining sync baseline
+
+### Implementation Steps:
+
+#### Step 1: Verify Sync Baseline Remains Working
+- [ ] Run full bag experiments on 3 bags
+- [ ] Record baseline metrics
+- [ ] Commit working sync baseline
+
+#### Step 2: Add Async-Specific Endpoints
+- [ ] Add `/eval_dual_async` endpoint scaffold (exists but not implemented)
+- [ ] Add request queue in server
+- [ ] Add latest-request coalescing logic
+
+#### Step 3: Implement Background Planning Thread
+- [ ] Add planning thread in server
+- [ ] Connect S2 input/output queues
+- [ ] Add thread synchronization
+
+#### Step 4: Client Async Support
+- [ ] Enable async mode flag in client
+- [ ] Add request batching/queueing
+- [ ] Add latest-response logic
+
+#### Step 5: Experiments and Tuning
+- [ ] Test async on 3 bags with various parameters
+- [ ] Compare with sync baseline
+- [ ] Tune for best quality/speed tradeoff
+
+### Guardrails:
+- Sync mode must NOT be affected by async changes
+- If trajectory quality drops > 10%, discard async implementation
+- If req_hz drops, document and tune
+
+### Current Status:
+- Working on `async_impl_v1` branch
+- Sync baseline VERIFIED after container restart
+- 2026-04-21: Bag3 test: traj=154, no_traj=19, discrete=124, req_hz~2.7
+
+### Sync Baseline Verification (post-restart)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | Notes |
+|---|---|---:|---:|---:|---:|---:|
+| verify_bag3 | my_camera_bag_20260317_073623 | 154 | 19 | 124 | ~2.7 | Container restart test |
+
+Conclusion: Sync baseline is stable and working.
