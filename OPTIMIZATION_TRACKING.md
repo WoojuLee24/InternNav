@@ -849,3 +849,29 @@ Conclusion: **commit 41b05702 confirmed as best healthy baseline** for current c
 | verify_bag3 | my_camera_bag_20260317_073623 | 154 | 19 | 124 | ~2.7 | Container restart test |
 
 Conclusion: Sync baseline is stable and working.
+
+## Async Implementation Status
+
+### Branch: `async_impl_v1`
+
+### Evidence: Current "async" is PARTIAL (gap-based decoupling only)
+- S2 runs every 12 frames (plan_step_gap=12), not per frame
+- S1 can run from cached latent without S2 inference
+- S2 timing: 128 runs vs S1 runs = 168 (S2 = 76% of S1)
+- This is NOT true async - still synchronous per-request
+
+### Real Async Implementation (in progress)
+- Added `/eval_dual_async` endpoint scaffold
+- Added background thread infrastructure (queue-based)
+- Added client async mode support
+- Current issue: image parsing bug in async endpoint
+- Next: fix image handling and test
+
+### Test Results (bag3)
+
+| Mode | traj | no_traj | discrete | S2 | S1 |
+|------|-----:|--------:|---------:|---:|---:|
+| sync | 168 | 17 | 104 | 128 | 168 |
+| async (test, broken) | 0 | 47 | 0 | 341 | 0 |
+
+Next step: Fix async endpoint and re-test.
