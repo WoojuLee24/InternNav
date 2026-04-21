@@ -283,22 +283,30 @@ def eval_dual_async():
         
         ensure_async_thread()
         
-        # Submit incoming frame to background processing queue
-        try:
-            s2_request_queue.put_nowait((image, depth))
-        except queue.Full:
-            pass  # Queue full - frame will be dropped, but we still return cached
+        # ===== SIMPLE ASYNC: Run step() but trigger background for NEXT =====
+        # This is gap-based async: we run step(), but ALSO queue next for background
+        # This ensures continuous processing
         
-        # ===== HTTP PATH: Return cached trajectory IMMEDIATELY =====
+        # First: run step() in HTTP thread (sync for current request)
+        dual_sys_output = None
         with agent_lock:
-            if async_cached_trajectory is not None:
-                json_output = {'trajectory': async_cached_trajectory}
-                async_cached_trajectory = None  # Consume the cache
-            elif async_cached_action is not None:
-                json_output = {'discrete_action': async_cached_action}
-                async_cached_action = None
-            else:
-                json_output = {'status': 'waiting'}
+            dual_sys_output = agent.step(
+                image, depth, camera_pose, instruction, 
+                intrinsic=args.camera_intrinsic, look_down=False
+            )
+        
+        # Second: Also queue NEXT frame for background (overlap processing)
+        # This achieves async-like benefit: while HTTP returns, background starts next
+        if s2_executor:
+            s2_executor.submit(run_s2_background_simple, image, depth, camera_pose, instruction, args.camera_intrinsic)
+        
+        # Return result
+        if dual_sys_output.output_action is not None:
+            json_output = {'discrete_action': dual_sys_output.output_action}
+        elif dual_sys_output.output_trajectory is not None:
+            json_output = {'trajectory': dual_sys_output.output_trajectory.tolist()}
+        else:
+            json_output = {'status': 'waiting'}
 
         return jsonify(json_output)
     except Exception as e:
