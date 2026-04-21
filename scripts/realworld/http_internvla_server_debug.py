@@ -48,6 +48,20 @@ s2_executor = None  # Thread pool for async S2
 async_cached_trajectory = None
 async_cached_action = None
 
+# ===== ASYNC METRICS INSTRUMENTATION =====
+async_metrics = {
+    "http_requests": 0,
+    "http_cache_hits": 0,
+    "http_cache_misses": 0,
+    "s1_runs": 0,
+    "s2_runs": 0,
+    "background_s2_runs": 0,
+    "total_http_latency": 0.0,
+    "total_s1_time": 0.0,
+    "total_s2_time": 0.0,
+}
+async_metrics_lock = threading.Lock()
+
 def async_continuous_loop():
     """Background thread: continuously runs step() and caches output
     
@@ -69,6 +83,8 @@ def async_continuous_loop():
             except queue.Empty:
                 continue
             
+            t0 = time.time()
+            
             # Run step() in background - this runs both S2 and S1
             with agent_lock:
                 dual_output = agent.step(
@@ -85,6 +101,13 @@ def async_continuous_loop():
                     async_cached_action = dual_output.output_action
                 elif dual_output.output_trajectory is not None:
                     async_cached_trajectory = dual_output.output_trajectory.tolist()
+            
+            t1 = time.time()
+            
+            # Update metrics
+            with async_metrics_lock:
+                async_metrics["background_s2_runs"] += 1
+                async_metrics["total_s2_time"] += (t1 - t0)
             
             s2_request_queue.task_done()
             
@@ -283,6 +306,8 @@ def eval_dual_async():
         
         ensure_async_thread()
         
+        t_http_start = time.time()
+        
         # ===== SIMPLE ASYNC: Run step() but trigger background for NEXT =====
         # This is gap-based async: we run step(), but ALSO queue next for background
         # This ensures continuous processing
@@ -295,10 +320,22 @@ def eval_dual_async():
                 intrinsic=args.camera_intrinsic, look_down=False
             )
         
+        t_http_end = time.time()
+        http_latency = t_http_end - t_http_start
+        
         # Second: Also queue NEXT frame for background (overlap processing)
         # This achieves async-like benefit: while HTTP returns, background starts next
         if s2_executor:
             s2_executor.submit(run_s2_background_simple, image, depth, camera_pose, instruction, args.camera_intrinsic)
+        
+        # Update async metrics
+        with async_metrics_lock:
+            async_metrics["http_requests"] += 1
+            async_metrics["total_http_latency"] += http_latency
+            if dual_sys_output.output_trajectory is not None:
+                async_metrics["s1_runs"] += 1
+            if dual_sys_output.output_action is not None:
+                async_metrics["s2_runs"] += 1
         
         # Return result
         if dual_sys_output.output_action is not None:
@@ -315,6 +352,30 @@ def eval_dual_async():
         traceback.print_exc()
         return jsonify({'status': 'waiting', 'error': str(e)})
 
+
+@app.route("/async_metrics", methods=['GET'])
+def get_async_metrics():
+    """Get async performance metrics"""
+    with async_metrics_lock:
+        m = async_metrics.copy()
+    
+    # Calculate averages
+    if m["http_requests"] > 0:
+        m["avg_http_latency"] = m["total_http_latency"] / m["http_requests"]
+    else:
+        m["avg_http_latency"] = 0.0
+    
+    if m["background_s2_runs"] > 0:
+        m["avg_background_s2_time"] = m["total_s2_time"] / m["background_s2_runs"]
+    else:
+        m["avg_background_s2_time"] = 0.0
+    
+    if m["s1_runs"] > 0:
+        m["s1_ratio"] = m["s1_runs"] / m["http_requests"] if m["http_requests"] > 0 else 0
+    else:
+        m["s1_ratio"] = 0.0
+    
+    return jsonify(m)
 
 
 def annotate_image(idx, image, llm_output, trajectory, pixel_goal, output_dir, filename):
