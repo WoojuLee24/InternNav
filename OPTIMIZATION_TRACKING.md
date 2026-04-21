@@ -874,4 +874,30 @@ Conclusion: Sync baseline is stable and working.
 | sync | 168 | 17 | 104 | 128 | 168 |
 | async (test, broken) | 0 | 47 | 0 | 341 | 0 |
 
-Next step: Fix async endpoint and re-test.
+## Key Learnings from Async Experiments
+
+### What DOES work (current system):
+- Gap-based decoupling: S2 runs every 12 frames (plan_step_gap=12)
+- S1 can use cached latent without S2 inference per frame
+- This is ~76% "async" already achieved!
+
+### What DOESN'T work (issues found):
+- `eval_dual_async`: Image parsing via BytesIO fails - use original stream
+- When run_s2=true, agent.step() BLOCKS synchronously (72s!)
+- True async requires BACKGROUND thread, not blocking call
+
+### Architecture needed for TRUE async:
+1. Background queue for S2 requests (not blocking)
+2. Response returns cached S1 immediately (no wait)
+3. Background S2 populates cache for next request
+4. Need: connection from background thread output back to agent state
+
+### Test Results (bag3)
+
+| Mode | traj | no_traj | discrete | S2 runs | S1 runs |
+|------|-----:|--------:|---------:|---:|---:|
+| sync | 168 | 17 | 104 | 128 | 168 |
+| async_v5 (not working) | 0 | 49 | 0 | 0 | 0 |
+| async_v6 (block issue) | 0 | 15 | 0 | 1 | 0 |
+
+Next step: Implement proper background S2 thread (non-blocking architecture).
