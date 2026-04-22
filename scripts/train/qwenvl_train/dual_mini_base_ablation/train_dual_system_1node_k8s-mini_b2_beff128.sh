@@ -34,7 +34,7 @@ data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce} #
 eval_mode=${2:-latest}
 
 # Output configuration
-run_name=InternVLA-N1-DualVLN-v0.5-mini
+run_name=InternVLA-N1-DualVLN-v0.5-mini_ratio0_1percent
 output_dir=checkpoints/${run_name}
 # system 1 options: nextdit_async, navdp_async, nextdit
 system1=nextdit_async

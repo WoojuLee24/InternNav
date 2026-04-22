@@ -30,7 +30,7 @@ val_interval_steps=500  # evaluate every N steps
 vln_datasets=r2r_125cm_0_30,r2r_125cm_0_45,r2r_60cm_15_15,r2r_60cm_30_30
 
 # Data path (override with: bash train_system2_1node_k8s.sh /path/to/data)
-data_root=${1:-/Home/irteam/data-vol1/InternData-N1-v0.5-mini/vln_ce}
+data_root=${1:-/home/irteam/data-vol1/InternData-N1-v0.5-mini/vln_ce}
 
 # Output configuration
 run_name=train_system2_1node_k8s-mini_$(date +%Y%m%d_%H%M%S)
