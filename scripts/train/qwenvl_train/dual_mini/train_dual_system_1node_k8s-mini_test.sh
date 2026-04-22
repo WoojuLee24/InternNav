@@ -80,7 +80,7 @@ torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --save_total_limit 2 \
     --metric_for_best_model eval_loss \
     --greater_is_better False \
-    --load_best_model_at_end True \
+    --load_best_model_at_end False \
     --learning_rate ${lr} \
     --weight_decay 0 \
     --warmup_ratio 0.003 \
@@ -118,6 +118,20 @@ if best:
         cp "${output_dir}/preprocessor_config.json" "${best_ckpt}/" 2>/dev/null || \
             cp "${system2_ckpt}/preprocessor_config.json" "${best_ckpt}/"
         cp "${system2_ckpt}/chat_template.json" "${best_ckpt}/"
+        # Resume into the same wandb run as training
+        wandb_run_id=$(python -c "
+import glob, os, re
+runs = glob.glob('${output_dir}/wandb/run-*')
+if runs:
+    latest = sorted(runs)[-1]
+    m = re.search(r'run-\d+_\d+-(\w+)$', latest)
+    if m: print(m.group(1))
+" 2>/dev/null)
+        if [ -n "${wandb_run_id}" ]; then
+            export WANDB_RUN_ID="${wandb_run_id}"
+            export WANDB_RESUME="allow"
+            echo "[Eval] Resuming wandb run: ${wandb_run_id}"
+        fi
         bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh --model_path "${best_ckpt}" --quiet
     else
         echo "[Eval] No best checkpoint found, skipping eval."
