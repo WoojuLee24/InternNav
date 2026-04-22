@@ -31,6 +31,12 @@ def parse_args():
         default=None,
         help="override agent.model_settings.model_path in the config (e.g. a training checkpoint)",
     )
+    parser.add_argument(
+        "--wandb_run_name",
+        type=str,
+        default=None,
+        help="override wandb run name in eval_settings",
+    )
     return parser.parse_args()
 
 
@@ -118,6 +124,9 @@ def main():
         ckpt_name = os.path.basename(args.model_path.rstrip('/'))
         evaluator_cfg.eval_settings.setdefault('wandb_run_name', ckpt_name)
         evaluator_cfg.eval_settings.setdefault('output_path', f"./logs/eval/{ckpt_name}")
+
+    if args.wandb_run_name is not None:
+        evaluator_cfg.eval_settings['wandb_run_name'] = args.wandb_run_name
 
     # fill in evaluator default config
     if evaluator_cfg.eval_type == 'vln_distributed':
