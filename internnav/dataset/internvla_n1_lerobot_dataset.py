@@ -212,8 +212,9 @@ def _stratified_scene_split_index(scene_keys, val_ratio, is_train):
 
     val_scene_set = set()
     for group, scenes in group_to_scenes.items():
-        n_val_scenes = max(1, math.ceil(len(scenes) * val_ratio))
-        val_scene_set.update(scenes[-n_val_scenes:])
+        scenes_sorted = sorted(scenes)  # deterministic across ranks regardless of insertion order
+        n_val_scenes = max(1, math.ceil(len(scenes_sorted) * val_ratio))
+        val_scene_set.update(scenes_sorted[-n_val_scenes:])
 
     known_result = [i for i in known_idx if (scene_keys[i] not in val_scene_set) == is_train]
 
@@ -789,7 +790,7 @@ def clip_or_pad(arr, fixed_len):
 
 
 def get_annotations_from_lerobot_data(data_path, setting):
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import ThreadPoolExecutor
 
     import pyarrow.parquet as pq
 
@@ -797,7 +798,7 @@ def get_annotations_from_lerobot_data(data_path, setting):
         "axis_align_matrix": [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
         "episodes": [],
     }
-    scene_ids = [d for d in os.listdir(data_path) if os.path.isdir(os.path.join(data_path, d))]
+    scene_ids = sorted(d for d in os.listdir(data_path) if os.path.isdir(os.path.join(data_path, d)))
 
     def process_scene(scene_id):
         scene_path = os.path.join(data_path, scene_id)
@@ -846,11 +847,8 @@ def get_annotations_from_lerobot_data(data_path, setting):
         return scene_annotations
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {executor.submit(process_scene, scene_id): scene_id for scene_id in scene_ids}
-        for future in as_completed(futures):
-            scene_id = futures[future]
+        for scene_id, scene_annotations in zip(scene_ids, executor.map(process_scene, scene_ids)):
             try:
-                scene_annotations = future.result()
                 annotations["episodes"].extend(scene_annotations)
             except Exception as e:
                 print(f"Error processing scene {scene_id}: {e}")
@@ -981,6 +979,7 @@ class NavPixelGoalDataset(Dataset):
                 list_data_dict += turn_list
                 list_data_dict += stop_list * 5
             if sampling_rate < 1.0:
+                random.seed(42)
                 list_data_dict = random.sample(list_data_dict, int(len(list_data_dict) * sampling_rate))
                 print(f"sampling {len(list_data_dict)} examples from dataset {data}")
             else:
@@ -1439,9 +1438,49 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, dat
 
         train_indices = _stratified_scene_split_index(all_scene_keys, val_ratio, is_train=True)
         val_indices   = _stratified_scene_split_index(all_scene_keys, val_ratio, is_train=False)
+
+        # ===== DEBUG: dataset split diagnostics =====
+        import math as _math
+        import torch.distributed as _dist
+        _rank = _dist.get_rank() if (_dist.is_available() and _dist.is_initialized()) else 0
+        _world = _dist.get_world_size() if (_dist.is_available() and _dist.is_initialized()) else 1
+
+        _train_raw, _val_raw = len(train_indices), len(val_indices)
+        _val_max = getattr(data_args, "val_max_samples", 0)
+        _train_max = getattr(data_args, "train_max_samples", 0)
+        _train_eff = min(_train_raw, _train_max) if _train_max > 0 else _train_raw
+        _val_eff   = min(_val_raw,   _val_max)   if _val_max  > 0 else _val_raw
+        _train_per_rank = _math.ceil(_train_eff / _world)
+        _val_per_rank   = _math.ceil(_val_eff   / _world)
+
+        print(
+            f"[DEBUG rank={_rank}] full={len(full_dataset)}  "
+            f"train_raw={_train_raw} → eff={_train_eff} → per_rank={_train_per_rank}  "
+            f"val_raw={_val_raw} → eff={_val_eff} → per_rank={_val_per_rank}  "
+            f"world={_world}",
+            flush=True,
+        )
+        if _rank == 0:
+            if _val_eff < _world:
+                print(f"[DEBUG WARNING] val samples ({_val_eff}) < world_size ({_world}): DDP eval hang 가능", flush=True)
+            if _train_eff < _world:
+                print(f"[DEBUG WARNING] train samples ({_train_eff}) < world_size ({_world}): DDP train hang 가능", flush=True)
+            print(f"[DEBUG] actual val ratio = {_val_eff / len(full_dataset) * 100:.1f}% (요청: {val_ratio * 100:.0f}%)", flush=True)
+            for _label, _idxs in [("train", train_indices[:1]), ("val", val_indices[:1])]:
+                if len(_idxs) > 0:
+                    try:
+                        _ = full_dataset[_idxs[0]]
+                        print(f"[DEBUG] {_label} sample[0] load: OK", flush=True)
+                    except Exception as _e:
+                        print(f"[DEBUG ERROR] {_label} sample[0] load FAILED: {_e}", flush=True)
+        # ===== END DEBUG =====
+
         val_max_samples = getattr(data_args, "val_max_samples", 0)
         if val_max_samples > 0:
             val_indices = val_indices[:val_max_samples]
+        train_max_samples = getattr(data_args, "train_max_samples", 0)
+        if train_max_samples > 0:
+            train_indices = train_indices[:train_max_samples]
         train_dataset = torch.utils.data.Subset(full_dataset, train_indices)
         eval_dataset  = torch.utils.data.Subset(full_dataset, val_indices)
         rank0_print(
