@@ -22,10 +22,10 @@ min_pixels=3136
 
 # Validation configuration
 val_ratio=0.1          # fraction of data for validation (0.0 to disable)
-val_interval_steps=$((10 * 4 / batch_size))  # scale by batch_size (standard: 100 steps at batch_size=4)
+val_interval_steps=$((1 * 2 / batch_size))  # scale by batch_size (standard: 100 steps at batch_size=4)
 
 # Dataset configuration
-vln_datasets=r2r_125cm_0_30%10,r2r_60cm_15_15%10
+vln_datasets=r2r_125cm_0_30%10
 
 # Data path (override with: bash train_dual_system_1node_k8s.sh /path/to/data)
 data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce} # ${1:-/ws/src/InternNav/data/InternData-N1/vln_ce}
@@ -72,7 +72,8 @@ torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --max_pixels ${max_pixels} \
     --min_pixels ${min_pixels} \
     --val_ratio ${val_ratio} \
-    --val_max_samples 128 \
+    --val_max_samples 65 \
+    --train_max_samples 512 \
     --eval_strategy "steps" \
     --eval_steps ${val_interval_steps} \
     --save_strategy "steps" \
@@ -118,21 +119,10 @@ if best:
         cp "${output_dir}/preprocessor_config.json" "${best_ckpt}/" 2>/dev/null || \
             cp "${system2_ckpt}/preprocessor_config.json" "${best_ckpt}/"
         cp "${system2_ckpt}/chat_template.json" "${best_ckpt}/"
-        # Resume into the same wandb run as training
-        wandb_run_id=$(python -c "
-import glob, os, re
-runs = glob.glob('${output_dir}/wandb/run-*')
-if runs:
-    latest = sorted(runs)[-1]
-    m = re.search(r'run-\d+_\d+-(\w+)$', latest)
-    if m: print(m.group(1))
-" 2>/dev/null)
-        if [ -n "${wandb_run_id}" ]; then
-            export WANDB_RUN_ID="${wandb_run_id}"
-            export WANDB_RESUME="allow"
-            echo "[Eval] Resuming wandb run: ${wandb_run_id}"
-        fi
-        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh --model_path "${best_ckpt}" --quiet
+        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh \
+            --model_path "${best_ckpt}" \
+            --wandb_run_name "${run_name}_test" \
+            --quiet
     else
         echo "[Eval] No best checkpoint found, skipping eval."
     fi
