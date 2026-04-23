@@ -22,16 +22,14 @@ max_pixels=313600
 min_pixels=3136
 
 # Validation configuration
-val_ratio=0.0          # fraction of data for validation (0.0 to disable)
-val_interval_steps=$((1 * 4 / batch_size))  # scale by batch_size (standard: 100 steps at batch_size=4)
+val_ratio=0.1          # fraction of data for validation (0.0 to disable)
+val_interval_steps=$((100 * 4 / batch_size))  # scale by batch_size (standard: 100 steps at batch_size=4)
 
 # Dataset configuration
-vln_datasets=r2r_125cm_0_30%1,r2r_60cm_15_15%1
+vln_datasets=r2r_125cm_0_30%30,r2r_60cm_15_15%30
 
 # Data path (override with: bash train_dual_system_1node_k8s.sh /path/to/data)
 data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce} # ${1:-/ws/src/InternNav/data/InternData-N1/vln_ce}
-# Eval mode: "latest" to eval the most recent checkpoint, "best" to eval the best checkpoint
-eval_mode=${2:-latest}
 
 # Output configuration
 run_name=InternVLA-N1-DualVLN-v0.5-mini
@@ -73,11 +71,14 @@ torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --max_pixels ${max_pixels} \
     --min_pixels ${min_pixels} \
     --val_ratio ${val_ratio} \
-    --eval_strategy "no" \
+    --eval_strategy "steps" \
     --eval_steps ${val_interval_steps} \
     --save_strategy "steps" \
     --save_steps ${val_interval_steps} \
     --save_total_limit 2 \
+    --metric_for_best_model eval_loss \
+    --greater_is_better False \
+    --load_best_model_at_end True \
     --learning_rate ${lr} \
     --weight_decay 0 \
     --warmup_ratio 0.003 \
@@ -91,7 +92,7 @@ torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --run_name ${run_name} \
     --report_to wandb
 
-# Auto-eval after training (master node only)
+# Auto-eval on best checkpoint after training (master node only)
 if [ "${NODE_RANK}" = "0" ]; then
     best_ckpt=$(python -c "
 import json, glob, os
@@ -109,27 +110,12 @@ if best:
     print(best)
 " 2>/dev/null)
 
-    latest_ckpt=$(python -c "
-import glob, os
-ckpts = glob.glob('${output_dir}/checkpoint-*')
-ckpts = [c for c in ckpts if os.path.isdir(c)]
-if ckpts:
-    print(max(ckpts, key=lambda c: int(c.split('-')[-1])))
-" 2>/dev/null)
-
-    if [ "${eval_mode}" = "latest" ]; then
-        eval_ckpt="${latest_ckpt}"
-        echo "[Eval] Latest checkpoint: ${eval_ckpt}"
+    if [ -n "${best_ckpt}" ]; then
+        echo "[Eval] Best checkpoint: ${best_ckpt}"
+        cp "${output_dir}/preprocessor_config.json" "${best_ckpt}/" 2>/dev/null || true
+        cp "${system2_ckpt}/chat_template.json" "${best_ckpt}/" 2>/dev/null || true
+        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh --model_path "${best_ckpt}" --quiet
     else
-        eval_ckpt="${best_ckpt}"
-        echo "[Eval] Best checkpoint: ${eval_ckpt}"
-    fi
-
-    if [ -n "${eval_ckpt}" ]; then
-        cp "${output_dir}/preprocessor_config.json" "${eval_ckpt}/" 2>/dev/null || true
-        cp "${system2_ckpt}/chat_template.json" "${eval_ckpt}/" 2>/dev/null || true
-        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh --model_path "${eval_ckpt}" --quiet
-    else
-        echo "[Eval] No checkpoint found, skipping eval."
+        echo "[Eval] No best checkpoint found, skipping eval."
     fi
 fi
