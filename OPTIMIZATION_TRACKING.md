@@ -1,8 +1,53 @@
-# Realworld Sync Optimization Tracking
+# True Async Background Thread Experiments
+
+Last updated: 2026-04-23
+
+## Experiment: Coordinate vs Discrete Output Investigation
+
+### Key Finding
+The InternVLA model outputs BOTH coordinates (for trajectories) and arrows (for discrete actions).
+**The trajectory ratio varies by ROS bag** - this is due to scene complexity and navigation requirements.
+
+### Results
+
+| Run | Rosbag | Total | Trajectories | Discrete | Traj Ratio |
+|---|---|---:|---:|---:|---:|
+| async1 | `my_camera_bag_20260317_061841` | 462 | 62 | 400 | 13.4% |
+| async2 | `my_camera_bag_20260317_063047` | 200 | 82 | 118 | 41.0% |
+| async3 | `my_camera_bag_20260317_073623` | 200 | 101 | 99 | 50.5% |
+
+### Summary
+- **Average trajectory ratio: 34.7%** across all 3 rosbags
+- Rosbag 3 has the best trajectory ratio (50.5%) - scene is more suitable for waypoint navigation
+- Rosbag 1 has lowest ratio (13.4%) - may require more discrete turning actions
+
+## Earlier Baseline (sync mode, module optimizations)
 
 Last updated: 2026-04-08
 
 This file records each optimization module attempt with before/after metrics.
+
+## Metric definitions
+
+- `traj_count`: number of `[Plan] Received Trajectory.` in client log.
+- `no_traj_count`: number of `[Plan] No trajectory in response.` in client log.
+- `discrete_count`: number of `[Plan] Received Discrete Actions:` in client log.
+- `req_hz`: effective HTTP request throughput from client log (`idx` range over elapsed wall time).
+- `http_avg_latency_s`: average of client `[HTTP] ... Latency:` values.
+- `http_failures`: request failures/JSON decode/bad status.
+
+Notes:
+- These are sync-mode rosbag validation metrics, not full S1/S2 internal profiler stats.
+- Trajectory count is a hard guardrail: optimizations must not significantly reduce trajectory responses.
+
+## Stable baseline snapshot (mode scaffold only)
+
+Reference commit: `c97d22d8` (mode scaffold)
+
+| Run | Rosbag | traj_count | no_traj_count | discrete_count | req_hz | http_avg_latency_s | http_failures |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fix18 | `my_camera_bag_20260310_035208` | 54 | 8 | 8 | 0.408 | 2.444 | 0 |
+| fix19 | `my_camera_bag_20260310_035611` | 44 | 18 | 18 | 0.411 | 2.454 | 0 |
 
 ## Metric definitions
 
