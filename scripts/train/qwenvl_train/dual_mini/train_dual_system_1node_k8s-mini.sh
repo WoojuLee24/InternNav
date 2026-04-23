@@ -16,8 +16,8 @@ llm=Qwen/Qwen2.5-VL-7B-Instruct
 
 # Training hyperparameters
 lr=1e-4
-batch_size=2
-grad_accum_steps=8  # 1 node x 8 GPUs x 2 x 8 = 128 effective batch (same as 8 nodes)
+batch_size=4
+grad_accum_steps=4  # 1 node x 8 GPUs x 4 x 4 = 128 effective batch (same as 8 nodes)
 max_pixels=313600
 min_pixels=3136
 
