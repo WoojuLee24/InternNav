@@ -92,47 +92,18 @@ class DistributedEvaluator(Evaluator):
             global_metrics = {name: tensor.detach().cpu() for name, tensor in local_metrics.items()}
             total_len = int(local_len)
         else:
-            # -------- 2) Gather lengths from all ranks --------
-            local_len_t = torch.tensor([local_len], dtype=torch.long, device=device)
-            len_list = [torch.zeros_like(local_len_t) for _ in range(world_size)]
-            dist.all_gather(len_list, local_len_t)
-            lens = torch.stack(len_list).cpu()  # shape [world_size, 1]
-            lens = lens.view(-1)  # [world_size]
-            max_len = int(lens.max().item())
-            total_len = int(lens.sum().item())
+            # -------- 2-3) Gather metrics from all ranks via CPU (avoids GPU OOM on max_len) --------
+            local_data = {name: tensor.detach().cpu().tolist() for name, tensor in local_metrics.items()}
+            all_data = [None] * world_size
+            dist.all_gather_object(all_data, local_data)
 
-            # -------- 3) For each metric, pad + all_gather + unpad --------
+            total_len = sum(len(next(iter(d.values()))) for d in all_data if d)
             global_metrics = {}
-            for name, tensor in local_metrics.items():
-                assert tensor.shape[0] == local_len, (
-                    f"Metric {name} length ({tensor.shape[0]}) " f"!= first metric length ({local_len})"
-                )
-
-                # pad to max_len on this rank
-                padded = torch.zeros(
-                    max_len,
-                    dtype=tensor.dtype,
-                    device=device,
-                )
-                padded[:local_len] = tensor
-
-                # gather padded tensors from all ranks
-                gathered = [torch.zeros_like(padded) for _ in range(world_size)]
-                dist.all_gather(gathered, padded)
-
-                # unpad & concat using true lengths
-                parts = []
-                for rank in range(world_size):
-                    cur_len = int(lens[rank].item())
-                    if cur_len > 0:
-                        parts.append(gathered[rank][:cur_len])
-                if parts:
-                    global_tensor = torch.cat(parts, dim=0)
-                else:
-                    # no episodes at all (edge case)
-                    global_tensor = torch.empty(0, dtype=tensor.dtype)
-
-                global_metrics[name] = global_tensor.detach().cpu()
+            for name in local_data:
+                combined = []
+                for rank_data in all_data:
+                    combined.extend(rank_data.get(name, []))
+                global_metrics[name] = torch.tensor(combined)
 
         # -------- 4) Let subclass compute final metrics from global tensors --------
         result_all = self.calc_metrics(global_metrics)
