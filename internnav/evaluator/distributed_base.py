@@ -1,5 +1,7 @@
 import json
 import os
+import tempfile
+import time
 
 import numpy as np
 import torch
@@ -92,12 +94,39 @@ class DistributedEvaluator(Evaluator):
             global_metrics = {name: tensor.detach().cpu() for name, tensor in local_metrics.items()}
             total_len = int(local_len)
         else:
-            # -------- 2-3) Gather metrics from all ranks via CPU (avoids GPU OOM on max_len) --------
-            local_data = {name: tensor.detach().cpu().tolist() for name, tensor in local_metrics.items()}
-            all_data = [None] * world_size
-            dist.all_gather_object(all_data, local_data)
+            # -------- 2) File-based metric collection (avoids NCCL OOM/timeout) --------
+            # Each rank writes its metrics to a file; rank 0 polls and collects.
+            # This replaces dist.all_gather_object which requires all ranks to call
+            # simultaneously — ranks with fewer episodes finish early and time out.
+            collect_dir = self.output_path or tempfile.mkdtemp()
+            os.makedirs(collect_dir, exist_ok=True)
 
-            total_len = sum(len(next(iter(d.values()))) for d in all_data if d)
+            rank = get_rank()
+            local_data = {name: tensor.detach().cpu().tolist() for name, tensor in local_metrics.items()}
+            rank_file = os.path.join(collect_dir, f"metrics_rank{rank}.json")
+            tmp_file = rank_file + ".tmp"
+            with open(tmp_file, "w") as f:
+                json.dump(local_data, f)
+            os.replace(tmp_file, rank_file)  # atomic write
+
+            if rank != 0:
+                return {}
+
+            # Rank 0 waits for all rank files
+            all_data = []
+            for r in range(world_size):
+                r_file = os.path.join(collect_dir, f"metrics_rank{r}.json")
+                while not os.path.exists(r_file):
+                    time.sleep(2)
+                with open(r_file, "r") as f:
+                    all_data.append(json.load(f))
+            for r in range(world_size):
+                try:
+                    os.remove(os.path.join(collect_dir, f"metrics_rank{r}.json"))
+                except OSError:
+                    pass
+
+            total_len = sum(len(next(iter(d.values()))) for d in all_data)
             global_metrics = {}
             for name in local_data:
                 combined = []
@@ -105,31 +134,31 @@ class DistributedEvaluator(Evaluator):
                     combined.extend(rank_data.get(name, []))
                 global_metrics[name] = torch.tensor(combined)
 
-        # -------- 4) Let subclass compute final metrics from global tensors --------
+        # -------- 4) Let subclass compute final metrics from global tensors (rank 0 only) --------
         result_all = self.calc_metrics(global_metrics)
         result_all.setdefault("length", total_len)
 
         # -------- 5) Logging --------
         print(result_all)
-        if get_rank() == 0:
+        if self.output_path:
             os.makedirs(self.output_path, exist_ok=True)
             out_path = os.path.join(self.output_path, "result.json")
             with open(out_path, "a") as f:
                 f.write(json.dumps(result_all) + "\n")
 
-            if self.eval_config.eval_settings.get("use_wandb", False):
-                try:
-                    import wandb
+        if self.eval_config.eval_settings.get("use_wandb", False):
+            try:
+                import wandb
 
-                    if wandb.run is None:
-                        wandb.init(
-                            project=self.eval_config.eval_settings.get("wandb_project", "internnav"),
-                            name=self.eval_config.eval_settings.get("wandb_run_name", None),
-                            config=self.eval_config.eval_settings,
-                        )
-                    wandb.log({f"test/{k}": v for k, v in result_all.items()})
-                except ImportError:
-                    print("[Warning] wandb not installed. Skipping wandb logging.")
+                if wandb.run is None:
+                    wandb.init(
+                        project=self.eval_config.eval_settings.get("wandb_project", "huggingface"),
+                        name=self.eval_config.eval_settings.get("wandb_run_name", None),
+                        config=self.eval_config.eval_settings,
+                    )
+                wandb.log({f"test/{k}": v for k, v in result_all.items()})
+            except ImportError:
+                print("[Warning] wandb not installed. Skipping wandb logging.")
 
         return result_all
 
