@@ -32,7 +32,7 @@ vln_datasets=r2r_125cm_0_30%30,r2r_60cm_15_15%30
 data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce} # ${1:-/ws/src/InternNav/data/InternData-N1/vln_ce}
 
 # Output configuration
-run_name=InternVLA-N1-DualVLN-v0.5-mini
+run_name=dual_mini/b4_beff128
 output_dir=checkpoints/${run_name}
 # system 1 options: nextdit_async, navdp_async, nextdit
 system1=nextdit_async

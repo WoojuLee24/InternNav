@@ -16,8 +16,8 @@ llm=Qwen/Qwen2.5-VL-7B-Instruct
 
 # Training hyperparameters
 lr=1e-4
-batch_size=4
-grad_accum_steps=4  # 1 node x 8 GPUs x 4 x 4 = 128 effective batch (same as 8 nodes)
+batch_size=2
+grad_accum_steps=8  # 1 node x 8 GPUs x 2 x 8 = 128 effective batch (same as 8 nodes)
 max_pixels=313600
 min_pixels=3136
 
@@ -32,7 +32,7 @@ vln_datasets=r2r_125cm_0_30%30,r2r_60cm_15_15%30
 data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce} # ${1:-/ws/src/InternNav/data/InternData-N1/vln_ce}
 
 # Output configuration
-run_name=InternVLA-N1-DualVLN-v0.5-mini
+run_name=dual_mini/b2_beff128
 output_dir=checkpoints/${run_name}
 # system 1 options: nextdit_async, navdp_async, nextdit
 system1=nextdit_async
