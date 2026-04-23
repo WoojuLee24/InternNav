@@ -122,7 +122,7 @@ class DAT_RGBD_Patch_Backbone(nn.Module):
         model_configs = {'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]}}
         self.rgb_model = DepthAnythingV2(**model_configs['vits'])
         self.rgb_model.load_state_dict(torch.load(checkpoint), strict=False, assign=True)
-        self.rgb_model = self.rgb_model.pretrained
+        self.rgb_model = self.rgb_model.pretrained.to(self.input_dtype)
 
         self.preprocess_mean = torch.tensor([0.485, 0.456, 0.406], dtype=self.input_dtype)
         self.preprocess_std = torch.tensor([0.229, 0.224, 0.225], dtype=self.input_dtype)
@@ -133,7 +133,7 @@ class DAT_RGBD_Patch_Backbone(nn.Module):
             self.rgb_model.eval()
 
         self.depth_model = DepthAnythingV2(**model_configs['vits'])
-        self.depth_model = self.depth_model.pretrained
+        self.depth_model = self.depth_model.pretrained.to(self.input_dtype)
         self.depth_model.train()
 
         self.former_query = nn.Embedding(self.memory_size * 16, 384)
