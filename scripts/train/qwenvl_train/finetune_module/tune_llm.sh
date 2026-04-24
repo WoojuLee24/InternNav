@@ -36,6 +36,8 @@ system2_ckpt=checkpoints/InternVLA-N1-System2
 
 # [ablation] tune_mm_llm: True (baseline: False)
 
+mkdir -p ${output_dir}
+
 torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --node_rank=${NODE_RANK} \
     --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} \
@@ -87,7 +89,8 @@ torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --gradient_checkpointing True \
     --dataloader_num_workers 4 \
     --run_name ${run_name} \
-    --report_to wandb
+    --report_to wandb \
+    2>&1 | tee ${output_dir}/train.log
 
 if [ "${NODE_RANK}" = "0" ]; then
     best_ckpt=$(python -c "
@@ -115,7 +118,7 @@ if best:
             export WANDB_RUN_ID="${wandb_run_id}"
             export WANDB_RESUME="allow"
         fi
-        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh --model_path "${best_ckpt}" --quiet --wandb_run_name "${run_name}"
+        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh --model_path "${best_ckpt}" --quiet --wandb_run_name "${run_name}" 2>&1 | tee ${output_dir}/test.log
     else
         echo "[Eval] No best checkpoint found, skipping eval."
     fi

@@ -37,6 +37,8 @@ system2_ckpt=checkpoints/InternVLA-N1-System2
 # [ablation] num_future_steps: 8 (baseline: 4)
 num_future_steps=8
 
+mkdir -p ${output_dir}
+
 torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --node_rank=${NODE_RANK} \
     --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} \
@@ -88,7 +90,8 @@ torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --gradient_checkpointing True \
     --dataloader_num_workers 4 \
     --run_name ${run_name} \
-    --report_to wandb
+    --report_to wandb \
+    2>&1 | tee ${output_dir}/train.log
 
 if [ "${NODE_RANK}" = "0" ]; then
     best_ckpt=$(python -c "
@@ -111,7 +114,7 @@ if best:
         echo "[Eval] Best checkpoint: ${best_ckpt}"
         cp "${output_dir}/preprocessor_config.json" "${best_ckpt}/" 2>/dev/null || true
         cp "${system2_ckpt}/chat_template.json" "${best_ckpt}/" 2>/dev/null || true
-        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh --model_path "${best_ckpt}" --quiet
+        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh --model_path "${best_ckpt}" --quiet 2>&1 | tee ${output_dir}/test.log
     else
         echo "[Eval] No best checkpoint found, skipping eval."
     fi
