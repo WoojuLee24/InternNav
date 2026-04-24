@@ -44,6 +44,7 @@ class DataArguments:
     val_ratio: float = field(default=0.0, metadata={"help": "Fraction of dataset to use for validation. 0.0 disables validation."})
     val_max_samples: int = field(default=0, metadata={"help": "Max number of validation samples. 0 = unlimited."})
     train_max_samples: int = field(default=0, metadata={"help": "Max number of training samples. 0 = unlimited."})
+    stop_weight: int = field(default=5, metadata={"help": "Oversampling multiplier for stop samples. Only used when pixel_goal_only=False."})
 
 
 @dataclass

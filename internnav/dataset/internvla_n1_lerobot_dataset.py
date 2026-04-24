@@ -874,6 +874,7 @@ class NavPixelGoalDataset(Dataset):
         self.predict_step_num = data_args.predict_step_num
         self.pixel_goal_only = data_args.pixel_goal_only
         self.num_future_steps = data_args.num_future_steps
+        self.stop_weight = data_args.stop_weight
 
         self.list_data_dict = []
         self.scene_keys = []
@@ -977,7 +978,7 @@ class NavPixelGoalDataset(Dataset):
             rank0_print(len(turn_list), len(pixel_goal_list), len(stop_list))
             if not self.pixel_goal_only:
                 list_data_dict += turn_list
-                list_data_dict += stop_list * 5
+                list_data_dict += stop_list * self.stop_weight
             if sampling_rate < 1.0:
                 random.seed(42)
                 list_data_dict = random.sample(list_data_dict, int(len(list_data_dict) * sampling_rate))
