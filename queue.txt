@@ -1,3 +1,3 @@
-scripts/train/qwenvl_train/batch_size/train_dual_system_1node_k8s-mini_b2_beff128.sh
-scripts/train/qwenvl_train/batch_size/train_dual_system_1node_k8s-mini_b4_beff128.sh
-scripts/train/qwenvl_train/batch_size/train_dual_system_1node_k8s-mini_b8_beff128.sh
+# [done] bash scripts/train/qwenvl_train/temporal_modeling/num_history_1.sh
+# [done] bash scripts/train/qwenvl_train/temporal_modeling/num_history_4.sh
+bash scripts/train/qwenvl_train/temporal_modeling/num_history_16.sh

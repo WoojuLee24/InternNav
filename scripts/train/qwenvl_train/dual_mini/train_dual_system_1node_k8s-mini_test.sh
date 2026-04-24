@@ -31,7 +31,7 @@ vln_datasets=r2r_125cm_0_30%10
 data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce} # ${1:-/ws/src/InternNav/data/InternData-N1/vln_ce}
 
 # Output configuration
-run_name=InternVLA-N1-DualVLN-v0.5-mini_test
+run_name=InternVLA-N1-DualVLN-v0.5-mini_test_$(date +%Y%m%d_%H%M%S)
 output_dir=checkpoints/${run_name}
 # system 1 options: nextdit_async, navdp_async, nextdit
 system1=nextdit_async
@@ -119,10 +119,12 @@ if best:
         cp "${output_dir}/preprocessor_config.json" "${best_ckpt}/" 2>/dev/null || \
             cp "${system2_ckpt}/preprocessor_config.json" "${best_ckpt}/"
         cp "${system2_ckpt}/chat_template.json" "${best_ckpt}/"
-        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh \
-            --model_path "${best_ckpt}" \
-            --wandb_run_name "${run_name}_test" \
-            --quiet
+        wandb_run_id=$(ls -td "wandb/run-"* 2>/dev/null | head -1 | xargs basename | sed 's/^run-[0-9]*_[0-9]*-//')
+        if [ -n "${wandb_run_id}" ]; then
+            export WANDB_RUN_ID="${wandb_run_id}"
+            export WANDB_RESUME="allow"
+        fi
+        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh --model_path "${best_ckpt}" --quiet --wandb_run_name "${run_name}"
     else
         echo "[Eval] No best checkpoint found, skipping eval."
     fi
