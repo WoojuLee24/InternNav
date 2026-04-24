@@ -1,3 +1,0 @@
-# [done] bash scripts/train/qwenvl_train/temporal_modeling/num_history_1.sh
-# [done] bash scripts/train/qwenvl_train/temporal_modeling/num_history_4.sh
-bash scripts/train/qwenvl_train/temporal_modeling/num_history_16.sh
