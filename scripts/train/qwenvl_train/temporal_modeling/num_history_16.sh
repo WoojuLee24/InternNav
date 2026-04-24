@@ -111,7 +111,12 @@ if best:
         echo "[Eval] Best checkpoint: ${best_ckpt}"
         cp "${output_dir}/preprocessor_config.json" "${best_ckpt}/" 2>/dev/null || true
         cp "${system2_ckpt}/chat_template.json" "${best_ckpt}/" 2>/dev/null || true
-        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh --model_path "${best_ckpt}" --quiet
+        wandb_run_id=$(ls -td "${output_dir}/wandb/run-"* 2>/dev/null | head -1 | xargs basename | sed 's/^run-[0-9]*_[0-9]*-//')
+        if [ -n "${wandb_run_id}" ]; then
+            export WANDB_RUN_ID="${wandb_run_id}"
+            export WANDB_RESUME="allow"
+        fi
+        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh --model_path "${best_ckpt}" --quiet --wandb_run_name "${run_name}"
     else
         echo "[Eval] No best checkpoint found, skipping eval."
     fi
