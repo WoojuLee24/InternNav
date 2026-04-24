@@ -29,7 +29,7 @@ vln_datasets=r2r_125cm_0_30%30,r2r_60cm_15_15%30
 data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce}
 
 # Output configuration
-run_name=finetune_module/tune_mlp
+run_name=finetune_module/tune_mlp_$(date +%Y%m%d_%H%M%S)
 output_dir=checkpoints/${run_name}
 system1=nextdit_async
 system2_ckpt=checkpoints/InternVLA-N1-System2
@@ -110,7 +110,12 @@ if best:
         echo "[Eval] Best checkpoint: ${best_ckpt}"
         cp "${output_dir}/preprocessor_config.json" "${best_ckpt}/" 2>/dev/null || true
         cp "${system2_ckpt}/chat_template.json" "${best_ckpt}/" 2>/dev/null || true
-        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh --model_path "${best_ckpt}" --quiet
+        wandb_run_id=$(ls -td "wandb/run-"* 2>/dev/null | head -1 | xargs basename | sed 's/^run-[0-9]*_[0-9]*-//')
+        if [ -n "${wandb_run_id}" ]; then
+            export WANDB_RUN_ID="${wandb_run_id}"
+            export WANDB_RESUME="allow"
+        fi
+        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh --model_path "${best_ckpt}" --quiet --wandb_run_name "${run_name}"
     else
         echo "[Eval] No best checkpoint found, skipping eval."
     fi
