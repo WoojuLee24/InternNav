@@ -124,6 +124,7 @@ def main():
         ckpt_name = os.path.basename(args.model_path.rstrip('/'))
         evaluator_cfg.eval_settings.setdefault('wandb_run_name', ckpt_name)
         evaluator_cfg.eval_settings.setdefault('output_path', f"./logs/eval/{ckpt_name}")
+        evaluator_cfg.eval_settings['best_checkpoint'] = ckpt_name
 
     if args.wandb_run_name is not None:
         evaluator_cfg.eval_settings['wandb_run_name'] = args.wandb_run_name

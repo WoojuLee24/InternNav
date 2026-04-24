@@ -156,7 +156,14 @@ class DistributedEvaluator(Evaluator):
                         name=self.eval_config.eval_settings.get("wandb_run_name", None),
                         config=self.eval_config.eval_settings,
                     )
-                wandb.log({f"test/{k}": v for k, v in result_all.items()})
+                log_dict = {f"test/{k}": v for k, v in result_all.items()}
+                best_checkpoint = self.eval_config.eval_settings.get("best_checkpoint", None)
+                if best_checkpoint is not None:
+                    import re
+                    m = re.search(r"(\d+)$", best_checkpoint)
+                    if m:
+                        log_dict["test/best_checkpoint_step"] = int(m.group(1))
+                wandb.log(log_dict)
                 wandb.finish()
             except ImportError:
                 print("[Warning] wandb not installed. Skipping wandb logging.")
