@@ -124,7 +124,7 @@ if best:
             export WANDB_RUN_ID="${wandb_run_id}"
             export WANDB_RESUME="allow"
         fi
-        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh --model_path "${best_ckpt}" --quiet --wandb_run_name "${run_name}"
+        bash scripts/eval/bash/eval_dual_system_mini_8gpu.sh --model_path "${best_ckpt}" --quiet --wandb_run_name "${run_name}" 2>&1 | tee ${output_dir}/test.log
     else
         echo "[Eval] No best checkpoint found, skipping eval."
     fi
