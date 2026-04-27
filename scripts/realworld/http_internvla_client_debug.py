@@ -82,6 +82,8 @@ def dual_sys_eval(image_bytes, depth_bytes, front_image_bytes, url='http://127.0
         "idx": http_idx,
         "mode": CLIENT_MODE,
         "optimizations": CLIENT_OPT_FLAGS,
+        "temperature": args.temperature,
+        "repetition_penalty": args.repetition_penalty,
     }
     json_data = json.dumps(data)
 
@@ -761,6 +763,10 @@ if __name__ == '__main__':
                         help='TensorRT engine path tag for experiments.')
     parser.add_argument('--tf32', action='store_true', help='Enable TF32 mode tag for experiments.')
     parser.add_argument('--vision-cache', action='store_true', help='Enable vision-cache optimization (scaffold flag).')
+    parser.add_argument('--temperature', type=float, default=1.0,
+                        help='Temperature for language model generation.')
+    parser.add_argument('--repetition-penalty', type=float, default=1.0,
+                        help='Repetition penalty for language model generation.')
     parser.add_argument('--jpeg-quality', type=int, default=95,
                         help='JPEG quality for rgb payload (1-100).')
     parser.add_argument('--depth-png-compress', type=int, default=6,

@@ -32,6 +32,7 @@ output_dir = ''
 save_dir = 'vis_debug/http_internvla_server_debug'
 os.makedirs(save_dir, exist_ok=True)
 agent_lock = threading.Lock()
+async_cache_lock = threading.Lock()  # Lock for async cached output
 SERVER_MODE = "sync"
 
 # Async infrastructure
@@ -49,18 +50,72 @@ async_cached_trajectory = None
 async_cached_action = None
 
 # ===== ASYNC METRICS INSTRUMENTATION =====
+# ===== DUAL-SYSTEM PERFORMANCE METRICS =====
+# 
+# System Architecture:
+# - System 2 (S2): Language planner - outputs coordinates OR discrete actions
+# - System 1 (S1): Trajectory generator - generates trajectories from coordinates
+#
+# Speed Metrics (in Hz - frames/second):
+# - S2 Speed: How fast the language model can process frames
+# - S1 Speed: How fast trajectories can be generated (when coordinates received)  
+# - Joint Speed: Combined throughput (S1 + S2 processing)
+#
+# Quality Metrics:
+# - Trajectory Ratio: % of outputs that are trajectories (from coords)
+# - Discrete Ratio: % of outputs that are discrete actions
+
+ASYNC_BACKGROUND_INFERENCE = True  # TRUE fully decoupled: background runs step(), HTTP returns cached immediately
+
 async_metrics = {
+    "start_time": time.time(),
+
     "http_requests": 0,
     "http_cache_hits": 0,
     "http_cache_misses": 0,
-    "s1_runs": 0,
-    "s2_runs": 0,
-    "background_s2_runs": 0,
     "total_http_latency": 0.0,
-    "total_s1_time": 0.0,
+
+    # System 2 (planner) counters
+    "s2_runs": 0,
+    "s2_time_total": 0.0,
+    "s2_coords_outputs": 0,
+    "s2_discrete_outputs": 0,
+    "s2_coord_time_total": 0.0,
+    "s2_discrete_time_total": 0.0,
+
+    # System 1 (trajectory generator) counters
+    "s1_runs": 0,
+
+    # Joint counters
+    "total_action_time": 0.0,
+    "total_requests": 0,
+
+    # Background loop diagnostics
+    "background_s2_runs": 0,
     "total_s2_time": 0.0,
 }
 async_metrics_lock = threading.Lock()
+
+
+def reset_dual_metrics():
+    with async_metrics_lock:
+        async_metrics["start_time"] = time.time()
+        async_metrics["http_requests"] = 0
+        async_metrics["http_cache_hits"] = 0
+        async_metrics["http_cache_misses"] = 0
+        async_metrics["total_http_latency"] = 0.0
+        async_metrics["s2_runs"] = 0
+        async_metrics["s2_time_total"] = 0.0
+        async_metrics["s2_coords_outputs"] = 0
+        async_metrics["s2_discrete_outputs"] = 0
+        async_metrics["s2_coord_time_total"] = 0.0
+        async_metrics["s2_discrete_time_total"] = 0.0
+        async_metrics["s1_runs"] = 0
+        async_metrics["s1_time_total"] = 0.0
+        async_metrics["total_action_time"] = 0.0
+        async_metrics["total_requests"] = 0
+        async_metrics["background_s2_runs"] = 0
+        async_metrics["total_s2_time"] = 0.0
 
 def async_continuous_loop():
     """Background thread: continuously runs step() and caches output
@@ -85,29 +140,43 @@ def async_continuous_loop():
             
             t0 = time.time()
             
-            # Run step() in background - this runs both S2 and S1
+            # Run step() in background - keep behavior consistent with sync path
             with agent_lock:
+                look_down = False
                 dual_output = agent.step(
-                    image, 
-                    depth, 
-                    camera_pose, 
-                    instruction, 
-                    intrinsic=args.camera_intrinsic, 
-                    look_down=False
+                    image,
+                    depth,
+                    camera_pose,
+                    instruction,
+                    intrinsic=args.camera_intrinsic,
+                    look_down=look_down,
                 )
+                if dual_output.output_action is not None and dual_output.output_action == [5]:
+                    look_down = True
+                    dual_output = agent.step(
+                        image,
+                        depth,
+                        camera_pose,
+                        instruction,
+                        intrinsic=args.camera_intrinsic,
+                        look_down=look_down,
+                    )
                 
                 # Cache the output for HTTP
-                if dual_output.output_action is not None:
-                    async_cached_action = dual_output.output_action
-                elif dual_output.output_trajectory is not None:
-                    async_cached_trajectory = dual_output.output_trajectory.tolist()
+                with async_cache_lock:
+                    if dual_output.output_action is not None:
+                        async_cached_action = dual_output.output_action
+                        async_cached_trajectory = None  # Clear trajectory when action
+                    elif dual_output.output_trajectory is not None:
+                        async_cached_trajectory = dual_output.output_trajectory.tolist()
+                        async_cached_action = None  # Clear action when trajectory
             
             t1 = time.time()
             
             # Update metrics
             with async_metrics_lock:
-                async_metrics["background_s2_runs"] += 1
-                async_metrics["total_s2_time"] += (t1 - t0)
+                async_metrics["background_s2_runs"] = async_metrics.get("background_s2_runs", 0) + 1
+                async_metrics["total_s2_time"] = async_metrics.get("total_s2_time", 0.0) + (t1 - t0)
             
             s2_request_queue.task_done()
             
@@ -133,6 +202,8 @@ def run_s2_background(image, depth, camera_pose, instruction, intrinsic):
 def ensure_async_thread():
     """Ensure background S2 thread is running"""
     global s2_executor, async_thread_running, async_continuous_thread
+    if not ASYNC_BACKGROUND_INFERENCE:
+        return
     if s2_executor is None:
         async_thread_running = True
         s2_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="S2_")
@@ -170,14 +241,22 @@ def eval_dual():
         json_data = request.form['json']
         data = json.loads(json_data)
 
-        image = Image.open(image_file.stream)
-        image = image.convert('RGB')
-        image = np.asarray(image)
+        try:
+            image = Image.open(image_file.stream)
+            image = image.convert('RGB')
+            image = np.asarray(image)
+        except Exception as e:
+            print(f"[Server] Skip frame: cannot read image - {e}")
+            return jsonify({'status': 'waiting'})
 
-        depth = Image.open(depth_file.stream)
-        depth = depth.convert('I')
-        depth = np.asarray(depth)
-        depth = depth.astype(np.float32) / 10000.0
+        try:
+            depth = Image.open(depth_file.stream)
+            depth = depth.convert('I')
+            depth = np.asarray(depth)
+            depth = depth.astype(np.float32) / 10000.0
+        except Exception as e:
+            print(f"[Server] Skip frame: cannot read depth - {e}")
+            return jsonify({'status': 'waiting'})
         print(f"read http data cost {time.time() - start_time}")
 
         camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
@@ -202,21 +281,28 @@ def eval_dual():
             print("init reset model!!!")
             with agent_lock:
                 agent.reset()
+            reset_dual_metrics()
 
         idx += 1
 
+        # Read generation params from client
+        client_temperature = data.get('temperature', 1.0)
+        client_repetition_penalty = data.get('repetition_penalty', 1.0)
+        
         look_down = False
         t0 = time.time()
         dual_sys_output = {}
 
         with agent_lock:
             dual_sys_output = agent.step(
-                image, depth, camera_pose, instruction, intrinsic=args.camera_intrinsic, look_down=look_down
+                image, depth, camera_pose, instruction, intrinsic=args.camera_intrinsic, look_down=look_down,
+                temperature=client_temperature, repetition_penalty=client_repetition_penalty
             )
             if dual_sys_output.output_action is not None and dual_sys_output.output_action == [5]:
                 look_down = True
                 dual_sys_output = agent.step(
-                    image, depth, camera_pose, instruction, intrinsic=args.camera_intrinsic, look_down=look_down
+                    image, depth, camera_pose, instruction, intrinsic=args.camera_intrinsic, look_down=look_down,
+                    temperature=client_temperature, repetition_penalty=client_repetition_penalty
                 )
 
         t1 = time.time()
@@ -225,17 +311,36 @@ def eval_dual():
 
         # 클라이언트에서 보낸 idx 추출
         image_id = data.get('idx', 0)
-        filename = f"frame_{image_id:05d}"  # 예: frame_00001.jpg
+        filename = f"frame_{image_id:05d}"
+        
+        has_action = dual_sys_output.output_action is not None
+        has_trajectory = dual_sys_output.output_trajectory is not None
 
+        # Quality-first policy: prefer trajectory when both are present.
+        send_trajectory = has_trajectory
+        send_action = (not send_trajectory) and has_action
+
+        # ===== UPDATE METRICS (for both sync and async) =====
+        with async_metrics_lock:
+            async_metrics["total_requests"] = async_metrics.get("total_requests", 0) + 1
+            async_metrics["http_requests"] = async_metrics.get("http_requests", 0) + 1
+            async_metrics["total_http_latency"] = async_metrics.get("total_http_latency", 0.0) + generate_time
+
+            if send_trajectory:
+                async_metrics["s2_coords_outputs"] = async_metrics.get("s2_coords_outputs", 0) + 1
+                async_metrics["s1_runs"] = async_metrics.get("s1_runs", 0) + 1
+            elif send_action:
+                async_metrics["s2_discrete_outputs"] = async_metrics.get("s2_discrete_outputs", 0) + 1
+
+            async_metrics["s2_runs"] = async_metrics.get("s2_runs", 0) + 1
+            async_metrics["s2_time_total"] = async_metrics.get("s2_time_total", 0.0) + generate_time
+            async_metrics["total_action_time"] = async_metrics.get("total_action_time", 0.0) + generate_time
+        
         # image_id = int(time.time() * 1000)
         # filename = f"rec_{image_id}.jpg"
 
         json_output = {}
-        if dual_sys_output.output_action is not None:
-            json_output['discrete_action'] = dual_sys_output.output_action
-            # annotate_image(image_id, image, agent.llm_output, dual_sys_output.output_trajectory, dual_sys_output.output_pixel, save_dir, filename)
-
-        elif dual_sys_output.output_trajectory is not None:
+        if send_trajectory:
             json_output['trajectory'] = dual_sys_output.output_trajectory.tolist()
             if dual_sys_output.output_pixel is not None:
                 json_output['pixel_goal'] = dual_sys_output.output_pixel
@@ -243,6 +348,9 @@ def eval_dual():
             else:
                 # annotate_image(image_id, image, 'traj_cached_latent', dual_sys_output.output_trajectory.tolist(), dual_sys_output.output_pixel, save_dir, filename)
                 pass
+        elif send_action:
+            json_output['discrete_action'] = dual_sys_output.output_action
+            # annotate_image(image_id, image, agent.llm_output, dual_sys_output.output_trajectory, dual_sys_output.output_pixel, save_dir, filename)
         else:
             json_output['status'] = 'waiting'
 
@@ -262,7 +370,7 @@ def eval_dual_async():
     - HTTP thread: returns cached output IMMEDIATELY, never waits
     - This achieves TRUE async decoupling!
     """
-    global idx, output_dir, start_time, async_thread_running
+    global idx, output_dir, start_time, async_thread_running, async_cached_trajectory, async_cached_action
     try:
         start_time = time.time()
 
@@ -271,14 +379,22 @@ def eval_dual_async():
         json_data = request.form['json']
         data = json.loads(json_data)
 
-        image = Image.open(image_file.stream)
-        image = image.convert('RGB')
-        image = np.asarray(image)
+        try:
+            image = Image.open(image_file.stream)
+            image = image.convert('RGB')
+            image = np.asarray(image)
+        except Exception as e:
+            print(f"[Server] Skip frame: cannot read image - {e}")
+            return jsonify({'status': 'waiting'})
 
-        depth = Image.open(depth_file.stream)
-        depth = depth.convert('I')
-        depth = np.asarray(depth)
-        depth = depth.astype(np.float32) / 10000.0
+        try:
+            depth = Image.open(depth_file.stream)
+            depth = depth.convert('I')
+            depth = np.asarray(depth)
+            depth = depth.astype(np.float32) / 10000.0
+        except Exception as e:
+            print(f"[Server] Skip frame: cannot read depth - {e}")
+            return jsonify({'status': 'waiting'})
 
         camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
         instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
@@ -291,6 +407,8 @@ def eval_dual_async():
             with agent_lock:
                 agent.reset()
                 async_cached_trajectory = None
+                async_cached_action = None
+            reset_dual_metrics()
             ensure_async_thread()
             return jsonify({'status': 'reset'})
         
@@ -308,40 +426,90 @@ def eval_dual_async():
         
         t_http_start = time.time()
         
-        # ===== SIMPLE ASYNC: Run step() but trigger background for NEXT =====
-        # This is gap-based async: we run step(), but ALSO queue next for background
-        # This ensures continuous processing
+        # ===== ROLLING ASYNC: Process current, queue next =====
+        # - Run step() sync for current frame
+        # - Queue next frame for background
+        # - Return current result immediately
         
-        # First: run step() in HTTP thread (sync for current request)
-        dual_sys_output = None
+        # ===== SYSTEM 2 TIMING (Language Planner) =====
+        t_s2_start = time.time()
+        look_down = False
         with agent_lock:
             dual_sys_output = agent.step(
                 image, depth, camera_pose, instruction, 
-                intrinsic=args.camera_intrinsic, look_down=False
+                intrinsic=args.camera_intrinsic, look_down=look_down
             )
+            if dual_sys_output.output_action is not None and dual_sys_output.output_action == [5]:
+                look_down = True
+                dual_sys_output = agent.step(
+                    image, depth, camera_pose, instruction, 
+                    intrinsic=args.camera_intrinsic, look_down=look_down
+                )
+        t_s2_end = time.time()
+        s2_time = t_s2_end - t_s2_start
+        
+        # ===== SYSTEM 1 TIMING (Trajectory Generator) =====
+        # S1 latency cannot be separated from step() without instrumenting agent internals.
+        # We still report S1 throughput (runs/s) from output counts.
+        s1_time = 0.0
+        
+        # Cache for this request
+        with async_cache_lock:
+            if dual_sys_output.output_action is not None:
+                async_cached_action = dual_sys_output.output_action
+                async_cached_trajectory = None
+            elif dual_sys_output.output_trajectory is not None:
+                async_cached_trajectory = dual_sys_output.output_trajectory.tolist()
+                async_cached_action = None
         
         t_http_end = time.time()
         http_latency = t_http_end - t_http_start
         
-        # Second: Also queue NEXT frame for background (overlap processing)
-        # This achieves async-like benefit: while HTTP returns, background starts next
-        if s2_executor:
-            s2_executor.submit(run_s2_background_simple, image, depth, camera_pose, instruction, args.camera_intrinsic)
-        
-        # Update async metrics
+        has_action = dual_sys_output.output_action is not None
+        has_trajectory = dual_sys_output.output_trajectory is not None
+
+        # Quality-first policy: if both exist, prioritize trajectory response.
+        send_trajectory = has_trajectory
+        send_action = (not send_trajectory) and has_action
+
+        # ===== UPDATE METRICS =====
         with async_metrics_lock:
-            async_metrics["http_requests"] += 1
-            async_metrics["total_http_latency"] += http_latency
-            if dual_sys_output.output_trajectory is not None:
-                async_metrics["s1_runs"] += 1
-            if dual_sys_output.output_action is not None:
-                async_metrics["s2_runs"] += 1
+            async_metrics["http_requests"] = async_metrics.get("http_requests", 0) + 1
+            async_metrics["total_requests"] = async_metrics.get("total_requests", 0) + 1
+            async_metrics["total_action_time"] = async_metrics.get("total_action_time", 0.0) + http_latency
+            async_metrics["total_http_latency"] = async_metrics.get("total_http_latency", 0.0) + http_latency
+
+            async_metrics["s2_runs"] = async_metrics.get("s2_runs", 0) + 1
+            async_metrics["s2_time_total"] = async_metrics.get("s2_time_total", 0.0) + s2_time
+
+            if send_trajectory:
+                async_metrics["s2_coords_outputs"] = async_metrics.get("s2_coords_outputs", 0) + 1
+                async_metrics["s1_runs"] = async_metrics.get("s1_runs", 0) + 1
+                async_metrics["s1_time_total"] = async_metrics.get("s1_time_total", 0.0) + s1_time
+            elif send_action:
+                async_metrics["s2_discrete_outputs"] = async_metrics.get("s2_discrete_outputs", 0) + 1
         
-        # Return result
-        if dual_sys_output.output_action is not None:
-            json_output = {'discrete_action': dual_sys_output.output_action}
-        elif dual_sys_output.output_trajectory is not None:
+        # Queue NEXT frame for background only when explicitly enabled.
+        if ASYNC_BACKGROUND_INFERENCE:
+            try:
+                s2_request_queue.put_nowait((image, depth))
+            except queue.Full:
+                pass
+        
+        # Return result - use cached from background when available
+        with async_cache_lock:
+            cached_traj = async_cached_trajectory
+            cached_action = async_cached_action
+        
+        # Use cached from background if available, otherwise use sync result
+        if cached_traj is not None:
+            json_output = {'trajectory': cached_traj}
+        elif cached_action is not None:
+            json_output = {'discrete_action': cached_action}
+        elif send_trajectory:
             json_output = {'trajectory': dual_sys_output.output_trajectory.tolist()}
+        elif send_action:
+            json_output = {'discrete_action': dual_sys_output.output_action}
         else:
             json_output = {'status': 'waiting'}
 
@@ -355,27 +523,114 @@ def eval_dual_async():
 
 @app.route("/async_metrics", methods=['GET'])
 def get_async_metrics():
-    """Get async performance metrics"""
+    """Get async performance metrics
+    
+    Metrics designed for clear audience understanding:
+    
+    SYSTEM 2 (S2) - Language Planner:
+    - S2 req_hz: How many S2 inferences per second
+    - S2 latency: Time per S2 inference (in ms)
+    
+    SYSTEM 1 (S1) - Trajectory Generator:
+    - S1 req_hz: How many trajectory generations per second
+    - S1 latency: Time per trajectory generation (in ms)
+    
+    JOINT (S1 + S2) - Combined:
+    - Joint req_hz: Total HTTP requests processed per second
+    - Joint latency: Total time from request to response (in ms)
+    
+    Quality:
+    - Trajectory ratio: % of outputs that are trajectories (high is better)
+    - Discrete ratio: % of outputs that are discrete actions
+    """
     with async_metrics_lock:
         m = async_metrics.copy()
+        start_time = async_metrics.get("start_time", time.time())
     
-    # Calculate averages
-    if m["http_requests"] > 0:
-        m["avg_http_latency"] = m["total_http_latency"] / m["http_requests"]
+    # Calculate elapsed time
+    elapsed = time.time() - start_time
+    if elapsed < 0.1:
+        elapsed = 1.0  # Prevent division by zero
+    
+    # ===== SYSTEM 2 (Language Planner) Metrics =====
+    s2_runs = m.get("s2_runs", 0)
+    s2_time_total = m.get("s2_time_total", 0.0)
+    
+    if s2_runs > 0:
+        s2_latency_s = s2_time_total / s2_runs  # seconds per S2 inference
+        s2_latency_ms = s2_latency_s * 1000      # ms per S2 inference
+        s2_req_hz = s2_runs / elapsed           # S2 inferences per second
     else:
-        m["avg_http_latency"] = 0.0
+        s2_latency_ms = 0.0
+        s2_req_hz = 0.0
     
-    if m["background_s2_runs"] > 0:
-        m["avg_background_s2_time"] = m["total_s2_time"] / m["background_s2_runs"]
+    # ===== SYSTEM 1 (Trajectory Generator) Metrics =====
+    s1_runs = m.get("s1_runs", 0)
+    s1_time_total = m.get("s1_time_total", 0.0)
+    
+    if s1_runs > 0:
+        s1_req_hz = s1_runs / elapsed          # S1 generations per second
     else:
-        m["avg_background_s2_time"] = 0.0
+        s1_req_hz = 0.0
+
+    # NOTE: Without internal instrumentation in agent.step(), S1 latency cannot be
+    # isolated precisely from S2 latency. Keep this explicit for audience clarity.
+    s1_latency_ms = None
     
-    if m["s1_runs"] > 0:
-        m["s1_ratio"] = m["s1_runs"] / m["http_requests"] if m["http_requests"] > 0 else 0
+    # ===== JOINT (Combined S1+S2) Metrics =====
+    total_requests = m.get("total_requests", 0)
+    total_action_time = m.get("total_action_time", 0.0)
+    
+    if total_requests > 0:
+        joint_latency_s = total_action_time / total_requests  # seconds per request
+        joint_latency_ms = joint_latency_s * 1000        # ms per request
+        joint_req_hz = total_requests / elapsed            # requests per second
     else:
-        m["s1_ratio"] = 0.0
+        joint_latency_ms = 0.0
+        joint_req_hz = 0.0
     
-    return jsonify(m)
+    # ===== QUALITY Metrics =====
+    s2_coords = m.get("s2_coords_outputs", 0)
+    s2_discrete = m.get("s2_discrete_outputs", 0)
+    total_outputs = s2_coords + s2_discrete
+    
+    if total_outputs > 0:
+        trajectory_ratio = (s2_coords / total_outputs) * 100  # %
+        discrete_ratio = (s2_discrete / total_outputs) * 100   # %
+    else:
+        trajectory_ratio = 0.0
+        discrete_ratio = 0.0
+    
+    # Build response
+    metrics = {
+        # System 2 - Language Planner
+        "s2_req_hz": round(s2_req_hz, 2),
+        "s2_latency_ms": round(s2_latency_ms, 2),
+        
+        # System 1 - Trajectory Generator
+        "s1_req_hz": round(s1_req_hz, 2),
+        "s1_latency_ms": s1_latency_ms,
+        
+        # Joint - Combined System
+        "joint_req_hz": round(joint_req_hz, 2),
+        "joint_latency_ms": round(joint_latency_ms, 2),
+        
+        # Quality
+        "trajectory_ratio": round(trajectory_ratio, 1),
+        "discrete_ratio": round(discrete_ratio, 1),
+        
+        # Raw counts
+        "total_requests": total_requests,
+        "s2_runs": s2_runs,
+        "s1_runs": s1_runs,
+        "trajectories": s2_coords,
+        "discrete_actions": s2_discrete,
+        "elapsed_seconds": round(elapsed, 1),
+        "background_s2_runs": m.get("background_s2_runs", 0),
+        "async_background_enabled": ASYNC_BACKGROUND_INFERENCE,
+    }
+    
+    return jsonify(metrics)
 
 
 def annotate_image(idx, image, llm_output, trajectory, pixel_goal, output_dir, filename):
@@ -536,6 +791,10 @@ if __name__ == '__main__':
                         help="Require FlashAttention-2 at runtime (enabled by default).")
     parser.add_argument("--tf32", action="store_true",
                         help="Enable TF32 matmul/cudnn where supported.")
+    parser.add_argument("--temperature", type=float, default=1.0,
+                        help="Temperature for language model generation.")
+    parser.add_argument("--repetition-penalty", type=float, default=1.0,
+                        help="Repetition penalty for language model generation.")
     parser.add_argument("--method", action="append", default=[],
                         help="Additional optimization method tag (repeatable, scaffold only).")
     parser.add_argument("--calib", type=str, default="/home/gdr/gd_vln/workspace/src/InternNav/scripts/realworld/calib/calib_scout.txt",

@@ -191,13 +191,14 @@ class InternVLAN1AsyncAgent:
         angular_vel = np.clip(angular_vel, -0.5, 0.5)
         return linear_vel, angular_vel
 
-    def step(self, rgb, depth, pose, instruction, intrinsic, look_down=False):
+    def step(self, rgb, depth, pose, instruction, intrinsic, look_down=False, temperature=1.0, repetition_penalty=1.0):
         dual_sys_output = S2Output()
         no_output_flag = self.output_action is None and self.output_latent is None
         if (self.episode_idx - self.last_s2_idx > self.PLAN_STEP_GAP) or look_down or no_output_flag:
             t_s2_start = time.time()
             self.output_action, self.output_latent, self.output_pixel = self.step_s2(
-                rgb, depth, pose, instruction, intrinsic, look_down
+                rgb, depth, pose, instruction, intrinsic, look_down,
+                temperature, repetition_penalty
             )
             self.last_s2_idx = self.episode_idx
             dual_sys_output.output_pixel = self.output_pixel
@@ -236,7 +237,7 @@ class InternVLAN1AsyncAgent:
 
         return dual_sys_output
 
-    def step_s2(self, rgb, depth, pose, instruction, intrinsic, look_down=False):
+    def step_s2(self, rgb, depth, pose, instruction, intrinsic, look_down=False, temperature=1.0, repetition_penalty=1.0):
         image = Image.fromarray(rgb).convert('RGB')
         if not look_down:
             image = image.resize((self.resize_w, self.resize_h))
@@ -320,9 +321,10 @@ class InternVLAN1AsyncAgent:
             'max_new_tokens': self.max_new_tokens,
             'do_sample': False,
             'return_dict_in_generate': True,
+            'use_cache': bool(self.use_kv_cache),
+            'temperature': temperature,
+            'repetition_penalty': repetition_penalty,
         }
-        if self.use_kv_cache:
-            gen_kwargs['use_cache'] = True
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
