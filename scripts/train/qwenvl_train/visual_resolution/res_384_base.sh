@@ -29,14 +29,14 @@ vln_datasets=r2r_125cm_0_30%30,r2r_60cm_15_15%30
 data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce}
 
 # Output configuration
-run_name=visual_resolution/res_336_$(date +%Y%m%d_%H%M%S)
+run_name=visual_resolution/res_384_base_$(date +%Y%m%d_%H%M%S)
 output_dir=checkpoints/${run_name}
 system1=nextdit_async
 system2_ckpt=checkpoints/InternVLA-N1-System2
 
-# [ablation] resize_h/resize_w: 336 (baseline: 384)
-resize_h=336
-resize_w=336
+# [ablation] resize_h/resize_w: 384 (baseline: 384)
+resize_h=384
+resize_w=384
 
 mkdir -p ${output_dir}
 
