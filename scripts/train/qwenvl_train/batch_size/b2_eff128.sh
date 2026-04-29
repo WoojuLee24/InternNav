@@ -13,8 +13,8 @@ deepspeed=scripts/train/qwenvl_train/zero2.json
 
 # Training hyperparameters
 lr=1e-4
-batch_size=4
-grad_accum_steps=4
+batch_size=2
+grad_accum_steps=8  # effective batch size: 2 * 8 GPU * 8 = 128
 max_pixels=313600
 min_pixels=3136
 
@@ -29,14 +29,13 @@ vln_datasets=r2r_125cm_0_30%30,r2r_60cm_15_15%30
 data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce}
 
 # Output configuration
-run_name=visual_resolution/res_336_$(date +%Y%m%d_%H%M%S)
+run_name=batch_size/b2_eff128_$(date +%Y%m%d_%H%M%S)
 output_dir=checkpoints/${run_name}
 system1=nextdit_async
 system2_ckpt=checkpoints/InternVLA-N1-System2
 
-# [ablation] resize_h/resize_w: 336 (baseline: 384)
-resize_h=336
-resize_w=336
+# num_history base value
+num_history=8
 
 mkdir -p ${output_dir}
 
@@ -54,10 +53,10 @@ torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --tune_mm_llm False \
     --bf16 \
     \
-    --num_history 8 \
+    --num_history ${num_history} \
     --data_augmentation True \
-    --resize_h ${resize_h} \
-    --resize_w ${resize_w} \
+    --resize_h 384 \
+    --resize_w 384 \
     --sample_step 4 \
     --num_future_steps 4 \
     --predict_step_num 32 \
