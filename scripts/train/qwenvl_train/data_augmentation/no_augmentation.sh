@@ -11,33 +11,30 @@ NODE_RANK=${NODE_RANK:-0}
 # DeepSpeed configuration
 deepspeed=scripts/train/qwenvl_train/zero2.json
 
-# Model configuration
-llm=Qwen/Qwen2.5-VL-7B-Instruct
-
 # Training hyperparameters
 lr=1e-4
 batch_size=4
-grad_accum_steps=4  # 1 node x 8 GPUs x 4 x 4 = 128 effective batch (same as 8 nodes)
+grad_accum_steps=4
 max_pixels=313600
 min_pixels=3136
 
 # Validation configuration
-val_ratio=0.1          # fraction of data for validation (0.0 to disable)
-val_interval_steps=$((100 * 4 / batch_size))  # scale by batch_size (standard: 100 steps at batch_size=4)
+val_ratio=0.1
+val_interval_steps=$((100 * 4 / batch_size))
 
 # Dataset configuration
 vln_datasets=r2r_125cm_0_30%30,r2r_60cm_15_15%30
 
-# Data path (override with: bash train_dual_system_1node_k8s.sh /path/to/data)
-data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce} # ${1:-/ws/src/InternNav/data/InternData-N1/vln_ce}
+# Data path
+data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce}
 
 # Output configuration
-run_name=dual_mini/InternVLA-N1-DualVLN-v0.5-mini_$(date +%Y%m%d_%H%M%S)
+run_name=data_augmentation/no_augmentation_$(date +%Y%m%d_%H%M%S)
 output_dir=checkpoints/${run_name}
-# system 1 options: nextdit_async, navdp_async, nextdit
 system1=nextdit_async
-
 system2_ckpt=checkpoints/InternVLA-N1-System2
+
+# [ablation] data_augmentation: False (baseline: True)
 
 mkdir -p ${output_dir}
 
@@ -56,7 +53,7 @@ torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --bf16 \
     \
     --num_history 8 \
-    --data_augmentation True \
+    --data_augmentation False \
     --resize_h 384 \
     --resize_w 384 \
     --sample_step 4 \
@@ -90,12 +87,11 @@ torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --logging_steps 1 \
     --model_max_length 8192 \
     --gradient_checkpointing True \
-    --dataloader_num_workers 8 \
+    --dataloader_num_workers 4 \
     --run_name ${run_name} \
     --report_to wandb \
     2>&1 | tee ${output_dir}/train.log
 
-# Auto-eval on best checkpoint after training (master node only)
 if [ "${NODE_RANK}" = "0" ]; then
     best_ckpt=$(python -c "
 import json, glob, os
