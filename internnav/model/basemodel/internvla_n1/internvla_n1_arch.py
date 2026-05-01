@@ -168,8 +168,9 @@ class InternVLAN1MetaModel:
 
         self.config.system1 = model_args.system1
         self.config.n_query = model_args.n_query
-        if getattr(self, 'latent_queries', None) is None:
-            print("random initiation the latent_queries !!!")
+        existing_lq = getattr(self, 'latent_queries', None)
+        if existing_lq is None or existing_lq.shape[1] != model_args.n_query:
+            print(f"random initiation the latent_queries !!! (n_query={model_args.n_query})")
             self.latent_queries = nn.Parameter(torch.randn(1, self.config.n_query, self.config.hidden_size))
 
 

@@ -213,7 +213,7 @@ def train(attn_implementation="flash_attention_2"):
     if data_args.data_packing:
         data_module = make_supervised_data_module_packed(tokenizer=tokenizer, data_args=data_args)  # noqa: F821
     else:
-        data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
+        data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args, n_query=model_args.n_query)
     trainer = Trainer(model=model, processing_class=tokenizer, args=training_args, **data_module)
     from tabulate import tabulate
 
