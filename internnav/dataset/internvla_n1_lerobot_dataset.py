@@ -1201,14 +1201,17 @@ class DataCollatorForSupervisedDataset(object):
     """Collate examples for supervised fine-tuning."""
 
     tokenizer: transformers.PreTrainedTokenizer
+    n_query: int = 4
 
     def process_input_with_traj_tokens(
         self,
         input_ids: torch.Tensor,
         labels: torch.Tensor,
         max_seq_len: int = None,
-        traj_token_length: int = 4,  # TODO hard-code
+        traj_token_length: int = None,
     ) -> Tuple[List[torch.Tensor], List[torch.Tensor], List[int]]:
+        if traj_token_length is None:
+            traj_token_length = self.n_query
         if max_seq_len is None:
             max_seq_len = self.tokenizer.model_max_length - traj_token_length
 
@@ -1418,7 +1421,7 @@ class CombinedDataset(Dataset):
         raise ValueError(f"Index {real_idx} out of bound")
 
 
-def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, data_args) -> Dict:
+def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, data_args, n_query: int = 4) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
     train_datasets = []
     if data_args.iign_dataset_use:
@@ -1492,9 +1495,9 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, dat
         train_dataset = full_dataset
 
     if data_args.data_flatten:
-        data_collator = FlattenedDataCollatorForSupervisedDataset(tokenizer=tokenizer)
+        data_collator = FlattenedDataCollatorForSupervisedDataset(tokenizer=tokenizer, n_query=n_query)
         return dict(train_dataset=train_dataset, eval_dataset=eval_dataset, data_collator=data_collator)
-    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
+    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer, n_query=n_query)
     return dict(train_dataset=train_dataset, eval_dataset=eval_dataset, data_collator=data_collator)
 
 
