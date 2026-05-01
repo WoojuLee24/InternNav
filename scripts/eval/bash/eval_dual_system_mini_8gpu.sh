@@ -44,10 +44,6 @@ if [ -n "${WANDB_RUN_NAME}" ]; then
     CMD="${CMD} --wandb_run_name ${WANDB_RUN_NAME}"
 fi
 
-# Disable NVIDIA compressed texture extensions to prevent SIGABRT on servers
-# where NVIDIA_VISIBLE_DEVICES=void causes Magnum to activate broken workarounds.
-export MAGNUM_DISABLE_EXTENSIONS="GL_EXT_texture_compression_s3tc GL_ARB_texture_compression_bptc GL_EXT_texture_compression_rgtc GL_ARB_texture_compression_rgtc"
-
 echo "[Eval] Config: ${CONFIG}"
 echo "[Eval] Model path: ${MODEL_PATH:-from config}"
 echo "[Eval] Log: ${EVAL_LOG}"
