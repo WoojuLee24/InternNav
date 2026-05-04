@@ -35,7 +35,7 @@ system2_ckpt=checkpoints/InternVLA-N1-System2
 num_history=4
 
 while true; do
-    run_name=repeat_train/num_history_4_$(date +%Y%m%d_%H%M%S)
+    run_name=debug/repeat_train
     output_dir=checkpoints/${run_name}
     mkdir -p ${output_dir}
 

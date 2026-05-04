@@ -11,7 +11,7 @@
 
 QUEUE_FILE="queue_eval.txt"
 LOG_FILE="run_eval_queue.log"
-EVAL_SCRIPT="scripts/eval/bash/eval_dual_system_mini_h200_1gpu.sh"
+EVAL_SCRIPT="scripts/eval/bash/eval_dual_system_mini_8gpu.sh"
 SYSTEM2_CKPT="/home/irteam/data-vol2/checkpoints/InternVLA-N1-System2"
 CKPT_BASE="/home/irteam/data-vol2/checkpoints"
 
@@ -43,7 +43,7 @@ while true; do
     # Infer output_dir from script path: scripts/train/qwenvl_train/<sub>/<name>.sh
     # → checkpoints/<sub>/<name>_* (pick latest)
     script_path=$(echo "$NEXT" | sed 's|bash scripts/train/qwenvl_train/||' | sed 's|\.sh$||')
-    OUTPUT_DIR=$(ls -td "${CKPT_BASE}/${script_path}_[0-9]"* 2>/dev/null | head -1)
+    OUTPUT_DIR=$(ls -td "${CKPT_BASE}/${script_path}_"[0-9]* 2>/dev/null | head -1)
 
     if [ -z "${OUTPUT_DIR}" ]; then
         log "No checkpoint directory found for ${script_path}, skipping."
@@ -52,21 +52,20 @@ while true; do
     fi
     log "Output dir: ${OUTPUT_DIR}"
 
-    # 1. Find best checkpoint
+    # 1. Find best checkpoint via best_model_checkpoint field in last trainer_state.json
     best_ckpt=$(python3 -c "
-import json, glob, os
+import json, glob, os, re
 state_files = glob.glob('${OUTPUT_DIR}/checkpoint-*/trainer_state.json')
-best = None
-best_loss = float('inf')
-for f in state_files:
-    s = json.load(open(f))
-    ckpt = os.path.dirname(f)
-    loss = s.get('best_metric')
-    if loss is not None and loss < best_loss:
-        best_loss = loss
-        best = ckpt
-if best:
-    print(best)
+if not state_files:
+    exit(1)
+state_files.sort(key=lambda f: int(re.search(r'checkpoint-(\d+)', f).group(1)))
+last_state = json.load(open(state_files[-1]))
+best_path = last_state.get('best_model_checkpoint', '')
+if best_path:
+    ckpt_name = os.path.basename(best_path)
+    best = os.path.join('${OUTPUT_DIR}', ckpt_name)
+    if os.path.exists(best):
+        print(best)
 " 2>/dev/null)
 
     if [ -z "${best_ckpt}" ]; then
@@ -97,12 +96,11 @@ if best:
     # 4. run_name = output_dir without CKPT_BASE prefix
     run_name="${OUTPUT_DIR#${CKPT_BASE}/}"
 
-    # 5. Run eval (single GPU)
+    # 5. Run eval (8 GPU)
     bash "${EVAL_SCRIPT}" \
         --model_path "${best_ckpt}" \
         --wandb_run_name "${run_name}" \
-        --nproc 1 \
-        2>&1 | tee -a "$LOG_FILE" "${best_ckpt}/habitat_test_1gpu.log"
+        2>&1 | tee -a "$LOG_FILE" "${best_ckpt}/habitat_test.log"
     eval_exit=${PIPESTATUS[0]}
 
     if [ "${eval_exit}" -eq 0 ]; then
