@@ -1,0 +1,37 @@
+==================================================
+ Phase 3 Task #9 — fresh-only metric check
+ Bag: my_camera_bag_20260317_073623 | Temp: 0.75
+==================================================
+
+--- threshold = 0.0 ---
+  playing bag at rate=0.5...
+  threshold              : 0.0
+  bg_runs (fresh S2)     : 461
+  fresh_traj_outputs     : 238
+  fresh_action_outputs   : 223
+  fresh_trajectory_ratio : 51.6%   (over fresh S2 only)
+  served trajectory_ratio: 62.1%   (over all HTTP responses)
+  skip_ratio             : 0.0%
+  joint_req_hz           : 11.25 Hz
+  total_requests         : 1775
+
+--- threshold = 0.92 ---
+  playing bag at rate=0.5...
+  threshold              : 0.92
+  bg_runs (fresh S2)     : 28
+  fresh_traj_outputs     : 28
+  fresh_action_outputs   : 0
+  fresh_trajectory_ratio : 100.0%   (over fresh S2 only)
+  served trajectory_ratio: 98.8%   (over all HTTP responses)
+  skip_ratio             : 98.3%
+  joint_req_hz           : 11.38 Hz
+  total_requests         : 1796
+
+==================================================
+ VERDICT GUIDE
+==================================================
+  If fresh_trajectory_ratio at thr=0.92 is ~equal to control's
+  fresh_trajectory_ratio, the cache replay is unbiased and the
+  98.9% served traj_ratio is purely a hold-time artifact.
+  If fresh ratio at 0.92 is much higher than control, cache is
+  selecting a quality-skewed subset of frames (still suspicious).

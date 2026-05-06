@@ -1,0 +1,29 @@
+==================================================
+ Phase 3 Task #9 — 3-bag cross-validation
+==================================================
+
+--- bag=my_camera_bag_20260317_061841  threshold=0.0 ---
+  playing /workspace/rosbag/my_camera_bag_20260317_061841 at rate=0.5...
+  thr=0.0 skip%=0.0 bg=2333 traj=46.3% hz=12.15
+
+--- bag=my_camera_bag_20260317_061841  threshold=0.92 ---
+  playing /workspace/rosbag/my_camera_bag_20260317_061841 at rate=0.5...
+  thr=0.92 skip%=98.9 bg=91 traj=51.7% hz=12.24
+
+--- bag=my_camera_bag_20260317_063047  threshold=0.0 ---
+  playing /workspace/rosbag/my_camera_bag_20260317_063047 at rate=0.5...
+  thr=0.0 skip%=0.0 bg=1992 traj=62.9% hz=12.25
+
+--- bag=my_camera_bag_20260317_063047  threshold=0.92 ---
+  playing /workspace/rosbag/my_camera_bag_20260317_063047 at rate=0.5...
+  thr=0.92 skip%=98.6 bg=108 traj=65.9% hz=12.28
+
+==================================================
+ 3-BAG SUMMARY (temp=0.75, threshold=0.92 vs control)
+==================================================
+  Bag         Threshold   skip%         bg_runs     traj_ratio    hz        
+  ----------  ----------  ------------  ----------  ------------  ----------
+  061841      0.00        0.0           2333        46.3          12.15     
+  061841      0.92        98.9          91          51.7          12.24     
+  063047      0.00        0.0           1992        62.9          12.25     
+  063047      0.92        98.6          108         65.9          12.28     

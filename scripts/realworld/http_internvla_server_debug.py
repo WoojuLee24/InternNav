@@ -132,6 +132,12 @@ async_metrics = {
     # Phase 3 Task #9: Temporal S2 caching diagnostics
     "temporal_cache_skips": 0,
     "temporal_cache_threshold": 0.0,
+
+    # Fresh-only output type counters (only incremented when S2 actually ran,
+    # not on cache replays). Lets us tell if cached outputs match the fresh
+    # output distribution or if traj_ratio is biased by cache replay.
+    "fresh_traj_outputs": 0,
+    "fresh_action_outputs": 0,
 }
 async_metrics_lock = threading.Lock()
 
@@ -156,6 +162,8 @@ def reset_dual_metrics():
         async_metrics["background_s2_runs"] = 0
         async_metrics["total_s2_time"] = 0.0
         async_metrics["temporal_cache_skips"] = 0
+        async_metrics["fresh_traj_outputs"] = 0
+        async_metrics["fresh_action_outputs"] = 0
 
 def async_continuous_loop():
     """Background thread: continuously runs step() and caches output
@@ -222,20 +230,28 @@ def async_continuous_loop():
                     )
                 
                 # Cache the output for HTTP
+                fresh_was_traj = False
+                fresh_was_action = False
                 with async_cache_lock:
                     if dual_output.output_action is not None:
                         async_cached_action = dual_output.output_action
                         async_cached_trajectory = None  # Clear trajectory when action
+                        fresh_was_action = True
                     elif dual_output.output_trajectory is not None:
                         async_cached_trajectory = dual_output.output_trajectory.tolist()
                         async_cached_action = None  # Clear action when trajectory
-            
+                        fresh_was_traj = True
+
             t1 = time.time()
-            
+
             # Update metrics
             with async_metrics_lock:
                 async_metrics["background_s2_runs"] = async_metrics.get("background_s2_runs", 0) + 1
                 async_metrics["total_s2_time"] = async_metrics.get("total_s2_time", 0.0) + (t1 - t0)
+                if fresh_was_traj:
+                    async_metrics["fresh_traj_outputs"] = async_metrics.get("fresh_traj_outputs", 0) + 1
+                elif fresh_was_action:
+                    async_metrics["fresh_action_outputs"] = async_metrics.get("fresh_action_outputs", 0) + 1
             
             s2_request_queue.task_done()
             
@@ -644,6 +660,16 @@ def get_async_metrics():
         "temporal_cache_skip_ratio": round(
             m.get("temporal_cache_skips", 0) /
             max(1, m.get("temporal_cache_skips", 0) + m.get("background_s2_runs", 0)) * 100, 1
+        ),
+
+        # Fresh-only output type ratio (over actual S2 inference calls only).
+        # Compare against trajectory_ratio: if they match, the cache replay is
+        # representative; if they diverge, traj_ratio is biased by hold time.
+        "fresh_traj_outputs": m.get("fresh_traj_outputs", 0),
+        "fresh_action_outputs": m.get("fresh_action_outputs", 0),
+        "fresh_trajectory_ratio": round(
+            m.get("fresh_traj_outputs", 0) /
+            max(1, m.get("fresh_traj_outputs", 0) + m.get("fresh_action_outputs", 0)) * 100, 1
         ),
     }
 
