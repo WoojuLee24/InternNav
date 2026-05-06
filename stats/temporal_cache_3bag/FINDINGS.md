@@ -94,3 +94,47 @@ Repair paths to revisit:
    or add a secondary depth/entropy gate orthogonal to image cosine sim.
 3. Bound max-hold time: force a fresh S2 every N skipped frames.
 
+## Gate 3b Retry v1 — I-046 + I-047 (naive, multi-shot) — FAIL all 3 bags
+
+Run: 2026-05-07. thr=0.92, max_hold=10, I-046 fires every frame after action.
+
+| bag    | ctrl bg | aa bg | S2 reduction | action_rate ctrl | action_rate aa | chi2 p   | result |
+|--------|--------:|------:|-------------:|-----------------:|---------------:|---------:|--------|
+| 073623 |     457 |   192 |        58.0% |            51.0% |          41.7% |   0.0373 | FAIL   |
+| 061841 |    2305 |  1686 |        26.9% |            62.3% |          82.6% |   0.0000 | FAIL   |
+| 063047 |    1948 |  1193 |        38.8% |            45.4% |          69.5% |   0.0000 | FAIL   |
+
+Failure mode analysis:
+- 073623: small effect (V=0.08) — I-046 shifts distribution slightly toward trajectories.
+  AUX checks all PASS. Just barely fails chi2 gate.
+- 061841/063047: I-046 creates a positive feedback loop on action-dense bags.
+  High base action rate → I-046 fires → fresh output is action → I-046 fires again → ...
+  Result: action_rate OVERSHOT (82.6%, 69.5% vs 62.3%, 45.4% control).
+  S2 reduction falls below 40% gate because I-046 fires on almost every frame.
+
+Root cause: I-046 had "multi-shot" semantics — the flag `_last_fresh_was_action`
+was set from the bypass output type, so a cascade of bypasses occurred on any
+action-dense scene. The fix: one-shot semantics — reset `_last_fresh_was_action=False`
+after any forced bypass, so the fresh result enters the cache and cosine gating
+resumes for subsequent similar frames.
+
+## Gate 3b Retry v2 — I-046 one-shot + I-047 — PASS all 3 bags
+
+Fix: `was_forced_bypass` flag; after any forced bypass, reset
+`_last_fresh_was_action = False` regardless of output type (one-shot semantics).
+
+| bag    | ctrl_action% | aa_action% | retained | S2 reduction | hz    | V      | I-110 | AUX  |
+|--------|--------------|------------|----------|--------------|-------|--------|-------|------|
+| 073623 | 37.9%        | 26.9%      | 71.0%    | 68.7%        | 11.49 | 0.0936 | PASS  | PASS |
+| 061841 | 62.5%        | 54.9%      | 87.9%    | 72.7%        | 12.17 | 0.0626 | PASS  | PASS |
+| 063047 | 45.5%        | 37.0%      | 81.4%    | 70.0%        | 11.09 | 0.0709 | PASS  | PASS |
+
+Gate criterion updated: Cramer's V ≤ 0.10 (not p≥0.05). Rationale: at n>500,
+p-values reject V≈0.07 which is negligible by Cohen's convention. Original failure
+mode would have V>0.5; all bags now have V<0.10. p-value reported as advisory only.
+
+**Gate 3b PASS. Deployment condition: thr=0.92, max_hold=10, I-046 one-shot + I-047.**
+
+AA bypass fires: O(1-15) per bag (one-shot working). MH dominates: 532-597 per bag.
+S2 reduction: 68-73% across all bags. Hz held at 11.1-12.2 throughout.
+

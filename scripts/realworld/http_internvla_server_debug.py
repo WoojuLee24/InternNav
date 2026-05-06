@@ -222,6 +222,7 @@ def async_continuous_loop():
                 last_was_action = _last_fresh_was_action
                 skip_count = _consecutive_skip_count
                 max_hold = _max_hold_frames
+            was_forced_bypass = False
             if threshold > 0.0:
                 forced = None
                 if last_was_action:
@@ -229,6 +230,7 @@ def async_continuous_loop():
                 elif skip_count >= max_hold:
                     forced = "max_hold_bypasses"  # I-047
                 if forced is not None:
+                    was_forced_bypass = True
                     # Forced refresh: skip the similarity check entirely
                     with async_metrics_lock:
                         async_metrics[forced] = async_metrics.get(forced, 0) + 1
@@ -302,9 +304,12 @@ def async_continuous_loop():
                 elif fresh_was_action:
                     async_metrics["fresh_action_outputs"] = async_metrics.get("fresh_action_outputs", 0) + 1
 
-            # I-046: track last fresh output type for next-iteration gate decision
+            # I-046: track last fresh output type for next-iteration gate decision.
+            # After a forced bypass (I-046 or I-047), reset to False: one-shot
+            # semantics — the fresh output is now in the cache; cosine gating
+            # can replay it for similar frames without re-triggering the bypass.
             with temporal_cache_lock:
-                _last_fresh_was_action = fresh_was_action
+                _last_fresh_was_action = False if was_forced_bypass else fresh_was_action
             
             s2_request_queue.task_done()
             

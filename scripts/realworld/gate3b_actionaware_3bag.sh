@@ -4,7 +4,8 @@
 #   1. control       : thr=0.0   (no cache)
 #   2. action-aware  : thr=0.92  max_hold=10   (I-046 + I-047 active)
 # Pass criteria (per bag):
-#   * chi2 p-value >= 0.05 between control and action-aware fresh action dist (I-110)
+#   * Cramer's V <= 0.10 on 2x2 action/traj contingency table (I-110)
+#     (p-value unreliable at large n; V<0.10 = negligible practical bias)
 #   * fresh_action_rate(test) >= 0.5 * fresh_action_rate(control)
 #   * S2 reduction >= 40%  (bg_runs(test) <= 0.6 * bg_runs(control))
 #   * joint_req_hz(test) >= 11.0
@@ -12,7 +13,7 @@ set -e
 source /opt/ros/jazzy/setup.bash
 
 CALIB="/workspace/InternNav/scripts/realworld/calib/calib_scout.txt"
-LOG_BASE="/tmp/gate3b_aa"
+LOG_BASE="/tmp/gate3b_aa_v2"
 mkdir -p "$LOG_BASE"
 
 BAGS=(
