@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# Gate 3c — cold-start pre-fetch (I-010)
+# Tests whether --pre-warm-frames eliminates "waiting" responses at bag start.
+#
+# Conditions per bag:
+#   1. baseline  : no pre-warm (--pre-warm-frames 0)
+#   2. pre-warm  : --pre-warm-frames 3 (queues 3 synthetic S2 frames at startup)
+#
+# Pass criteria (per bag):
+#   * waiting_responses(pre-warm) == 0  (cold-start eliminated)
+#   * waiting_responses(baseline) >= 1  (confirms problem was real)
+#   * joint_req_hz(pre-warm) >= 11.0    (throughput unchanged)
+#   * V <= 0.10 on action/traj distribution (cache quality maintained)
+#
+# Note: Gate 3a (adaptive plan_step_gap) is documented as superseded by Gate 3b.
+# The temporal cache provides equivalent adaptive S2 frequency via cosine gating.
+set -e
+source /opt/ros/jazzy/setup.bash
+
+CALIB="/workspace/InternNav/scripts/realworld/calib/calib_scout.txt"
+SERVER="scripts/realworld/http_internvla_server_debug.py"
+CLIENT="scripts/realworld/http_internvla_client_debug.py"
+LOG_BASE="/tmp/gate3c_prewarm"
+mkdir -p "$LOG_BASE"
+
+BAGS=(
+    "my_camera_bag_20260317_073623"
+    "my_camera_bag_20260317_061841"
+    "my_camera_bag_20260317_063047"
+)
+
+CONDITIONS=(
+    "baseline|0"
+    "prewarm|3"
+)
+
+echo "=================================================="
+echo " Gate 3c — cold-start pre-fetch (I-010)"
+echo " Condition: no-prewarm vs --pre-warm-frames 3"
+echo "=================================================="
+
+start_server() {
+    local prewarm="$1"
+    local tag="$2"
+    pkill -f "$SERVER" 2>/dev/null || true
+    sleep 2
+
+    python3 /workspace/InternNav/$SERVER \
+        --mode async --temperature 0.75 --kv-cache \
+        --calib "$CALIB" \
+        --pre-warm-frames "$prewarm" \
+        > "$LOG_BASE/${tag}_server.log" 2>&1 &
+    SERVER_PID=$!
+
+    until curl -sf http://localhost:5802/async_metrics > /dev/null 2>&1; do sleep 2; done
+    echo "  server up (pid=$SERVER_PID, pre_warm=$prewarm)"
+}
+
+run_one() {
+    local bag="$1"
+    local condition="$2"
+    local name="${condition%%|*}"
+    local prewarm="${condition##*|}"
+    local short="${bag##*_}"
+    local tag="${short}_${name}"
+    local log_dir="$LOG_BASE/$tag"
+    mkdir -p "$log_dir"
+
+    echo ""
+    echo "--- bag=$short  cond=$name  pre_warm_frames=$prewarm ---"
+
+    start_server "$prewarm" "$tag"
+
+    # Reset metrics (clear any pre-warm-time activity)
+    curl -sf http://localhost:5802/reset_metrics > "$log_dir/reset.json"
+    sleep 1
+
+    # Configure temporal cache same as Gate 3b production config
+    curl -sf "http://localhost:5802/set_temporal_threshold?threshold=0.92" > "$log_dir/set_thr.json"
+    curl -sf "http://localhost:5802/set_max_hold_frames?frames=10" > "$log_dir/set_mh.json"
+
+    python3.12 /workspace/InternNav/$CLIENT \
+        --mode async --kv-cache --temperature 0.75 \
+        --jpeg-quality 95 --depth-png-compress 6 --calib "$CALIB" \
+        > "$log_dir/client.log" 2>&1 &
+    local client_pid=$!
+    sleep 3
+
+    echo "  playing /workspace/rosbag/$bag at rate=0.5..."
+    ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$log_dir/bag.log" 2>&1
+    sleep 2
+
+    curl -sf http://localhost:5802/async_metrics > "$log_dir/metrics.json"
+    kill $client_pid 2>/dev/null || true
+
+    python3 - <<PYEOF
+import json
+with open("$log_dir/metrics.json") as f: d = json.load(f)
+bg = d.get("background_s2_runs", 0)
+wait = d.get("waiting_responses", 0)
+pw = d.get("pre_warm_frames_queued", 0)
+hz = d.get("joint_req_hz", 0)
+total = d.get("total_requests", 1)
+ft = d.get("fresh_traj_outputs", 0)
+fa = d.get("fresh_action_outputs", 0)
+n = ft + fa
+print(f"  pre_warm_queued={pw}  waiting_responses={wait}  ({wait/max(1,total)*100:.1f}% of requests)")
+print(f"  bg={bg}  skip%={d.get('temporal_cache_skip_ratio',0):.1f}  hz={hz:.2f}")
+print(f"  fresh: traj={ft}  action={fa}  n={n}  action_rate={(fa/max(1,n))*100:.1f}%")
+PYEOF
+
+    pkill -f "$SERVER" 2>/dev/null || true
+    sleep 3
+}
+
+for bag in "${BAGS[@]}"; do
+    for cond in "${CONDITIONS[@]}"; do
+        run_one "$bag" "$cond"
+    done
+done
+
+echo ""
+echo "=================================================="
+echo " GATE 3c — PASS/FAIL ANALYSIS PER BAG"
+echo "=================================================="
+for bag in "${BAGS[@]}"; do
+    short="${bag##*_}"
+    baseline="$LOG_BASE/${short}_baseline/metrics.json"
+    test_="$LOG_BASE/${short}_prewarm/metrics.json"
+    echo ""
+    echo "--- bag $short ---"
+    python3 /workspace/InternNav/scripts/viz/chi_squared_action_test.py "$baseline" "$test_" || true
+    python3 - <<PYEOF
+import json
+with open("$baseline") as f: b = json.load(f)
+with open("$test_") as f: t = json.load(f)
+b_wait = b.get("waiting_responses", 0)
+t_wait = t.get("waiting_responses", 0)
+b_hz   = b.get("joint_req_hz", 0)
+t_hz   = t.get("joint_req_hz", 0)
+pw     = t.get("pre_warm_frames_queued", 0)
+print(f"")
+print(f"Gate 3c checks:")
+print(f"  waiting_responses baseline={b_wait}  (need >= 1 to confirm problem)")
+print(f"  waiting_responses prewarm={t_wait}   (need == 0 to confirm fix)")
+print(f"  hz: baseline={b_hz:.2f}  prewarm={t_hz:.2f}  (both need >= 11.0)")
+cold_ok  = t_wait == 0
+prob_ok  = b_wait >= 1
+hz_ok    = t_hz >= 11.0
+all_pass = cold_ok and prob_ok and hz_ok
+print(f"  cold_start_eliminated: {'PASS' if cold_ok else 'FAIL'}")
+print(f"  problem_confirmed:     {'PASS' if prob_ok else 'SKIP (baseline also 0)'}")
+print(f"  throughput_hz:         {'PASS' if hz_ok else 'FAIL'}")
+print(f"  => bag {b.get('temporal_cache_threshold','')}: {'PASS' if all_pass else 'FAIL'}")
+PYEOF
+done

@@ -157,6 +157,10 @@ async_metrics = {
     # I-046 / I-047 forced-fresh counters (cache bypass diagnostics)
     "action_aware_bypasses": 0,   # I-046: forced fresh because last was action
     "max_hold_bypasses": 0,       # I-047: forced fresh because skip count >= max
+
+    # Gate 3c (I-010): cold-start pre-fetch diagnostics
+    "waiting_responses": 0,       # HTTP responses returned before any cache hit
+    "pre_warm_frames_queued": 0,  # synthetic frames queued at server start
 }
 async_metrics_lock = threading.Lock()
 
@@ -190,6 +194,8 @@ def reset_dual_metrics():
         async_metrics["fresh_action_outputs"] = 0
         async_metrics["action_aware_bypasses"] = 0
         async_metrics["max_hold_bypasses"] = 0
+        async_metrics["waiting_responses"] = 0
+        # pre_warm_frames_queued is NOT reset here — it's a server-lifetime counter
 
 def async_continuous_loop():
     """Background thread: continuously runs step() and caches output
@@ -587,6 +593,9 @@ def eval_dual_async():
         elif cached_action is not None:
             json_output = {'discrete_action': cached_action}
         else:
+            # Gate 3c (I-010): track cold-start "waiting" responses
+            with async_metrics_lock:
+                async_metrics["waiting_responses"] = async_metrics.get("waiting_responses", 0) + 1
             json_output = {'status': 'waiting'}
 
         return jsonify(json_output)
@@ -734,6 +743,10 @@ def get_async_metrics():
         "action_aware_bypasses": m.get("action_aware_bypasses", 0),
         "max_hold_bypasses": m.get("max_hold_bypasses", 0),
         "max_hold_frames": _max_hold_frames,
+
+        # Gate 3c (I-010): cold-start diagnostics
+        "waiting_responses": m.get("waiting_responses", 0),
+        "pre_warm_frames_queued": m.get("pre_warm_frames_queued", 0),
     }
 
     return jsonify(metrics)
@@ -944,6 +957,10 @@ if __name__ == '__main__':
                         help="Additional optimization method tag (repeatable, scaffold only).")
     parser.add_argument("--calib", type=str, default="/home/gdr/gd_vln/workspace/src/InternNav/scripts/realworld/calib/calib_scout.txt",
                         help="Path to calibration file (e.g. calib/calib_scout.txt)")
+    parser.add_argument("--pre-warm-frames", type=int, default=0,
+                        help="Gate 3c (I-010): queue N synthetic S2 frames at startup to pre-populate "
+                             "the async cache before first real request. Eliminates cold-start 'waiting' "
+                             "responses. Default 0 (off). Recommend 3 for rosbag experiments.")
     args = parser.parse_args()
 
     SERVER_MODE = args.mode
@@ -989,5 +1006,21 @@ if __name__ == '__main__':
             args.camera_intrinsic,
         )
         agent.reset()
+
+    # Gate 3c (I-010): cold-start pre-fetch
+    # Queue synthetic frames before any real requests arrive. The background S2
+    # thread processes them during model-load / client-connect latency (~3s),
+    # so by the time the first real frame arrives, the cache is already warm.
+    if args.mode == 'async' and args.pre_warm_frames > 0:
+        ensure_async_thread()
+        synthetic_image = np.zeros((480, 640, 3), dtype=np.uint8)
+        synthetic_depth = np.zeros((480, 640), dtype=np.float32)
+        synthetic_pose = np.eye(4)
+        for _ in range(args.pre_warm_frames):
+            run_s2_background(synthetic_image, synthetic_depth, synthetic_pose,
+                              "pre-warm", args.camera_intrinsic)
+        with async_metrics_lock:
+            async_metrics["pre_warm_frames_queued"] = args.pre_warm_frames
+        print(f"[Server] Gate 3c pre-warm: queued {args.pre_warm_frames} synthetic S2 frames")
 
     app.run(host='0.0.0.0', port=5802)
