@@ -36,10 +36,10 @@ class ControlMode(Enum):
     MPC_Mode = 2
 
 
-# global variable
+# global variable (will be overridden by args in main)
 policy_init = True
 mpc = None
-pid = PID_controller(Kp_trans=2.0, Kd_trans=0.0, Kp_yaw=1.5, Kd_yaw=0.0, max_v=0.6, max_w=0.5)
+pid = None  # Will be set in main() based on args
 http_idx = -1
 first_running_time = 0.0
 last_pixel_goal = None
@@ -212,7 +212,7 @@ def planning_thread(frame_id="os_sensor", traj_width=0.05, subgoal_radius=0.2):
 
     while True:
         start_time = time.time()
-        DESIRED_TIME = 0.3
+        DESIRED_TIME = 0.05  # 20 Hz target (was 0.3 = 3.3 Hz, bottleneck pre-async)
         time.sleep(0.05)
 
         if not manager.new_image_arrived:
@@ -780,6 +780,10 @@ if __name__ == '__main__':
                         help='Enable visualize_thread (OccupancyGrid)')
     parser.add_argument('--frame_id', type=str, default='os_sensor',
                         help='Frame ID for OccupancyGrid (e.g. os_sensor, camera_init)')
+    parser.add_argument('--max-v', type=float, default=0.6,
+                        help='Maximum linear velocity (m/s). Safe: 0.3, Fast: 0.8, Very Fast: 1.0+')
+    parser.add_argument('--max-w', type=float, default=0.5,
+                        help='Maximum angular velocity (rad/s). Safe: 0.3, Fast: 0.8, Very Fast: 1.2+')
     parser.add_argument('--traj_width', type=float, default=0.1,
                         help='Trajectory marker line width in meters (default: 0.1)')
     parser.add_argument('--subgoal_radius', type=float, default=0.3,
@@ -791,6 +795,11 @@ if __name__ == '__main__':
         print(f"[Client] Using async mode")
     JPEG_QUALITY = max(1, min(100, int(args.jpeg_quality)))
     DEPTH_PNG_COMPRESS = max(0, min(9, int(args.depth_png_compress)))
+    
+    # Create PID controller with custom velocity limits
+    pid = PID_controller(Kp_trans=2.0, Kd_trans=0.0, Kp_yaw=1.5, Kd_yaw=0.0, 
+                        max_v=args.max_v, max_w=args.max_w)
+    print(f"[Client] Velocity limits: max_v={args.max_v} m/s, max_w={args.max_w} rad/s")
     CLIENT_OPT_FLAGS = {
         "kv_cache": bool(args.kv_cache),
         "tensorrt": bool(args.tensorrt),

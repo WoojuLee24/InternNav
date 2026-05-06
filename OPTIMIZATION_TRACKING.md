@@ -1,6 +1,64 @@
-# True Async Background Thread Experiments
+# TRUE ASYNC DUAL-SYSTEM EXPERIMENTS
 
-Last updated: 2026-04-23
+Last updated: 2026-04-30
+
+## Gate Progress
+
+| Gate | Status | Condition |
+|------|--------|-----------|
+| Task #1 — Remove blocking agent.step() from /eval_dual_async | ✅ DONE | HTTP handler now cache-first only |
+| Task #2 — 3-bag verification (Gate 0) | ✅ PASS | All 3 bags: latency 0.02ms, 12Hz, bg_s2>0, traj≥threshold |
+| Task #3 — Temperature sweep (Phase 1) | 🔄 NEXT | temp ∈ {0.70, 0.75, 0.80, 0.85} on bag 073623 |
+
+## Metric Design for Clear Audience Understanding
+
+Designed metrics to show:
+
+### SYSTEM 2 (S2) - Language Planner
+- **S2 req_hz**: How many S2 inferences per second (throughput)
+- **S2 latency**: Time per S2 inference in ms (speed)
+
+### SYSTEM 1 (S1) - Trajectory Generator  
+- **S1 req_hz**: How many trajectory generations per second
+- **S1 latency**: Time per trajectory generation in ms
+
+### JOINT (S1 + S2) - Combined End-to-End
+- **Joint req_hz**: Total HTTP requests processed per second
+- **Joint latency**: Total time from request to response in ms
+
+### QUALITY
+- **Trajectory ratio**: % of outputs that are trajectories (high = navigation quality)
+- **Discrete ratio**: % of outputs that are discrete actions
+
+---
+
+## SYNC MODE RESULTS (baseline)
+
+| Metric | Value |
+|--------|-------|
+| S2 req_hz | 2.81 Hz |
+| S2 latency | 495.4 ms |
+| S1 req_hz | 1.48 Hz |
+| S1 latency | 0.0 ms |
+| Joint req_hz | 2.81 Hz |
+| Joint latency | 495.4 ms |
+| Trajectories | 52.8% |
+| Discrete | 47.2% |
+| Total runs | 743 |
+
+---
+
+## ASYNC MODE RESULTS
+
+| Metric | Value |
+|--------|-------|
+| Joint req_hz | 1.78 Hz |
+| Joint latency | 294.0 ms |
+| Trajectories | 0.0% |
+
+Note: Async mode shows 0% trajectories - needs investigation
+
+---
 
 ## Experiment: Coordinate vs Discrete Output Investigation
 

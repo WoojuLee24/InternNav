@@ -425,91 +425,34 @@ def eval_dual_async():
         ensure_async_thread()
         
         t_http_start = time.time()
-        
-        # ===== ROLLING ASYNC: Process current, queue next =====
-        # - Run step() sync for current frame
-        # - Queue next frame for background
-        # - Return current result immediately
-        
-        # ===== SYSTEM 2 TIMING (Language Planner) =====
-        t_s2_start = time.time()
-        look_down = False
-        with agent_lock:
-            dual_sys_output = agent.step(
-                image, depth, camera_pose, instruction, 
-                intrinsic=args.camera_intrinsic, look_down=look_down
-            )
-            if dual_sys_output.output_action is not None and dual_sys_output.output_action == [5]:
-                look_down = True
-                dual_sys_output = agent.step(
-                    image, depth, camera_pose, instruction, 
-                    intrinsic=args.camera_intrinsic, look_down=look_down
-                )
-        t_s2_end = time.time()
-        s2_time = t_s2_end - t_s2_start
-        
-        # ===== SYSTEM 1 TIMING (Trajectory Generator) =====
-        # S1 latency cannot be separated from step() without instrumenting agent internals.
-        # We still report S1 throughput (runs/s) from output counts.
-        s1_time = 0.0
-        
-        # Cache for this request
+
+        # ===== TRUE ASYNC: queue frame for background, return cache immediately =====
+        # agent.step() is NEVER called in the HTTP thread.
+        # The background thread (async_continuous_loop) owns all inference.
+        run_s2_background(image, depth, camera_pose, instruction, args.camera_intrinsic)
+
         with async_cache_lock:
-            if dual_sys_output.output_action is not None:
-                async_cached_action = dual_sys_output.output_action
-                async_cached_trajectory = None
-            elif dual_sys_output.output_trajectory is not None:
-                async_cached_trajectory = dual_sys_output.output_trajectory.tolist()
-                async_cached_action = None
-        
+            cached_traj = async_cached_trajectory
+            cached_action = async_cached_action
+
         t_http_end = time.time()
         http_latency = t_http_end - t_http_start
-        
-        has_action = dual_sys_output.output_action is not None
-        has_trajectory = dual_sys_output.output_trajectory is not None
-
-        # Quality-first policy: if both exist, prioritize trajectory response.
-        send_trajectory = has_trajectory
-        send_action = (not send_trajectory) and has_action
 
         # ===== UPDATE METRICS =====
         with async_metrics_lock:
             async_metrics["http_requests"] = async_metrics.get("http_requests", 0) + 1
             async_metrics["total_requests"] = async_metrics.get("total_requests", 0) + 1
-            async_metrics["total_action_time"] = async_metrics.get("total_action_time", 0.0) + http_latency
             async_metrics["total_http_latency"] = async_metrics.get("total_http_latency", 0.0) + http_latency
-
-            async_metrics["s2_runs"] = async_metrics.get("s2_runs", 0) + 1
-            async_metrics["s2_time_total"] = async_metrics.get("s2_time_total", 0.0) + s2_time
-
-            if send_trajectory:
+            async_metrics["total_action_time"] = async_metrics.get("total_action_time", 0.0) + http_latency
+            if cached_traj is not None:
                 async_metrics["s2_coords_outputs"] = async_metrics.get("s2_coords_outputs", 0) + 1
-                async_metrics["s1_runs"] = async_metrics.get("s1_runs", 0) + 1
-                async_metrics["s1_time_total"] = async_metrics.get("s1_time_total", 0.0) + s1_time
-            elif send_action:
+            elif cached_action is not None:
                 async_metrics["s2_discrete_outputs"] = async_metrics.get("s2_discrete_outputs", 0) + 1
-        
-        # Queue NEXT frame for background only when explicitly enabled.
-        if ASYNC_BACKGROUND_INFERENCE:
-            try:
-                s2_request_queue.put_nowait((image, depth))
-            except queue.Full:
-                pass
-        
-        # Return result - use cached from background when available
-        with async_cache_lock:
-            cached_traj = async_cached_trajectory
-            cached_action = async_cached_action
-        
-        # Use cached from background if available, otherwise use sync result
+
         if cached_traj is not None:
             json_output = {'trajectory': cached_traj}
         elif cached_action is not None:
             json_output = {'discrete_action': cached_action}
-        elif send_trajectory:
-            json_output = {'trajectory': dual_sys_output.output_trajectory.tolist()}
-        elif send_action:
-            json_output = {'discrete_action': dual_sys_output.output_action}
         else:
             json_output = {'status': 'waiting'}
 
@@ -519,6 +462,13 @@ def eval_dual_async():
         print(f"[Server] eval_dual_async exception: {repr(e)}")
         traceback.print_exc()
         return jsonify({'status': 'waiting', 'error': str(e)})
+
+
+@app.route("/reset_metrics", methods=['GET'])
+def reset_metrics_endpoint():
+    """Reliably reset all experiment metrics without needing a valid image."""
+    reset_dual_metrics()
+    return jsonify({'status': 'reset', 'start_time': async_metrics.get('start_time', 0)})
 
 
 @app.route("/async_metrics", methods=['GET'])
