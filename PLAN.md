@@ -109,15 +109,35 @@ from a SYNC measurement). See EXPERIMENTS_LOG.md for full diagnosis and N=3 repl
 
 *Blocked until Gate 1 passes.*
 
-### Step 2.1 — Deep review of enhanced agent `[Task #5]`
+### Step 2.1 — Deep review of enhanced agent `[Task #5]` ✅ DONE — 2026-05-06
 **What**: Read `internnav/agent/internvla_n1_agent_enhanced.py` (651 lines) fully.
 
-**GATE 2a — pass if, for EACH of the 5 innovations, you can state:**
-1. The specific method name(s) that implement it
-2. Whether it is fully implemented or a stub/placeholder
-3. The expected effect on trajectory_ratio or latency
+**Findings (full table in EXPERIMENTS_LOG.md):**
+| # | Innovation | Status |
+|---|-----------|--------|
+| 1 | Action tokens (OpenVLA-style) | heuristic regex (not real action tokens) |
+| 2 | Adaptive action chunking | STUB — `action_chunk_size` set but never read |
+| 3 | Parallel decoding | STUB — flag set but never read |
+| 4 | True async pipeline | REGRESSION — re-blocks HTTP on cache miss |
+| 5 | Entropy-based confidence | STUB — returns `np.random.random()*0.5` |
 
-❌ If any innovation is a stub: mark clearly before connecting to server
+Plus a compositional bug: the server `__main__` (L642) instantiates
+`InternVLAN1AsyncAgent` from the realworld file, **not** the
+`InternVLAN1EnhancedAgent` defined above. Even with `--agent-type enhanced`
+the enhanced class would never be instantiated.
+
+**GATE 2a: ❌ FAIL** — 4 of 5 innovations are stubs, the 5th would regress Gate 0.
+
+### Step 2.2 — Connect to server with flag `[Task #6]` ⛔ BLOCKED
+### Step 2.3 — Full 3-bag benchmark `[Task #7]` ⛔ BLOCKED
+Both blocked: connecting the enhanced server would lose Gate 0 improvements
+(HTTP-blocking on cache miss). See EXPERIMENTS_LOG.md for full diagnosis.
+
+**Phase 2 decision (per failure protocol Step 3 — DOCUMENTED, not relaxed):**
+Skip Phase 2 connection, advance directly to Phase 3. The enhanced agent's
+intent maps closely to Phase 3 ideas (adaptive scheduling, temporal cache,
+speculative prefetch) but Phase 3 starts from the Gate-0-passing production
+server and adds net-new innovations rather than swapping for a stub-heavy one.
 
 ### Step 2.2 — Connect to server with flag `[Task #6]`
 **What**: Add `--agent-type [base|enhanced]` flag to server. Default=base (no breaking change).
@@ -240,7 +260,12 @@ from a SYNC measurement). See EXPERIMENTS_LOG.md for full diagnosis and N=3 repl
 | **Phase 0** | **Task #2: 3-bag verify** | **✅ DONE — Gate 0 PASS** |
 | **Phase 1** | **Task #3: Temp sweep** | **✅ DONE — Gate 1a PASS (recalibrated)** |
 | **Phase 1** | **Task #4: Lock baseline** | **✅ DONE — Gate 1b PASS, temp=0.75 locked** |
-| **Phase 2** | **Task #5: Review enhanced agent** | **✅ START HERE** |
+| **Phase 2** | **Task #5: Review enhanced agent** | **✅ DONE — Gate 2a FAIL (4/5 stubs)** |
+| Phase 2 | Task #6: Connect to server | ⛔ blocked by Gate 2a fail (would regress Gate 0) |
+| Phase 2 | Task #7: 3-bag benchmark | ⛔ blocked by #6 |
+| **Phase 3** | **Task #9: Temporal S2 caching** | **✅ START HERE (recommended)** |
+| Phase 3 | Task #8: Adaptive plan_step_gap | ✅ unlocked |
+| Phase 3 | Task #10: Speculative S2 prefetch | ✅ unlocked (needs paper review first) |
 | Phase 2 | Task #6: Connect to server | ⛔ needs #5 |
 | Phase 2 | Task #7: 3-bag benchmark | ⛔ needs #6 |
 | Phase 3 | Tasks #8 #9 #10 (parallel) | ⛔ needs #7 |

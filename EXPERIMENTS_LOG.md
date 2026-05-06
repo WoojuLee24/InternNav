@@ -121,6 +121,121 @@ expected effect on trajectory_ratio or latency.
 
 ---
 
+## Experiment: Phase 2 Task #5 — Enhanced Agent Code Review — 2026-05-06
+**Branch**: research/async-foundation | **Status**: ⚠️ GATE 2a FAIL (4/5 stubs)
+
+### File reviewed
+`internnav/agent/internvla_n1_agent_enhanced.py` (651 lines, 1 class + Flask server)
+
+### Per-innovation analysis (Gate 2a requires this for each)
+
+#### Innovation 1 — Action Token Output (OpenVLA-style)
+- **Methods**: `parse_actions()` (L141), `_extract_coordinates_enhanced()` (L155)
+- **Status**: **STUB / heuristic only.** Header claims "action tokens" but the
+  implementation is regex-based text parsing (5 patterns at L164–170). The
+  class docstring (L47–50) explicitly downgrades this to an "ACTION TOKEN
+  HEURISTIC: If coord-like text appears, try trajectory."
+- **Expected effect**: MARGINAL on trajectory_ratio (better regex coverage may
+  catch a few more coordinate strings). Zero effect on latency. Not real
+  OpenVLA-style action tokens — those would require model retraining.
+
+#### Innovation 2 — Adaptive Action Chunking
+- **Methods**: `step_s2_with_chunking()` (L207). Reads `self.action_chunk_size = 8` (L86).
+- **Status**: **STUB / NAME-ONLY.** Method name says "with_chunking" but the body
+  performs a single `model.generate(**inputs, **gen_kwargs)` call (L296) with
+  `do_sample=False`. `action_chunk_size` is set in `__init__` but **not read
+  anywhere else** in the file. No chunking logic exists.
+- **Expected effect**: NONE — purely placeholder.
+
+#### Innovation 3 — Parallel Decoding
+- **Methods**: `self.use_parallel_decode = True` (L87, also L635 as CLI default).
+- **Status**: **STUB / UNUSED FLAG.** The flag is set in `__init__` and exposed
+  on the CLI but **never read or branched on** anywhere in generation. Standard
+  sequential decoding is always used.
+- **Expected effect**: NONE.
+
+#### Innovation 4 — True Async Pipeline
+- **Methods**: `eval_dual_async_enhanced()` (L484), `_background_s2()` (L587),
+  `s2_executor = ThreadPoolExecutor(max_workers=2)` (L471).
+- **Status**: **REGRESSION RISK.** This is a *less sophisticated* async pattern
+  than what production already runs:
+  1. Cache-miss path (L545–553) calls `agent.step()` synchronously **inside the
+     HTTP handler with `agent_lock` held** — exactly the blocking pattern Gate 0
+     removed from `http_internvla_server_debug.py`.
+  2. Background thread also acquires `agent_lock` for the full duration of
+     `agent.step()` (L592–593) — same lock contention pattern.
+  3. No `/reset_metrics` endpoint, no per-experiment isolation.
+  4. Metric reporting is incomplete (no `joint_req_hz`, no `trajectory_ratio`).
+- **Expected effect**: **NEGATIVE** if connected — would re-introduce HTTP
+  blocking on cache misses and lose Gate 0 improvements.
+
+#### Innovation 5 — Entropy-based Confidence
+- **Methods**: `_check_entropy()` (L198), `coord_confidence_thresh = 0.6` (L91).
+- **Status**: **STUB + MISLABELED.** `_check_entropy()` returns
+  `np.random.random() * 0.5  # Placeholder` (L205). The threshold *is* used
+  inside `_extract_coordinates_enhanced` (L193), but the "confidence" computed
+  there is an **edge-margin heuristic** (L187:
+  `confidence = min(edge_margin / 64.0, 1.0)`) — i.e., "how far is the coord
+  from the image edge". This is **not** model output entropy.
+- **Expected effect**: NEUTRAL on trajectory_ratio. The edge-margin filter may
+  reject a few near-edge coords, but is unrelated to the claimed innovation.
+
+### Critical compositional bug
+The `__main__` block at L642 instantiates `InternVLAN1AsyncAgent` (imported
+from `internvla_n1_agent_realworld.py`), **not** `InternVLAN1EnhancedAgent`
+(the class defined in the same file). Running the server entry point as-is
+exercises the production agent and bypasses every "enhanced" method above.
+Even if we connected this server with `--agent-type enhanced`, the routing
+logic does not pick up the enhanced class.
+
+### Gate 2a Verdict
+Per PLAN.md Gate 2a, "for EACH of the 5 innovations, you can state: (1) the
+specific method name(s), (2) implementation status, (3) expected effect."
+
+| # | Innovation | Methods | Status | Expected effect |
+|---|-----------|---------|--------|-----------------|
+| 1 | Action tokens | `parse_actions`, `_extract_coordinates_enhanced` | heuristic regex | marginal |
+| 2 | Adaptive chunking | `step_s2_with_chunking` | STUB (name only) | none |
+| 3 | Parallel decoding | `self.use_parallel_decode` | STUB (flag unused) | none |
+| 4 | True async | `eval_dual_async_enhanced`, `_background_s2` | REGRESSION | negative |
+| 5 | Entropy confidence | `_check_entropy` | STUB + mislabeled | neutral |
+
+PLAN.md says: "❌ If any innovation is a stub: mark clearly before connecting
+to server." 4 of 5 are stubs. The 5th would actively regress Gate 0.
+
+**GATE 2a: FAIL.**
+
+### Decision (Failure Protocol Step 3 — DOCUMENTED)
+Do **not** proceed with Phase 2 Tasks #6 (connect to server) or #7 (3-bag
+benchmark) for the enhanced agent as currently written. The expected outcome
+is no improvement at best and Gate 0 regression at worst.
+
+### Path Forward
+Two options for the user to choose:
+
+- **(A) Skip Phase 2 entirely**, proceed to Phase 3 (Tasks #8/#9/#10 in parallel:
+  adaptive `plan_step_gap`, temporal S2 caching, speculative S2 prefetch). The
+  enhanced agent's intent maps roughly to Phase 3 ideas anyway, but Phase 3
+  starts from the production (Gate-0-passing) server, so we keep gains and
+  add net-new innovations.
+
+- **(B) Salvage one piece** — port `_extract_coordinates_enhanced` as a small,
+  isolated parsing improvement into the production server, then re-run the
+  3-bag protocol to see if trajectory_ratio shifts (≥+1pp would be evidence
+  of a real bottleneck in current parsing). Skip everything else.
+
+Recommendation: **(A).** Phase 3 has clearly defined, publishable hypotheses
+that are independent of this stub-heavy file. Picking up new gains there is
+a higher-EV use of time than salvaging regex tweaks.
+
+### Next Step
+Phase 3 (Tasks #8/#9/#10) unlocks. Recommend starting with **Task #9 (Temporal
+S2 caching)** because it has the most directly measurable effect on
+trajectory_ratio and the cleanest implementation (vision-encoder feature
+cosine-similarity gate around the existing background-S2 invocation).
+
+---
+
 ## Experiment: Gate 0 — TRUE Async Verification — 2026-05-03
 **Branch**: research/async-foundation | **Status**: ✅ GATE 0 PASS
 
