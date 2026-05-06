@@ -57,6 +57,21 @@ temporal_cache_threshold = 0.0
 temporal_cache_lock = threading.Lock()
 _last_fingerprint = None  # numpy float32 vector, normalized
 
+# === Phase 3 Task #9 v2 (I-046, I-047): Action-aware cache gate ===
+# Without these guards, the cosine-only gate at thr>=0.92 systematically
+# filters out frames where S2 would have produced discrete actions
+# (stop/turn/look_down). Verified empirically: 0/28 fresh actions on bag
+# 073623 vs ~50/50 control split. Two safeguards:
+#   I-046: never replay the cache when the last fresh output was a discrete
+#          action. Action frames are decision points; staleness there is a
+#          safety failure mode.
+#   I-047: bound max-hold time. Force a fresh S2 every _max_hold_frames
+#          regardless of similarity, so the cache cannot lock onto one
+#          trajectory output indefinitely.
+_last_fresh_was_action = False
+_consecutive_skip_count = 0
+_max_hold_frames = 10  # Forced refresh threshold; tuned per experiment
+
 def _image_fingerprint(rgb):
     """32x32 grayscale, raw pixel values 0-255 (no normalization).
     Returns a 1D float32 vector or None if input is unusable.
@@ -138,11 +153,20 @@ async_metrics = {
     # output distribution or if traj_ratio is biased by cache replay.
     "fresh_traj_outputs": 0,
     "fresh_action_outputs": 0,
+
+    # I-046 / I-047 forced-fresh counters (cache bypass diagnostics)
+    "action_aware_bypasses": 0,   # I-046: forced fresh because last was action
+    "max_hold_bypasses": 0,       # I-047: forced fresh because skip count >= max
 }
 async_metrics_lock = threading.Lock()
 
 
 def reset_dual_metrics():
+    global _last_fresh_was_action, _consecutive_skip_count, _last_fingerprint
+    with temporal_cache_lock:
+        _last_fresh_was_action = False
+        _consecutive_skip_count = 0
+        _last_fingerprint = None
     with async_metrics_lock:
         async_metrics["start_time"] = time.time()
         async_metrics["http_requests"] = 0
@@ -164,6 +188,8 @@ def reset_dual_metrics():
         async_metrics["temporal_cache_skips"] = 0
         async_metrics["fresh_traj_outputs"] = 0
         async_metrics["fresh_action_outputs"] = 0
+        async_metrics["action_aware_bypasses"] = 0
+        async_metrics["max_hold_bypasses"] = 0
 
 def async_continuous_loop():
     """Background thread: continuously runs step() and caches output
@@ -178,7 +204,7 @@ def async_continuous_loop():
     instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
     camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
     
-    global _last_fingerprint
+    global _last_fingerprint, _last_fresh_was_action, _consecutive_skip_count
     while async_thread_running:
         try:
             # Wait for new frame data from queue (non-blocking with timeout)
@@ -187,23 +213,46 @@ def async_continuous_loop():
             except queue.Empty:
                 continue
 
-            # === Phase 3 Task #9: Temporal cache gate ===
-            # Skip running agent.step() if the new frame is visually almost
-            # identical to the last processed frame. Cached output stays valid.
+            # === Phase 3 Task #9 v2: Action-aware temporal cache gate ===
+            # I-046: never skip if last fresh output was a discrete action
+            # I-047: never skip more than _max_hold_frames consecutively
+            # else: standard MAD-based similarity gate
             with temporal_cache_lock:
                 threshold = temporal_cache_threshold
+                last_was_action = _last_fresh_was_action
+                skip_count = _consecutive_skip_count
+                max_hold = _max_hold_frames
             if threshold > 0.0:
-                fp = _image_fingerprint(image)
-                if fp is not None and _last_fingerprint is not None:
-                    sim = _cosine_sim(fp, _last_fingerprint)
-                    if sim >= threshold:
-                        with async_metrics_lock:
-                            async_metrics["temporal_cache_skips"] = async_metrics.get("temporal_cache_skips", 0) + 1
-                        s2_request_queue.task_done()
-                        continue
-                # First frame, or below threshold → process and update fingerprint
-                if fp is not None:
-                    _last_fingerprint = fp
+                forced = None
+                if last_was_action:
+                    forced = "action_aware_bypasses"  # I-046
+                elif skip_count >= max_hold:
+                    forced = "max_hold_bypasses"  # I-047
+                if forced is not None:
+                    # Forced refresh: skip the similarity check entirely
+                    with async_metrics_lock:
+                        async_metrics[forced] = async_metrics.get(forced, 0) + 1
+                    fp = _image_fingerprint(image)
+                    if fp is not None:
+                        _last_fingerprint = fp
+                    with temporal_cache_lock:
+                        _consecutive_skip_count = 0
+                else:
+                    fp = _image_fingerprint(image)
+                    if fp is not None and _last_fingerprint is not None:
+                        sim = _cosine_sim(fp, _last_fingerprint)
+                        if sim >= threshold:
+                            with async_metrics_lock:
+                                async_metrics["temporal_cache_skips"] = async_metrics.get("temporal_cache_skips", 0) + 1
+                            with temporal_cache_lock:
+                                _consecutive_skip_count += 1
+                            s2_request_queue.task_done()
+                            continue
+                    # First frame, or below threshold → process and update fingerprint
+                    if fp is not None:
+                        _last_fingerprint = fp
+                    with temporal_cache_lock:
+                        _consecutive_skip_count = 0
 
             t0 = time.time()
 
@@ -252,6 +301,10 @@ def async_continuous_loop():
                     async_metrics["fresh_traj_outputs"] = async_metrics.get("fresh_traj_outputs", 0) + 1
                 elif fresh_was_action:
                     async_metrics["fresh_action_outputs"] = async_metrics.get("fresh_action_outputs", 0) + 1
+
+            # I-046: track last fresh output type for next-iteration gate decision
+            with temporal_cache_lock:
+                _last_fresh_was_action = fresh_was_action
             
             s2_request_queue.task_done()
             
@@ -671,6 +724,11 @@ def get_async_metrics():
             m.get("fresh_traj_outputs", 0) /
             max(1, m.get("fresh_traj_outputs", 0) + m.get("fresh_action_outputs", 0)) * 100, 1
         ),
+
+        # I-046 / I-047 forced-fresh diagnostics
+        "action_aware_bypasses": m.get("action_aware_bypasses", 0),
+        "max_hold_bypasses": m.get("max_hold_bypasses", 0),
+        "max_hold_frames": _max_hold_frames,
     }
 
     return jsonify(metrics)
@@ -694,6 +752,25 @@ def set_temporal_threshold_endpoint():
     with async_metrics_lock:
         async_metrics["temporal_cache_threshold"] = new_t
     return jsonify({'status': 'ok', 'temporal_cache_threshold': new_t})
+
+
+@app.route("/set_max_hold_frames", methods=['POST', 'GET'])
+def set_max_hold_frames_endpoint():
+    """I-047: configure the max number of consecutive cache skips before
+    forcing a fresh S2 inference. Lower = more frequent forced refresh
+    (safer but less compute saving). Higher = looser staleness bound.
+    GET ?frames=10  or  POST {frames: 10}. 0 disables the bound."""
+    global _max_hold_frames, _consecutive_skip_count
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        new_n = int(data.get('frames', 10))
+    else:
+        new_n = int(request.args.get('frames', 10))
+    new_n = max(0, min(10000, new_n))
+    with temporal_cache_lock:
+        _max_hold_frames = new_n
+        _consecutive_skip_count = 0
+    return jsonify({'status': 'ok', 'max_hold_frames': new_n})
 
 
 def annotate_image(idx, image, llm_output, trajectory, pixel_goal, output_dir, filename):

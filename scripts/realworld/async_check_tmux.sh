@@ -111,6 +111,10 @@ echo ""
 echo "  # Run sync baseline comparison"
 echo "  REPO_DIR=/path/to/InternNav ./sync_check_tmux.sh rosbag/my_camera_bag_20260317_073623 baseline"
 
-if [ -z "${NO_ATTACH:-}" ]; then
+# Auto-detect if already inside a tmux session — avoid nested attach
+if [ -z "${NO_ATTACH:-}" ] && [ -z "${TMUX:-}" ]; then
   tmux attach -t "$SESSION_NAME"
+elif [ -n "${TMUX:-}" ]; then
+  echo "Already inside tmux. Switch to experiment session with:"
+  echo "  tmux switch-client -t $SESSION_NAME"
 fi
