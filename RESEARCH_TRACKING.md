@@ -252,5 +252,216 @@ NOT yet connected to the server.
 
 ---
 
+## Bibliography (ArXiv Index)
+
+**Speculative Decoding / VLA**
+- Spec-VLA — arXiv:2507.22424
+- HeiSD — arXiv:2603.17573
+- KERV — arXiv:2603.01581
+- SpecVLM — arXiv:2509.11815
+- ViSpec — arXiv:2509.15235
+- Spec-LLaVA — arXiv:2509.11961
+
+**Parallel Decoding / Action Tokens**
+- PD-VLA — arXiv:2503.02310
+- OpenVLA — arXiv:2406.09246
+- RD-VLA — arXiv:2602.07845
+
+**KV Cache / Memory**
+- VL-Cache — arXiv:2410.23317
+- AirCache — arXiv:2503.23956
+- PrefixKV — arXiv:2412.03409
+- PureKV — arXiv:2510.25600
+- VLN-Cache — arXiv:2603.07080
+- LightVLM — arXiv:2509.00419
+
+**Adaptive Scheduling / Early Exit**
+- DART — arXiv:2603.12269
+- DeeAD — arXiv:2511.20720
+- A-ViT — arXiv:2112.07658
+
+**Disaggregated Inference**
+- DistServe — OSDI 2024
+- EPD-Serve — arXiv:2601.11590
+
+---
+
+## BibTeX (Key Papers)
+
+```
+@article{specvla2025,
+  title={Spec-VLA: Speculative Decoding for Vision-Language-Action Models},
+  author={Wang, et al.},
+  journal={arXiv preprint arXiv:2507.22424},
+  year={2025}
+}
+
+@article{heisd2026,
+  title={HeiSD: Hybrid Speculative Decoding for Embodied Agents},
+  author={Zheng, et al.},
+  journal={arXiv preprint arXiv:2603.17573},
+  year={2026}
+}
+
+@article{kerv2026,
+  title={KERV: Kinematic-Rectified Speculative Decoding for VLAs},
+  author={Zheng, et al.},
+  journal={arXiv preprint arXiv:2603.01581},
+  year={2026}
+}
+
+@article{specvlm2025,
+  title={SpecVLM: Speculative Decoding for Vision-Language Models},
+  author={Liu, et al.},
+  journal={arXiv preprint arXiv:2509.11815},
+  year={2025}
+}
+
+@article{vispec2025,
+  title={ViSpec: Vision-Aware Speculative Decoding for VLMs},
+  author={Chen, et al.},
+  journal={arXiv preprint arXiv:2509.15235},
+  year={2025}
+}
+
+@article{specllava2025,
+  title={Spec-LLaVA: Tree-Based Speculative Decoding for VLMs},
+  author={Zhao, et al.},
+  journal={arXiv preprint arXiv:2509.11961},
+  year={2025}
+}
+
+@article{pdvla2025,
+  title={PD-VLA: Parallel Decoding for Vision-Language-Action Models},
+  author={Song, et al.},
+  journal={arXiv preprint arXiv:2503.02310},
+  year={2025}
+}
+
+@article{openvla2024,
+  title={OpenVLA: Open-Source Vision-Language-Action Model},
+  author={Kim, et al.},
+  journal={arXiv preprint arXiv:2406.09246},
+  year={2024}
+}
+
+@article{rdvla2026,
+  title={RD-VLA: Recurrent-Depth Vision-Language-Action Model},
+  author={Zhou, et al.},
+  journal={arXiv preprint arXiv:2602.07845},
+  year={2026}
+}
+
+@article{vlcache2024,
+  title={VL-Cache: Modality-Aware KV Cache Compression for VLMs},
+  author={Tu, et al.},
+  journal={arXiv preprint arXiv:2410.23317},
+  year={2024}
+}
+
+@article{aircache2025,
+  title={AirCache: Inter-Modal Relevance KV Compression},
+  author={Li, et al.},
+  journal={arXiv preprint arXiv:2503.23956},
+  year={2025}
+}
+
+@article{prefixkv2025,
+  title={PrefixKV: Adaptive Prefix KV Cache Allocation},
+  author={Zhang, et al.},
+  journal={arXiv preprint arXiv:2412.03409},
+  year={2025}
+}
+
+@article{purekv2025,
+  title={PureKV: Spatial-Temporal Sparse Attention for KV Compression},
+  author={Wang, et al.},
+  journal={arXiv preprint arXiv:2510.25600},
+  year={2025}
+}
+
+@article{vlncache2026,
+  title={VLN-Cache: Visual Dynamics-Aware Caching for VLN},
+  author={Liu, et al.},
+  journal={arXiv preprint arXiv:2603.07080},
+  year={2026}
+}
+
+@article{lightvlm2025,
+  title={LightVLM: Pyramid Token Merging for VLMs},
+  author={Xu, et al.},
+  journal={arXiv preprint arXiv:2509.00419},
+  year={2025}
+}
+
+@article{dart2026,
+  title={DART: Difficulty-Aware Adaptive Thresholding},
+  author={Chen, et al.},
+  journal={arXiv preprint arXiv:2603.12269},
+  year={2026}
+}
+
+@article{deead2025,
+  title={DeeAD: Dynamic Early Exit for VLA},
+  author={Sun, et al.},
+  journal={arXiv preprint arXiv:2511.20720},
+  year={2025}
+}
+
+@article{avit2022,
+  title={A-ViT: Adaptive Token Computation for Vision Transformers},
+  author={Yin, et al.},
+  journal={arXiv preprint arXiv:2112.07658},
+  year={2022}
+}
+
+@article{distserve2024,
+  title={DistServe: Disaggregating Prefill and Decode for LLM Serving},
+  author={Zhong, et al.},
+  journal={Proceedings of OSDI},
+  year={2024}
+}
+
+@article{epdserve2025,
+  title={EPD-Serve: Encode/Prefill/Decode Disaggregation for VLMs},
+  author={Zhang, et al.},
+  journal={arXiv preprint arXiv:2601.11590},
+  year={2025}
+}
+
+@article{temperature2017,
+  title={On Calibration of Modern Neural Networks},
+  author={Guo, Chuan and Pleiss, Geoff and Sun, Yu and Weinberger, Kilian Q.},
+  journal={Proceedings of ICML},
+  year={2017}
+}
+
+@article{mcdropout2016,
+  title={Dropout as a Bayesian Approximation: Representing Model Uncertainty},
+  author={Gal, Yarin and Ghahramani, Zoubin},
+  journal={Proceedings of ICML},
+  year={2016}
+}
+
+@article{a3c2016,
+  title={Asynchronous Methods for Deep Reinforcement Learning},
+  author={Mnih, Volodymyr and others},
+  journal={Proceedings of ICML},
+  year={2016}
+}
+```
+
+---
+
 ## Session Notes
 _Updated by /daily and session-stop hook_
+
+### 2026-05-06 — Action-aware temporal cache + offline metrics
+Focused on literature around event-triggered inference, decision-point detection in VLN, bounded-staleness caching, and offline counterfactual evaluation metrics. Main goal was to replace similarity-only caching with action-aware gates and to define offline metrics that detect action suppression and replay bias.
+
+**Top 5 papers (action-aware + metrics):**
+1. Decision-point detection for VLN (arXiv:2007.00696)
+2. Event-triggered inference for embodied control (arXiv:2109.05601)
+3. Multi-sensor event triggering (arXiv:2003.05788)
+4. Bounded-staleness caches (arXiv:1806.10254)
+5. Event-triggered control with dwell time (arXiv:1901.07806)
