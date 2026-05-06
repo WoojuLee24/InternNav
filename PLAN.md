@@ -181,18 +181,30 @@ server and adds net-new innovations rather than swapping for a stub-heavy one.
 | trajectory_ratio | **≥ Phase 2 baseline − 5pp** (small allowed regression) |
 | Publishable? | **Yes** — adaptive scheduling for dual-system embodied AI |
 
-### Step 3b — Temporal S2 caching `[Task #9]`
+### Step 3b — Temporal S2 caching `[Task #9]` ✅ DONE — 2026-05-06
 
 **Hypothesis**: If the scene hasn't changed meaningfully, S2 output from the previous frame is still valid.
 
-**Implementation**: Compare vision encoder features. If cosine_sim > threshold → skip S2, reuse cache.
+**Implementation**: MAD-based image-similarity gate around `agent.step()` in
+`async_continuous_loop`. Cosine on L2-normalized grayscale was tried first
+and abandoned (too lenient — see EXPERIMENTS_LOG.md v1 sweep). Threshold
+mutable at runtime via new `/set_temporal_threshold` endpoint.
+
+**Results (bag 073623, temp=0.75):**
+| Threshold | bg_runs | reduction | traj_ratio |
+|-----------|--------:|----------:|-----------:|
+| 0.0 (control) | 477 | — | 60.1% |
+| 0.95 | 65 | **-86.4%** | 64.5% (+4.4pp) |
+| 0.99 | 274 | **-42.6%** | 63.1% (+3.0pp) |
 
 **GATE 3b:**
-| Condition | Required |
-|-----------|---------|
-| S2 invocations | **≥ 20% fewer** vs no-cache baseline |
-| trajectory_ratio | **Within 5pp** of Phase 2 baseline |
-| Threshold found | **One threshold value documented** for deployment |
+| Condition | Required | At 0.95 | At 0.99 |
+|-----------|---------|---------|---------|
+| S2 invocations | **≥ 20% fewer** | ✅ -86.4% | ✅ -42.6% |
+| trajectory_ratio | **Within 5pp** | ✅ +4.4pp | ✅ +3.0pp |
+| Threshold documented | **Yes** | ✅ | ✅ |
+
+**GATE 3b: ✅ PASS** — `0.95` for max efficiency, `0.99` for safer deployment.
 
 ### Step 3c — Speculative S2 pre-fetch `[Task #10]`
 
@@ -263,9 +275,10 @@ server and adds net-new innovations rather than swapping for a stub-heavy one.
 | **Phase 2** | **Task #5: Review enhanced agent** | **✅ DONE — Gate 2a FAIL (4/5 stubs)** |
 | Phase 2 | Task #6: Connect to server | ⛔ blocked by Gate 2a fail (would regress Gate 0) |
 | Phase 2 | Task #7: 3-bag benchmark | ⛔ blocked by #6 |
-| **Phase 3** | **Task #9: Temporal S2 caching** | **✅ START HERE (recommended)** |
-| Phase 3 | Task #8: Adaptive plan_step_gap | ✅ unlocked |
+| **Phase 3** | **Task #9: Temporal S2 caching** | **✅ DONE — Gate 3b PASS @ 0.95 / 0.99** |
+| **Phase 3** | **Task #8: Adaptive plan_step_gap** | **✅ START HERE (recommended next)** |
 | Phase 3 | Task #10: Speculative S2 prefetch | ✅ unlocked (needs paper review first) |
+| Phase 3 followup | 3-bag temporal cache verification | ✅ unlocked (cross-bag check) |
 | Phase 2 | Task #6: Connect to server | ⛔ needs #5 |
 | Phase 2 | Task #7: 3-bag benchmark | ⛔ needs #6 |
 | Phase 3 | Tasks #8 #9 #10 (parallel) | ⛔ needs #7 |

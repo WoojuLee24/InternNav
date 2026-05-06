@@ -49,6 +49,41 @@ s2_executor = None  # Thread pool for async S2
 async_cached_trajectory = None
 async_cached_action = None
 
+# === Phase 3 Task #9: Temporal S2 caching ===
+# Skip background agent.step() if the new frame is visually near-identical
+# to the previously processed frame. Threshold is the cosine-similarity
+# floor for skipping; 0.0 disables (always run).
+temporal_cache_threshold = 0.0
+temporal_cache_lock = threading.Lock()
+_last_fingerprint = None  # numpy float32 vector, normalized
+
+def _image_fingerprint(rgb):
+    """32x32 grayscale, raw pixel values 0-255 (no normalization).
+    Returns a 1D float32 vector or None if input is unusable.
+    Used with MAD-based similarity which is far more discriminative for
+    natural video than L2-normalized cosine (cosine on smooth scenes is
+    ~0.97+ even between visually distinct frames, making cosine useless
+    for caching gates here)."""
+    if rgb is None:
+        return None
+    try:
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY) if rgb.ndim == 3 else rgb
+        small = cv2.resize(gray, (32, 32), interpolation=cv2.INTER_AREA)
+        return small.astype(np.float32).flatten()
+    except Exception:
+        return None
+
+def _cosine_sim(a, b):
+    """Now MAD-based similarity in [0, 1].
+    Identical frames -> 1.0. Pure-noise pair -> ~0.5.
+    Natural video consecutive frames typically 0.94-0.99 (steady scene)
+    or 0.85-0.95 (active motion). Threshold around 0.97 is a sensible
+    skip floor for static scenes; below that the cache should refresh."""
+    if a is None or b is None:
+        return 0.0
+    mad = float(np.abs(a - b).mean()) / 255.0
+    return max(0.0, 1.0 - mad)
+
 # ===== ASYNC METRICS INSTRUMENTATION =====
 # ===== DUAL-SYSTEM PERFORMANCE METRICS =====
 # 
@@ -93,6 +128,10 @@ async_metrics = {
     # Background loop diagnostics
     "background_s2_runs": 0,
     "total_s2_time": 0.0,
+
+    # Phase 3 Task #9: Temporal S2 caching diagnostics
+    "temporal_cache_skips": 0,
+    "temporal_cache_threshold": 0.0,
 }
 async_metrics_lock = threading.Lock()
 
@@ -116,6 +155,7 @@ def reset_dual_metrics():
         async_metrics["total_requests"] = 0
         async_metrics["background_s2_runs"] = 0
         async_metrics["total_s2_time"] = 0.0
+        async_metrics["temporal_cache_skips"] = 0
 
 def async_continuous_loop():
     """Background thread: continuously runs step() and caches output
@@ -130,6 +170,7 @@ def async_continuous_loop():
     instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
     camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
     
+    global _last_fingerprint
     while async_thread_running:
         try:
             # Wait for new frame data from queue (non-blocking with timeout)
@@ -137,9 +178,27 @@ def async_continuous_loop():
                 image, depth = s2_request_queue.get(timeout=0.1)
             except queue.Empty:
                 continue
-            
+
+            # === Phase 3 Task #9: Temporal cache gate ===
+            # Skip running agent.step() if the new frame is visually almost
+            # identical to the last processed frame. Cached output stays valid.
+            with temporal_cache_lock:
+                threshold = temporal_cache_threshold
+            if threshold > 0.0:
+                fp = _image_fingerprint(image)
+                if fp is not None and _last_fingerprint is not None:
+                    sim = _cosine_sim(fp, _last_fingerprint)
+                    if sim >= threshold:
+                        with async_metrics_lock:
+                            async_metrics["temporal_cache_skips"] = async_metrics.get("temporal_cache_skips", 0) + 1
+                        s2_request_queue.task_done()
+                        continue
+                # First frame, or below threshold → process and update fingerprint
+                if fp is not None:
+                    _last_fingerprint = fp
+
             t0 = time.time()
-            
+
             # Run step() in background - keep behavior consistent with sync path
             with agent_lock:
                 look_down = False
@@ -578,9 +637,37 @@ def get_async_metrics():
         "elapsed_seconds": round(elapsed, 1),
         "background_s2_runs": m.get("background_s2_runs", 0),
         "async_background_enabled": ASYNC_BACKGROUND_INFERENCE,
+
+        # Phase 3 Task #9: Temporal caching diagnostics
+        "temporal_cache_threshold": temporal_cache_threshold,
+        "temporal_cache_skips": m.get("temporal_cache_skips", 0),
+        "temporal_cache_skip_ratio": round(
+            m.get("temporal_cache_skips", 0) /
+            max(1, m.get("temporal_cache_skips", 0) + m.get("background_s2_runs", 0)) * 100, 1
+        ),
     }
-    
+
     return jsonify(metrics)
+
+
+@app.route("/set_temporal_threshold", methods=['POST', 'GET'])
+def set_temporal_threshold_endpoint():
+    """Set the temporal cache cosine-similarity threshold without restarting.
+    GET ?threshold=0.95  or  POST {threshold: 0.95}
+    threshold=0.0 disables the cache (always run agent.step())."""
+    global temporal_cache_threshold, _last_fingerprint
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        new_t = float(data.get('threshold', 0.0))
+    else:
+        new_t = float(request.args.get('threshold', 0.0))
+    new_t = max(0.0, min(1.0, new_t))
+    with temporal_cache_lock:
+        temporal_cache_threshold = new_t
+        _last_fingerprint = None  # reset so first frame after change always processes
+    with async_metrics_lock:
+        async_metrics["temporal_cache_threshold"] = new_t
+    return jsonify({'status': 'ok', 'temporal_cache_threshold': new_t})
 
 
 def annotate_image(idx, image, llm_output, trajectory, pixel_goal, output_dir, filename):
