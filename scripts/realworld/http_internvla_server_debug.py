@@ -321,6 +321,10 @@ def async_continuous_loop():
             
         except Exception as e:
             print(f"[Async Loop] Error: {e}")
+            try:
+                s2_request_queue.task_done()
+            except ValueError:
+                pass
             time.sleep(0.1)
 
 def run_s2_background(image, depth, camera_pose, instruction, intrinsic):
@@ -957,6 +961,8 @@ if __name__ == '__main__':
                         help="Additional optimization method tag (repeatable, scaffold only).")
     parser.add_argument("--calib", type=str, default="/home/gdr/gd_vln/workspace/src/InternNav/scripts/realworld/calib/calib_scout.txt",
                         help="Path to calibration file (e.g. calib/calib_scout.txt)")
+    parser.add_argument("--port", type=int, default=5802,
+                        help="HTTP server port (default 5802). Use a different port for parallel experiments.")
     parser.add_argument("--pre-warm-frames", type=int, default=0,
                         help="Gate 3c (I-010): queue N synthetic S2 frames at startup to pre-populate "
                              "the async cache before first real request. Eliminates cold-start 'waiting' "
@@ -1008,19 +1014,30 @@ if __name__ == '__main__':
         agent.reset()
 
     # Gate 3c (I-010): cold-start pre-fetch
-    # Queue synthetic frames before any real requests arrive. The background S2
-    # thread processes them during model-load / client-connect latency (~3s),
-    # so by the time the first real frame arrives, the cache is already warm.
+    # Run N synchronous agent.step() calls before starting the async thread.
+    # This warms CUDA JIT compilation (~3s first inference → ~230ms thereafter)
+    # without seeding the cache: results are discarded, async thread starts clean.
     if args.mode == 'async' and args.pre_warm_frames > 0:
-        ensure_async_thread()
         synthetic_image = np.zeros((480, 640, 3), dtype=np.uint8)
         synthetic_depth = np.zeros((480, 640), dtype=np.float32)
         synthetic_pose = np.eye(4)
-        for _ in range(args.pre_warm_frames):
-            run_s2_background(synthetic_image, synthetic_depth, synthetic_pose,
-                              "pre-warm", args.camera_intrinsic)
+        print(f"[Server] Gate 3c pre-warm: running {args.pre_warm_frames} synchronous warm-up inferences...")
+        for i in range(args.pre_warm_frames):
+            try:
+                agent.step(synthetic_image, synthetic_depth, synthetic_pose,
+                           "pre-warm", args.camera_intrinsic)
+                print(f"[Server] Gate 3c pre-warm: frame {i+1}/{args.pre_warm_frames} done")
+            except Exception as e:
+                print(f"[Server] Gate 3c pre-warm: frame {i+1} error (non-fatal): {e}")
+        # Reset agent state: clears KV cache + history contaminated by zero-frame inputs.
+        # CUDA compiled kernels remain cached (warmup preserved), only Python-level
+        # state is cleared so the first real frame gets an unbiased S2 output.
+        agent.reset()
         with async_metrics_lock:
             async_metrics["pre_warm_frames_queued"] = args.pre_warm_frames
-        print(f"[Server] Gate 3c pre-warm: queued {args.pre_warm_frames} synthetic S2 frames")
+        print(f"[Server] Gate 3c pre-warm: CUDA warmed + agent reset (clean state)")
+        # Async thread starts NOW, after prewarm — CUDA hot, agent state clean.
+    if args.mode == 'async':
+        ensure_async_thread()
 
-    app.run(host='0.0.0.0', port=5802)
+    app.run(host='0.0.0.0', port=args.port)

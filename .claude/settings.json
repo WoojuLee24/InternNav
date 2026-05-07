@@ -4,14 +4,67 @@
       "Bash(git diff*)",
       "Bash(git log*)",
       "Bash(git status*)",
+      "Bash(git branch*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
       "Bash(pytest tests/*)",
       "Bash(nvidia-smi)",
-      "Bash(ros2 topic*)"
+      "Bash(ros2 topic*)",
+      "Bash(ros2 bag*)",
+      "Bash(cat *)",
+      "Bash(grep*)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(find *)",
+      "Bash(ls *)",
+      "Bash(date*)",
+      "Bash(wc *)",
+      "Bash(docker ps*)",
+      "Bash(docker stats*)",
+      "Bash(docker logs*)",
+      "Bash(docker exec*)",
+      "Bash(python scripts/realworld/http_internvla_server*)",
+      "Bash(python3.12 scripts/realworld/http_internvla_client*)"
     ],
     "deny": [
       "Bash(git push --force*)",
       "Bash(git reset --hard*)",
-      "Bash(rm -rf*)"
+      "Bash(rm -rf*)",
+      "Bash(docker rm*)",
+      "Bash(docker rmi*)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/session-stop.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/perf-detect.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/context-inject.sh"
+          }
+        ]
+      }
     ]
   }
 }
