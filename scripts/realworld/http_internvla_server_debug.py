@@ -75,6 +75,22 @@ _max_hold_frames = 10  # Forced refresh threshold; tuned per experiment
 # True = default (action-aware); False = disabled for ablation condition 3.
 _action_aware_enabled = True
 
+# I-049: Adaptive max_hold (Gate 3e)
+# In stable scenes (bag 073623), I-047 monopolizes all forced bypasses and
+# resets I-046 after each (one-shot semantics). This causes V>0.10 on stable
+# bags. Adaptive max_hold tracks recent similarity variance and decreases
+# max_hold when scenes are stable, allowing natural diversity to emerge.
+# Window of recent cosine similarities for adaptation.
+_adaptive_max_hold_enabled = False  # Off by default; enable via endpoint
+_similarity_window = []             # Rolling window of recent sim values
+_ADAPTIVE_WINDOW_SIZE = 20          # Frames to average over
+_ADAPTIVE_MAX_HOLD_MIN = 3          # Floor: never lower than 3 forced per cycle
+_ADAPTIVE_MAX_HOLD_MAX = 25         # Ceiling: never exceed 25 frames between refresh
+# Variance thresholds: below low_var → stable scene → reduce max_hold
+# above high_var → dynamic scene → increase max_hold
+_ADAPTIVE_VAR_LOW = 0.0002          # Below this: very stable → max_hold=5
+_ADAPTIVE_VAR_HIGH = 0.001          # Above this: dynamic → max_hold=15
+
 def _image_fingerprint(rgb):
     """32x32 grayscale, raw pixel values 0-255 (no normalization).
     Returns a 1D float32 vector or None if input is unusable.
@@ -169,11 +185,12 @@ async_metrics_lock = threading.Lock()
 
 
 def reset_dual_metrics():
-    global _last_fresh_was_action, _consecutive_skip_count, _last_fingerprint
+    global _last_fresh_was_action, _consecutive_skip_count, _last_fingerprint, _similarity_window
     with temporal_cache_lock:
         _last_fresh_was_action = False
         _consecutive_skip_count = 0
         _last_fingerprint = None
+        _similarity_window.clear()  # I-049: reset adaptive window on metrics reset
     with async_metrics_lock:
         async_metrics["start_time"] = time.time()
         async_metrics["http_requests"] = 0
@@ -225,6 +242,7 @@ def async_continuous_loop():
             # === Phase 3 Task #9 v2: Action-aware temporal cache gate ===
             # I-046: never skip if last fresh output was a discrete action
             # I-047: never skip more than _max_hold_frames consecutively
+            # I-049: adaptive max_hold based on scene stability (Gate 3e)
             # else: standard MAD-based similarity gate
             with temporal_cache_lock:
                 threshold = temporal_cache_threshold
@@ -232,8 +250,24 @@ def async_continuous_loop():
                 skip_count = _consecutive_skip_count
                 max_hold = _max_hold_frames
                 action_aware_on = _action_aware_enabled
+                adaptive_on = _adaptive_max_hold_enabled
             was_forced_bypass = False
             if threshold > 0.0:
+                # I-049: compute adaptive max_hold if enabled
+                if adaptive_on and len(_similarity_window) >= _ADAPTIVE_WINDOW_SIZE:
+                    sim_var = float(np.var(_similarity_window[-_ADAPTIVE_WINDOW_SIZE:]))
+                    if sim_var < _ADAPTIVE_VAR_LOW:
+                        # Very stable scene — reduce max_hold to force more diversity
+                        adaptive_mh = _ADAPTIVE_MAX_HOLD_MIN
+                    elif sim_var > _ADAPTIVE_VAR_HIGH:
+                        # Dynamic scene — relax max_hold
+                        adaptive_mh = _ADAPTIVE_MAX_HOLD_MAX
+                    else:
+                        # Interpolate linearly between min and 10 (static default)
+                        t = (sim_var - _ADAPTIVE_VAR_LOW) / (_ADAPTIVE_VAR_HIGH - _ADAPTIVE_VAR_LOW)
+                        adaptive_mh = int(_ADAPTIVE_MAX_HOLD_MIN + t * (10 - _ADAPTIVE_MAX_HOLD_MIN))
+                    max_hold = adaptive_mh
+
                 forced = None
                 if action_aware_on and last_was_action:
                     forced = "action_aware_bypasses"  # I-046
@@ -253,6 +287,11 @@ def async_continuous_loop():
                     fp = _image_fingerprint(image)
                     if fp is not None and _last_fingerprint is not None:
                         sim = _cosine_sim(fp, _last_fingerprint)
+                        # I-049: track similarity for adaptive max_hold window
+                        if adaptive_on:
+                            _similarity_window.append(sim)
+                            if len(_similarity_window) > _ADAPTIVE_WINDOW_SIZE * 2:
+                                del _similarity_window[:-_ADAPTIVE_WINDOW_SIZE]
                         if sim >= threshold:
                             with async_metrics_lock:
                                 async_metrics["temporal_cache_skips"] = async_metrics.get("temporal_cache_skips", 0) + 1
@@ -756,6 +795,10 @@ def get_async_metrics():
         "max_hold_bypasses": m.get("max_hold_bypasses", 0),
         "max_hold_frames": _max_hold_frames,
         "action_aware_enabled": _action_aware_enabled,
+        # I-049: adaptive max_hold (Gate 3e)
+        "adaptive_max_hold_enabled": _adaptive_max_hold_enabled,
+        "adaptive_sim_window_size": len(_similarity_window),
+        "adaptive_sim_variance": float(np.var(_similarity_window[-_ADAPTIVE_WINDOW_SIZE:])) if len(_similarity_window) >= _ADAPTIVE_WINDOW_SIZE else None,
 
         # Gate 3c (I-010): cold-start diagnostics
         "waiting_responses": m.get("waiting_responses", 0),
@@ -817,6 +860,23 @@ def set_action_aware_endpoint():
         if not enabled:
             _last_fresh_was_action = False
     return jsonify({'status': 'ok', 'action_aware_enabled': enabled})
+
+
+@app.route("/set_adaptive_max_hold", methods=['POST', 'GET'])
+def set_adaptive_max_hold_endpoint():
+    """I-049 (Gate 3e): Toggle adaptive max_hold based on scene stability.
+    When enabled, max_hold automatically adjusts: low in stable scenes (so I-046
+    can fire), high in dynamic scenes (to avoid excess S2 invocations).
+    ?enabled=true|false
+    """
+    global _adaptive_max_hold_enabled, _similarity_window
+    enabled_str = request.args.get('enabled', 'true').lower()
+    enabled = enabled_str in ('1', 'true', 'yes', 'on')
+    with temporal_cache_lock:
+        _adaptive_max_hold_enabled = enabled
+        if not enabled:
+            _similarity_window.clear()
+    return jsonify({'status': 'ok', 'adaptive_max_hold_enabled': enabled})
 
 
 def annotate_image(idx, image, llm_output, trajectory, pixel_goal, output_dir, filename):
