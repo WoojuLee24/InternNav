@@ -4,8 +4,8 @@ _Last updated: 2026-05-08 · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
- Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 4
-  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   📋 READY  📋 BLOCKED
+ Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 4
+  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   📋 DESIGN  📋 BLOCKED
 ```
 
 ---
@@ -279,9 +279,9 @@ Result: 91% skip, V_worst=0.0093, hz=11.1-12.2
 
 ---
 
-## 📋 Gate 3h — Trajectory-Length-Adaptive Max Hold (I-051)
+## ❌ Gate 3h — Trajectory-Length-Adaptive Max Hold (I-051)
 
-**Status**: READY — implementation complete, experiment not yet run.
+**Status**: FAIL — experiment complete 2026-05-08. See analysis below.
 
 **Hypothesis**: Setting `max_hold = min(cap, len(trajectory) * M)` dynamically increases
 skip% beyond 91% while maintaining V ≤ 0.10. Long plans (6+ waypoints) are held for
@@ -300,7 +300,72 @@ skip% beyond 91% while maintaining V ≤ 0.10. Long plans (6+ waypoints) are hel
 **Theoretical prediction** (if avg trajectory length = 4 waypoints, M=7):
 - avg max_hold = 4 × 7 = 28 frames → skip% ≈ 1 - 1/28 ≈ 96%
 
-**Note**: Run after Gate 3g completes (server is shared). Uses new `/set_trajectory_adaptive_hold` endpoint.
+**Results**:
+| Condition | eff. H | 073623 skip% | 061841 skip% | 063047 skip% | 073623 ar% | V_073623 | verdict |
+|-----------|--------|-------------|-------------|-------------|-----------|----------|---------|
+| BASELINE  | 10     | 88.4%       | 86.9%       | 88.2%       | 35.9%     | ref      | ref     |
+| TRAJ_M5   | 50     | 96.6%       | 96.7%       | 96.5%       | 22.2%     | ~0.13    | ❌ FAIL |
+| TRAJ_M7   | 50     | 96.5%       | 96.8%       | 96.5%       | 25.0%     | ~0.10    | ❌ FAIL |
+| TRAJ_M10  | 70     | 97.5%       | 97.3%       | ~97%        | 0.0%!     | ≫0.10   | ❌ FAIL |
+
+**Root cause: fixed-length model output.**
+InternVLA-N1 always outputs 33-waypoint trajectories (avg_traj_len=33.0 for ALL conditions).
+I-051's equation degenerates: min(50, 33×5) = 50, min(50, 33×7) = 50, min(70, 33×10) = 70.
+The "adaptive" hold is a constant cap — no actual adaptation occurs.
+At cap=50-70, action_rate collapses on bag 073623 (stable scene): AA drops from 27 to 0-6,
+and action_rate drops from 35.9% to 0-25%, causing V > 0.10.
+
+**Design lesson**: Plan length ≠ plan consumption. The correct signal is the robot's position
+along the trajectory (how many waypoints have been "consumed"). I-051v2 uses HTTP serve count
+as a proxy for plan consumption.
+
+**Next gate**: Gate 3i — I-051v2 request-count-adaptive hold, or skip to Gate 4.
+
+---
+
+## 📋 Gate 3i — Request-Count-Adaptive Hold (I-051v2)
+
+**Status**: DESIGN ONLY — not yet implemented.
+
+**Motivation**: Gate 3h (I-051) revealed that plan-length-based adaptation degenerates
+for fixed-length model outputs (always 33 waypoints). The correct consumption signal
+is "how many HTTP responses have served the current cached trajectory" — each response
+represents one robot control step consuming the plan.
+
+**Design (I-052)**:
+```python
+# Global state
+_traj_serve_count = 0          # HTTP responses serving current cached traj
+_serve_hold_threshold = 15     # force refresh after N serve cycles (configurable)
+_serve_count_bypass = False    # enable/disable I-052
+
+# In eval_dual_async (HTTP handler, after reading cache):
+if cached_traj is not None:
+    with temporal_cache_lock:
+        _traj_serve_count += 1   # increment per serve
+
+# In async_continuous_loop (background thread, before similarity check):
+if serve_count_bypass and _traj_serve_count >= serve_threshold:
+    forced = "serve_count_bypasses"  # I-052
+    was_i052_bypass = True
+    with temporal_cache_lock:
+        _traj_serve_count = 0
+
+# Reset serve_count when cache is updated by background thread:
+# (in the async_cache_lock block where async_cached_trajectory is written)
+_traj_serve_count = 0
+```
+
+**Pass criterion**: V ≤ 0.10 all 3 bags; equivalent or better skip% than Gate 3g (MH=15)
+
+**Note**: This approach is independent of trajectory length — the serve count directly
+measures robot step consumption regardless of model output format. It works correctly
+even for fixed-length trajectory outputs.
+
+**Comparison with I-047**: I-052 is similar to I-047 but counts HTTP serve cycles
+rather than background loop skip iterations. In the current architecture (1:1 HTTP→queue),
+they are equivalent. I-052 would be superior in architectures where multiple HTTP requests
+arrive per background iteration (e.g., batched inference).
 
 ---
 

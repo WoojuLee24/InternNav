@@ -100,6 +100,17 @@ _traj_adaptive_hold_enabled = False
 _traj_adaptive_hold_multiplier = 7   # frames to hold per cached waypoint
 _traj_adaptive_hold_cap = 50         # hard upper cap to prevent unbounded hold
 
+# I-052: Request-Count-Adaptive Hold (Gate 3i, I-051v2)
+# Counts HTTP responses that served the current cached trajectory.
+# Each serve represents one robot control step consuming the plan.
+# Force S2 refresh after _serve_hold_threshold consecutive serve cycles.
+# Unlike I-051, this is independent of trajectory length and works correctly
+# for fixed-length model outputs (e.g., InternVLA-N1's 33-waypoint decoder).
+_serve_count_bypass_enabled = False
+_serve_hold_threshold = 15          # force refresh after N serve cycles
+_traj_serve_count = 0               # HTTP responses serving current cached traj
+_serve_count_lock = threading.Lock()
+
 def _image_fingerprint(rgb):
     """32x32 grayscale, raw pixel values 0-255 (no normalization).
     Returns a 1D float32 vector or None if input is unusable.
@@ -226,6 +237,7 @@ def reset_dual_metrics():
         async_metrics["waiting_responses"] = 0
         async_metrics["traj_lengths_sum"] = 0
         async_metrics["traj_lengths_count"] = 0
+        async_metrics["serve_count_bypasses"] = 0
         # pre_warm_frames_queued is NOT reset here — it's a server-lifetime counter
 
 def async_continuous_loop():
@@ -265,9 +277,14 @@ def async_continuous_loop():
                 traj_adaptive_on = _traj_adaptive_hold_enabled
                 traj_adaptive_multiplier = _traj_adaptive_hold_multiplier
                 traj_adaptive_cap = _traj_adaptive_hold_cap
+            with _serve_count_lock:
+                serve_count = _traj_serve_count
+                serve_bypass_on = _serve_count_bypass_enabled
+                serve_threshold = _serve_hold_threshold
             was_forced_bypass = False
             was_i046_bypass = False  # I-050: track bypass type for flag propagation
             was_i047_bypass = False
+            was_i052_bypass = False
             if threshold > 0.0:
                 # I-049: compute adaptive max_hold if enabled
                 if adaptive_on and len(_similarity_window) >= _ADAPTIVE_WINDOW_SIZE:
@@ -291,6 +308,11 @@ def async_continuous_loop():
                 elif skip_count >= max_hold:
                     forced = "max_hold_bypasses"  # I-047
                     was_i047_bypass = True
+                elif serve_bypass_on and serve_count >= serve_threshold:
+                    forced = "serve_count_bypasses"  # I-052
+                    was_i052_bypass = True
+                    with _serve_count_lock:
+                        _traj_serve_count = 0
                 if forced is not None:
                     was_forced_bypass = True
                     # Forced refresh: skip the similarity check entirely
@@ -359,6 +381,9 @@ def async_continuous_loop():
                         async_cached_trajectory = dual_output.output_trajectory.tolist()
                         async_cached_action = None  # Clear action when trajectory
                         fresh_was_traj = True
+                        # I-052: reset serve count when cache is refreshed
+                        with _serve_count_lock:
+                            _traj_serve_count = 0
 
             # I-051: trajectory-length-adaptive max_hold
             # After trajectory is cached, update max_hold based on plan richness.
@@ -675,8 +700,14 @@ def eval_dual_async():
                 async_metrics["s2_discrete_outputs"] = async_metrics.get("s2_discrete_outputs", 0) + 1
 
         if cached_traj is not None:
+            # I-052: count HTTP responses serving current cached trajectory
+            with _serve_count_lock:
+                _traj_serve_count += 1
             json_output = {'trajectory': cached_traj}
         elif cached_action is not None:
+            # Reset serve count when action is served (plan consumed to decision point)
+            with _serve_count_lock:
+                _traj_serve_count = 0
             json_output = {'discrete_action': cached_action}
         else:
             # Gate 3c (I-010): track cold-start "waiting" responses
@@ -835,6 +866,12 @@ def get_async_metrics():
         "adaptive_sim_window_size": len(_similarity_window),
         "adaptive_sim_variance": float(np.var(_similarity_window[-_ADAPTIVE_WINDOW_SIZE:])) if len(_similarity_window) >= _ADAPTIVE_WINDOW_SIZE else None,
 
+        # I-052: request-count-adaptive hold (Gate 3i)
+        "serve_count_bypass_enabled": _serve_count_bypass_enabled,
+        "serve_hold_threshold": _serve_hold_threshold,
+        "traj_serve_count": _traj_serve_count,
+        "serve_count_bypasses": m.get("serve_count_bypasses", 0),
+
         # I-051: trajectory-length-adaptive max_hold (Gate 3h)
         "traj_adaptive_hold_enabled": _traj_adaptive_hold_enabled,
         "traj_adaptive_hold_multiplier": _traj_adaptive_hold_multiplier,
@@ -945,6 +982,30 @@ def set_trajectory_adaptive_hold_endpoint():
         'traj_adaptive_hold_enabled': enabled,
         'traj_adaptive_hold_multiplier': multiplier,
         'traj_adaptive_hold_cap': cap,
+    })
+
+
+@app.route("/set_serve_count_hold", methods=['POST', 'GET'])
+def set_serve_count_hold_endpoint():
+    """I-052 (Gate 3i): Toggle request-count-adaptive hold.
+    When enabled, force S2 refresh after _serve_hold_threshold consecutive
+    HTTP responses serving the same cached trajectory.  This measures plan
+    consumption by robot control steps rather than background-loop skip count,
+    making it independent of model trajectory length.
+    GET ?enabled=true|false&threshold=15"""
+    global _serve_count_bypass_enabled, _serve_hold_threshold, _traj_serve_count
+    enabled_str = request.args.get('enabled', 'true').lower()
+    enabled = enabled_str in ('1', 'true', 'yes', 'on')
+    threshold = int(request.args.get('threshold', _serve_hold_threshold))
+    threshold = max(1, min(10000, threshold))
+    with _serve_count_lock:
+        _serve_count_bypass_enabled = enabled
+        _serve_hold_threshold = threshold
+        _traj_serve_count = 0
+    return jsonify({
+        'status': 'ok',
+        'serve_count_bypass_enabled': enabled,
+        'serve_hold_threshold': threshold,
     })
 
 
