@@ -277,14 +277,10 @@ real camera frames — deployment procedure: robot holds still 2–3s at startup
 | **Phase 2** | **Task #5: Review enhanced agent** | **✅ DONE — Gate 2a FAIL (4/5 stubs)** |
 | Phase 2 | Task #6: Connect to server | ⛔ blocked by Gate 2a fail (would regress Gate 0) |
 | Phase 2 | Task #7: 3-bag benchmark | ⛔ blocked by #6 |
-| **Phase 3** | **Task #9: Temporal S2 caching** | **✅ DONE — Gate 3b PASS @ 0.95 / 0.99** |
-| **Phase 3** | **Task #8: Adaptive plan_step_gap** | **✅ START HERE (recommended next)** |
-| **Phase 3** | **Task #10: Cold-Start Pre-Fetch** | **✅ DONE — Gate 3c PASS** |
-| Phase 3 followup | 3-bag temporal cache verification | ✅ unlocked (cross-bag check) |
-| Phase 2 | Task #6: Connect to server | ⛔ needs #5 |
-| Phase 2 | Task #7: 3-bag benchmark | ⛔ needs #6 |
-| Phase 3 | Tasks #8 #9 #10 (parallel) | ⛔ needs #7 |
-| Phase 4 | Task #11: Benchmark validation | ⛔ needs #8+#9+#10 |
+| **Phase 3** | **Task #8: Adaptive plan_step_gap** | **✅ SUPERSEDED by Gate 3b (temporal cache achieves adaptive scheduling)** |
+| **Phase 3** | **Task #9: Temporal S2 caching** | **✅ DONE — Gate 3b PASS @ thr=0.92, V<0.10 all 3 bags** |
+| **Phase 3** | **Task #10: Cold-Start Pre-Fetch** | **✅ DONE — Gate 3c PASS — 38.2% reduction, V=0.091** |
+| Phase 4 | Task #11: Benchmark validation | ⛔ BLOCKED — Habitat + R2R data not installed |
 | Phase 5 | Task #12: Distillation | ⛔ needs #11 |
 
 ---
