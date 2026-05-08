@@ -4,8 +4,8 @@ _Last updated: 2026-05-08 · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
- Gate 0  ────  Gate 1  ────  Gate 2  ────  Gate 3a  ────  Gate 3b  ────  Gate 3c  ────  Gate 3d  ────  Gate 3e  ────  Gate 4
-  ✅ PASS      ✅ PASS      ⚠️ FAIL       📋 SKIP       ✅ PASS       ✅ PASS      ⚠️ COND.      🔄 ACTIVE     📋 BLOCKED
+ Gate 0  ────  Gate 1  ────  Gate 2  ────  Gate 3a  ────  Gate 3b  ────  Gate 3c  ────  Gate 3d  ────  Gate 3e  ────  Gate 3f  ────  Gate 4
+  ✅ PASS      ✅ PASS      ⚠️ FAIL       📋 SKIP       ✅ PASS       ✅ PASS      ⚠️ COND.      ❌ FAIL       🔄 ACTIVE     📋 BLOCKED
 ```
 
 ---
@@ -159,16 +159,67 @@ natural crossings produce action outputs → I-046 fires (AA=5/19) → V≤0.10.
 
 ---
 
-## 🔄 Gate 3e — Adaptive max_hold (I-049)
+## ❌ Gate 3e — Adaptive max_hold (I-049) — FAIL
 
-**Hypothesis**: If max_hold dynamically adjusts to scene stability (higher in stable
-scenes, lower in dynamic scenes), then I-046 will contribute more uniformly and
-V≤0.10 on all bags.  
-**Script**: TBD — implement `/set_adaptive_max_hold?enabled={true|false}` endpoint.  
-**Gate 3e criteria**:
-- V(A vs D_adaptive) ≤ 0.10 on ALL 3 bags (including stable bag 073623)
-- AA > 0 on bag 073623 (I-046 now active in stable scenes)
-- S2 reduction ≥ 70% (maintained or improved)
+**Completed**: 2026-05-08  
+**Hypothesis**: If max_hold dynamically adjusts to scene stability, I-046 fires more
+uniformly and V≤0.10 on all bags including stable bag 073623.
+
+**Results (D vs D_adaptive)**:
+| Bag | D bg_s2 | D_adap bg_s2 | D skip% | D_adap skip% | D_adap AA | Cramér's V | Verdict |
+|-----|---------|--------------|---------|-------------|-----------|-----------|---------|
+| 073623 | 130 | 256 | 90.3% | 75.4% | 2 | **0.1048** | ❌ FAIL |
+| 061841 | 620 | 1252 | 90.7% | 75.3% | 2 | 0.0635 | ✅ PASS |
+| 063047 | 578 | 1113 | 90.4% | 75.3% | 9 | 0.0733 | ✅ PASS |
+
+**Failure analysis**:
+1. `sim_variance ≈ 0.000000` on all bags (including dynamic ones!) → adaptive logic
+   always falls below `_ADAPTIVE_VAR_LOW=0.0002` → max_hold always set to MIN=3
+2. Consequence: S2 runs ~3× more often (bg increased 130→256 on stable bag), but skip%
+   only 75% vs 90% in condition D — reducing efficiency without fixing quality
+3. AA=2 on bag 073623 (criterion met), but action distribution still biased (V=0.1048)
+4. S2 reduction vs A: only ~44% on all bags — well below 70% criterion
+
+**Why sim_variance is near-zero**: The similarity window is only populated at natural
+cosine-gate crossings (frames below threshold), which are already rare at τ=0.92.
+The few boundary frames captured have similar sim values, making their variance tiny.
+The adaptive logic therefore cannot distinguish stable from dynamic scenes using this signal.
+
+**Root cause (fundamental)**: The I-046/I-047 interaction is NOT solved by adaptive
+max_hold. The real issue is `_last_fresh_was_action = False if was_forced_bypass else fresh_was_action`
+which resets the flag after BOTH I-046 and I-047 bypasses. Even with max_hold=3,
+every I-047 cycle resets the flag before I-046 can fire meaningfully.
+
+**Decision**: FAIL. Motivates Gate 3f — fix the flag propagation logic directly.
+
+---
+
+## 🔄 Gate 3f — I-046/I-047 Flag Propagation Fix (I-050)
+
+**Hypothesis**: If I-047 forced bypasses do NOT reset `_last_fresh_was_action` (only
+I-046 resets it), then after I-047 produces an action output I-046 fires on the next
+frame — restoring the action distribution on stable bag 073623 while maintaining 70%
+S2 reduction.
+
+**The fix** (one line change in `async_continuous_loop`):
+```python
+# BEFORE (Gate 3d/3e):
+_last_fresh_was_action = False if was_forced_bypass else fresh_was_action
+
+# AFTER (Gate 3f):
+if was_i046_bypass:
+    _last_fresh_was_action = False        # I-046: one-shot, reset
+else:
+    _last_fresh_was_action = fresh_was_action  # I-047 or natural: propagate
+```
+
+**Gate 3f criteria**:
+- V(A vs D_3f) ≤ 0.10 on ALL 3 bags (including stable bag 073623)
+- AA > 0 on bag 073623
+- S2 reduction ≥ 60% on all bags (slightly relaxed vs 70% — I-046 adds some extra runs)
+- Max-hold config unchanged: max_hold=10, threshold=0.92
+
+**Script**: `scripts/realworld/gate3f_flag_propagation.sh`
 
 ---
 

@@ -252,6 +252,8 @@ def async_continuous_loop():
                 action_aware_on = _action_aware_enabled
                 adaptive_on = _adaptive_max_hold_enabled
             was_forced_bypass = False
+            was_i046_bypass = False  # I-050: track bypass type for flag propagation
+            was_i047_bypass = False
             if threshold > 0.0:
                 # I-049: compute adaptive max_hold if enabled
                 if adaptive_on and len(_similarity_window) >= _ADAPTIVE_WINDOW_SIZE:
@@ -271,8 +273,10 @@ def async_continuous_loop():
                 forced = None
                 if action_aware_on and last_was_action:
                     forced = "action_aware_bypasses"  # I-046
+                    was_i046_bypass = True
                 elif skip_count >= max_hold:
                     forced = "max_hold_bypasses"  # I-047
+                    was_i047_bypass = True
                 if forced is not None:
                     was_forced_bypass = True
                     # Forced refresh: skip the similarity check entirely
@@ -353,16 +357,19 @@ def async_continuous_loop():
                 elif fresh_was_action:
                     async_metrics["fresh_action_outputs"] = async_metrics.get("fresh_action_outputs", 0) + 1
 
-            # I-046: track last fresh output type for next-iteration gate decision.
-            # After a forced bypass (I-046 or I-047), reset to False: one-shot
-            # semantics — the fresh output is now in the cache; cosine gating
-            # can replay it for similar frames without re-triggering the bypass.
-            # When _action_aware_enabled=False (ablation), never set this flag.
+            # I-050 (Gate 3f): track last fresh output type for next-iteration gate.
+            # I-046 bypass: one-shot semantics — reset flag so it doesn't re-trigger.
+            # I-047 bypass: propagate actual output type — if S2 produced an action
+            #   during an I-047 cycle, I-046 should fire on the next frame to refresh.
+            #   This fixes the Gate 3d/3e bug where I-047 monopolized stable-scene
+            #   bypasses and suppressed I-046 entirely (AA=0, V=0.17 on bag 073623).
             with temporal_cache_lock:
                 if not _action_aware_enabled:
                     _last_fresh_was_action = False
+                elif was_i046_bypass:
+                    _last_fresh_was_action = False   # I-046 one-shot: reset after firing
                 else:
-                    _last_fresh_was_action = False if was_forced_bypass else fresh_was_action
+                    _last_fresh_was_action = fresh_was_action  # I-047 or natural crossing
             
             s2_request_queue.task_done()
             
