@@ -304,9 +304,9 @@ skip% beyond 91% while maintaining V ≤ 0.10. Long plans (6+ waypoints) are hel
 | Condition | eff. H | 073623 skip% | 061841 skip% | 063047 skip% | 073623 ar% | V_073623 | verdict |
 |-----------|--------|-------------|-------------|-------------|-----------|----------|---------|
 | BASELINE  | 10     | 88.4%       | 86.9%       | 88.2%       | 35.9%     | ref      | ref     |
-| TRAJ_M5   | 50     | 96.6%       | 96.7%       | 96.5%       | 22.2%     | ~0.13    | ❌ FAIL |
-| TRAJ_M7   | 50     | 96.5%       | 96.8%       | 96.5%       | 25.0%     | ~0.10    | ❌ FAIL |
-| TRAJ_M10  | 70     | 97.5%       | 97.3%       | ~97%        | 0.0%!     | ≫0.10   | ❌ FAIL |
+| TRAJ_M5   | 50     | 96.6%       | 96.7%       | 96.5%       | 22.2%     | 0.1288   | ❌ FAIL |
+| TRAJ_M7   | 50     | 96.5%       | 96.8%       | 96.5%       | 25.0%     | 0.1031   | ❌ FAIL |
+| TRAJ_M10  | 70     | 97.5%       | 97.3%       | 97.3%       | 0.0%!     | 0.3228   | ❌ FAIL |
 
 **Root cause: fixed-length model output.**
 InternVLA-N1 always outputs 33-waypoint trajectories (avg_traj_len=33.0 for ALL conditions).
