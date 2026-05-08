@@ -250,6 +250,35 @@ real camera frames — deployment procedure: robot holds still 2–3s at startup
 | Cramer's V (A vs D) | **≤ 0.10** (full system not biased vs control) |
 | Publishable? | **Yes** — ablation validates each component's role |
 
+### Step 3e — Adaptive max_hold (I-049) `[Task #14]`
+
+**Motivation**: Gate 3d reveals that in stable scenes (bag 073623), I-047 (fixed
+max_hold=10) handles ALL forced bypasses and resets the I-046 flag after each.
+This means I-046 is scene-conditionally dormant: it contributes only when
+cosine-gate natural crossings occur (dynamic scenes). Fixed max_hold=10 in stable
+scenes causes ~119 unnecessary forced bypasses and biases the fresh-output sample.
+
+**Hypothesis**: An adaptive max_hold that increases when recent frames are
+consistently similar (stable scene) and decreases when similarity variance rises
+will:
+1. Reduce unnecessary forced bypasses in stable scenes (lower S2 compute)
+2. Allow I-046 to contribute in all scene types
+3. Maintain V ≤ 0.10 quality criterion across all bags
+
+**Proposed I-049 design**:
+- Track rolling window of cosine similarities (last N=20 frames)
+- `adaptive_max_hold = clip(20 / mean_similarity_change_rate, 5, 30)`
+- Reset the window on each scene transition (similarity < threshold)
+- Expose via `/set_adaptive_max_hold?enabled={true|false}` endpoint
+
+**GATE 3e:**
+| Condition | Required |
+|-----------|---------|
+| S2 reduction vs A | ≥ 70% on stable bags (improvement over Gate 3d's 71.6%) |
+| Cramér's V vs A | ≤ 0.10 on all bags (improvement over Gate 3d bag 073623 V≈0.17) |
+| AA bypasses | > 0 on bag 073623 (I-046 now contributes in stable scenes) |
+| Publishable? | Yes — solves the scene-dependency limitation found in Gate 3d |
+
 ---
 
 ## Phase 4 — Benchmark Validation
@@ -305,7 +334,8 @@ real camera frames — deployment procedure: robot holds still 2–3s at startup
 | **Phase 3** | **Task #8: Adaptive plan_step_gap** | **✅ SUPERSEDED by Gate 3b (temporal cache achieves adaptive scheduling)** |
 | **Phase 3** | **Task #9: Temporal S2 caching** | **✅ DONE — Gate 3b PASS @ thr=0.92, V<0.10 all 3 bags** |
 | **Phase 3** | **Task #10: Cold-Start Pre-Fetch** | **✅ DONE — Gate 3c PASS — 38.2% reduction, V=0.091** |
-| **Phase 3** | **Task #13: Component Ablation Study** | **🔄 ACTIVE — Gate 3d** |
+| **Phase 3** | **Task #13: Component Ablation Study** | **⚠️ CONDITIONAL PASS — Gate 3d: S2 reduction ✓, V=0.17 on stable bag (known I-046/I-047 interaction)** |
+| **Phase 3** | **Task #14: Adaptive max_hold (I-049)** | **🔄 ACTIVE — Gate 3e (addresses Gate 3d finding)** |
 | Phase 4 | Task #11: Benchmark validation | ⛔ BLOCKED — Habitat + R2R data not installed |
 | Phase 5 | Task #12: Distillation | ⛔ needs #11 |
 

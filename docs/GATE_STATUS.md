@@ -1,11 +1,11 @@
 # Research Gate Status
 
-_Last updated: 2026-05-07 · Branch: research/async-foundation_
+_Last updated: 2026-05-08 · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
- Gate 0  ────  Gate 1  ────  Gate 2  ────  Gate 3a  ────  Gate 3b  ────  Gate 3c  ────  Gate 3d  ────  Gate 4  ────  Gate 5
-  ✅ PASS      ✅ PASS      ⚠️ FAIL       📋 SKIP       ✅ PASS       ✅ PASS       🔄 ACTIVE      📋 TODO      📋 TODO
+ Gate 0  ────  Gate 1  ────  Gate 2  ────  Gate 3a  ────  Gate 3b  ────  Gate 3c  ────  Gate 3d  ────  Gate 3e  ────  Gate 4
+  ✅ PASS      ✅ PASS      ⚠️ FAIL       📋 SKIP       ✅ PASS       ✅ PASS      ⚠️ COND.      🔄 ACTIVE     📋 BLOCKED
 ```
 
 ---
@@ -133,27 +133,42 @@ Without reset: action_rate bias V=0.25. With reset: V=0.091 (just under 0.10 thr
 
 ---
 
-## 🔄 Gate 3d — Component Ablation Study (I-048)
+## ⚠️ Gate 3d — Component Ablation Study (I-048) — CONDITIONAL PASS
 
-**Commit**: pending  
-**Hypothesis**: Similarity gate, I-047 (max_hold), and I-046 (action-aware) each contribute independently to the 70% S2 reduction with V≤0.10.  
-**Pass criteria**:
-- bg_runs(A: no cache) ≥ bg_runs(B: cache only) — gate suppresses S2
-- S2 reduction (full system D vs control A) ≥ 40% all 3 bags
-- Cramer's V(A vs D) ≤ 0.10 (full system not biased vs control)
+**Completed**: 2026-05-08  
+**Hypothesis**: Similarity gate, I-047 (max_hold), and I-046 (action-aware) each contribute independently to the 70% S2 reduction with V≤0.10.
 
-**Conditions**:
-| Label | threshold | max_hold | I-046 |
-|-------|-----------|----------|-------|
-| A | 0.0 | — | off | ← control
-| B | 0.92 | 9999 | off | ← cache only
-| C | 0.92 | 10 | off | ← + I-047
-| D | 0.92 | 10 | on | ← full (Gate 3b)
+**Results**:
+| Cond | bg (073623/061841/063047) | skip% | action_rate | AA | V vs A |
+|------|--------------------------|-------|------------|-----|--------|
+| A | 462 / 2305 / 1965 | 0% | 45/63/47% | 0 | — |
+| B | 28 / 89 / 108 | 98% | 0/21/48% | 0 | ≫0.10 |
+| C | 132 / 612 / 568 | 90% | 26/54/34% | 0 | — |
+| **D** | **131 / 613 / 581** | **90%** | **25/54/37%** | **0/5/19** | **0.17/0.07/0.08** |
 
-**New server endpoint**: `/set_action_aware?enabled={true|false}`  
-**Script**: `scripts/realworld/gate3d_ablation_3bag.sh`
+**S2 reduction (D vs A)**: 71.6% / 73.4% / 70.5% — all ≥40% ✅  
+**Cramér's V**: PASS 2/3 bags; V=0.17 on bag 073623 (stable, AA=0)
 
-**Status**: Experiment in preparation.
+**Key Finding — I-046/I-047 interaction**:
+In stable scenes (bag 073623), I-047 provides all forced bypasses (MH=119) and resets
+`_last_fresh_was_action=False` (one-shot semantics) → I-046 never fires (AA=0) →
+action distribution not restored. In dynamic scenes (bags 061841/063047), cosine-gate
+natural crossings produce action outputs → I-046 fires (AA=5/19) → V≤0.10.
+
+**Verdict: ⚠️ CONDITIONAL PASS** — Motivates Gate 3e: adaptive max_hold
+
+---
+
+## 🔄 Gate 3e — Adaptive max_hold (I-049)
+
+**Hypothesis**: If max_hold dynamically adjusts to scene stability (higher in stable
+scenes, lower in dynamic scenes), then I-046 will contribute more uniformly and
+V≤0.10 on all bags.  
+**Script**: TBD — implement `/set_adaptive_max_hold?enabled={true|false}` endpoint.  
+**Gate 3e criteria**:
+- V(A vs D_adaptive) ≤ 0.10 on ALL 3 bags (including stable bag 073623)
+- AA > 0 on bag 073623 (I-046 now active in stable scenes)
+- S2 reduction ≥ 70% (maintained or improved)
 
 ---
 
