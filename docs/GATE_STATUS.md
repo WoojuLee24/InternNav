@@ -5,7 +5,7 @@ _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
  Gate 0  ────  Gate 1  ────  Gate 2  ────  Gate 3a  ────  Gate 3b  ────  Gate 3c  ────  Gate 3d  ────  Gate 3e  ────  Gate 3f  ────  Gate 4
-  ✅ PASS      ✅ PASS      ⚠️ FAIL       📋 SKIP       ✅ PASS       ✅ PASS      ⚠️ COND.      ❌ FAIL       🔄 ACTIVE     📋 BLOCKED
+  ✅ PASS      ✅ PASS      ⚠️ FAIL       📋 SKIP       ✅ PASS       ✅ PASS      ⚠️ COND.      ❌ FAIL       ✅ PASS       📋 BLOCKED
 ```
 
 ---
@@ -194,8 +194,9 @@ every I-047 cycle resets the flag before I-046 can fire meaningfully.
 
 ---
 
-## 🔄 Gate 3f — I-046/I-047 Flag Propagation Fix (I-050)
+## ✅ Gate 3f — I-046/I-047 Flag Propagation Fix (I-050)
 
+**Completed**: 2026-05-08  
 **Hypothesis**: If I-047 forced bypasses do NOT reset `_last_fresh_was_action` (only
 I-046 resets it), then after I-047 produces an action output I-046 fires on the next
 frame — restoring the action distribution on stable bag 073623 while maintaining 70%
@@ -206,18 +207,34 @@ S2 reduction.
 # BEFORE (Gate 3d/3e):
 _last_fresh_was_action = False if was_forced_bypass else fresh_was_action
 
-# AFTER (Gate 3f):
+# AFTER (Gate 3f, I-050):
 if was_i046_bypass:
     _last_fresh_was_action = False        # I-046: one-shot, reset
 else:
     _last_fresh_was_action = fresh_was_action  # I-047 or natural: propagate
 ```
 
-**Gate 3f criteria**:
-- V(A vs D_3f) ≤ 0.10 on ALL 3 bags (including stable bag 073623)
-- AA > 0 on bag 073623
-- S2 reduction ≥ 60% on all bags (slightly relaxed vs 70% — I-046 adds some extra runs)
-- Max-hold config unchanged: max_hold=10, threshold=0.92
+**Results (D_3f vs A from Gate 3d)**:
+| Bag    | bg_s2 | skip% | hz    | AA  | MH  | ar%   | Cramér's V | verdict |
+|--------|-------|-------|-------|-----|-----|-------|-----------|---------|
+| 073623 | 150   | 88.5% | 11.22 | **26** | 112 | 34.7% | **0.0899** ✅ | PASS |
+| 061841 | 818   | 87.0% | 12.15 | 264 | 542 | 64.1% | **0.0094** ✅ | PASS |
+| 063047 | 692   | 88.1% | 12.16 | 166 | 500 | 47.4% | **0.0002** ✅ | PASS |
+
+**Gate 3f criteria check**:
+- V ≤ 0.10 on ALL 3 bags: 0.0899 / 0.0094 / 0.0002 ✅
+- AA > 0 on bag 073623: AA=26 ✅ (was 0 in Gate 3d)
+- S2 reduction ≥ 60% (vs A): 67.5% / 64.5% / 64.8% ✅
+- Max-hold config unchanged: threshold=0.92, max_hold=10 ✅
+
+**Verdict: ✅ PASS**
+
+**Key finding**:
+The I-050 fix resolves the root cause: by only resetting `_last_fresh_was_action` on I-046
+bypass (not I-047), the flag propagates after every I-047 cycle. When I-047 fires on a
+frame where S2 produced an action, the flag carries forward and I-046 fires on the very
+next frame. Result: AA jumps from 0→26 on stable bag 073623 (V drops from 0.17→0.0899).
+The fix is one conditional vs original one-line flag reset — minimal code change, complete quality fix.
 
 **Script**: `scripts/realworld/gate3f_flag_propagation.sh`
 
