@@ -4,8 +4,8 @@ _Last updated: 2026-05-08 · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
- Gate 0  ────  Gate 1  ────  Gate 2  ────  Gate 3a  ────  Gate 3b  ────  Gate 3c  ────  Gate 3d  ────  Gate 3e  ────  Gate 3f  ────  Gate 4
-  ✅ PASS      ✅ PASS      ⚠️ FAIL       📋 SKIP       ✅ PASS       ✅ PASS      ⚠️ COND.      ❌ FAIL       ✅ PASS       📋 BLOCKED
+ Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 4
+  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   🔄 ACTIVE 📋 BLOCKED
 ```
 
 ---
@@ -237,6 +237,31 @@ next frame. Result: AA jumps from 0→26 on stable bag 073623 (V drops from 0.17
 The fix is one conditional vs original one-line flag reset — minimal code change, complete quality fix.
 
 **Script**: `scripts/realworld/gate3f_flag_propagation.sh`
+
+---
+
+## 🔄 Gate 3g — max_hold Parameter Sweep
+
+**Hypothesis**: With I-050 fix in place, I-047 no longer blocks I-046. It is therefore
+safe to increase `max_hold` beyond 10. Since I-047 accounts for 67–75% of all S2 runs
+at max_hold=10, doubling to 20 should reduce I-047 bypasses by ~50% and push skip%
+from 88% toward 92–93% while V ≤ 0.10 is maintained via the propagated I-046 flag.
+
+**Sweep**: max_hold ∈ {5, 10, 15, 20, 25, 30}, τ=0.92 fixed, action_aware=on, I-050 active.
+
+**Predictions** (from Gate 3f analysis):
+| max_hold | 073623 skip% | 061841 skip% | 063047 skip% |
+|----------|-------------|-------------|-------------|
+| 10       | 88.5%       | 87.0%       | 88.1%       |
+| 20       | ~92.8%      | ~91.3%      | ~92.4%      |
+| 30       | ~94.2%      | ~92.7%      | ~93.8%      |
+
+**Gate 3g criteria**:
+- V ≤ 0.10 all 3 bags at each max_hold value
+- Identify highest max_hold where quality holds
+- Skip% improvement vs max_hold=10 baseline
+
+**Script**: `scripts/realworld/gate3g_maxhold_sweep.sh`
 
 ---
 
