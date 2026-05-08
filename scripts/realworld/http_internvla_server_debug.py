@@ -91,6 +91,15 @@ _ADAPTIVE_MAX_HOLD_MAX = 25         # Ceiling: never exceed 25 frames between re
 _ADAPTIVE_VAR_LOW = 0.0002          # Below this: very stable → max_hold=5
 _ADAPTIVE_VAR_HIGH = 0.001          # Above this: dynamic → max_hold=15
 
+# I-051: Trajectory-Length-Adaptive Max Hold (Gate 3h)
+# When S2 produces a N-waypoint trajectory, the plan has N*multiplier frames
+# of semantic "plan consumption" before it can go stale.  Setting max_hold
+# dynamically to min(cap, N*multiplier) couples hold duration to plan richness:
+# short plans refresh often, long plans stay cached longer — both correctly.
+_traj_adaptive_hold_enabled = False
+_traj_adaptive_hold_multiplier = 7   # frames to hold per cached waypoint
+_traj_adaptive_hold_cap = 50         # hard upper cap to prevent unbounded hold
+
 def _image_fingerprint(rgb):
     """32x32 grayscale, raw pixel values 0-255 (no normalization).
     Returns a 1D float32 vector or None if input is unusable.
@@ -215,6 +224,8 @@ def reset_dual_metrics():
         async_metrics["action_aware_bypasses"] = 0
         async_metrics["max_hold_bypasses"] = 0
         async_metrics["waiting_responses"] = 0
+        async_metrics["traj_lengths_sum"] = 0
+        async_metrics["traj_lengths_count"] = 0
         # pre_warm_frames_queued is NOT reset here — it's a server-lifetime counter
 
 def async_continuous_loop():
@@ -226,11 +237,11 @@ def async_continuous_loop():
     - HTTP never waits for inference!
     """
     global async_cached_trajectory, async_cached_action, async_thread_running
-    
+
     instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
     camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
-    
-    global _last_fingerprint, _last_fresh_was_action, _consecutive_skip_count
+
+    global _last_fingerprint, _last_fresh_was_action, _consecutive_skip_count, _max_hold_frames
     while async_thread_running:
         try:
             # Wait for new frame data from queue (non-blocking with timeout)
@@ -251,6 +262,9 @@ def async_continuous_loop():
                 max_hold = _max_hold_frames
                 action_aware_on = _action_aware_enabled
                 adaptive_on = _adaptive_max_hold_enabled
+                traj_adaptive_on = _traj_adaptive_hold_enabled
+                traj_adaptive_multiplier = _traj_adaptive_hold_multiplier
+                traj_adaptive_cap = _traj_adaptive_hold_cap
             was_forced_bypass = False
             was_i046_bypass = False  # I-050: track bypass type for flag propagation
             was_i047_bypass = False
@@ -345,6 +359,20 @@ def async_continuous_loop():
                         async_cached_trajectory = dual_output.output_trajectory.tolist()
                         async_cached_action = None  # Clear action when trajectory
                         fresh_was_traj = True
+
+            # I-051: trajectory-length-adaptive max_hold
+            # After trajectory is cached, update max_hold based on plan richness.
+            # Executed outside async_cache_lock to avoid contention.
+            if fresh_was_traj:
+                traj_len = len(async_cached_trajectory) if async_cached_trajectory else 0
+                with async_metrics_lock:
+                    async_metrics["traj_lengths_sum"] = async_metrics.get("traj_lengths_sum", 0) + traj_len
+                    async_metrics["traj_lengths_count"] = async_metrics.get("traj_lengths_count", 0) + 1
+                if traj_adaptive_on and traj_len > 0:
+                    new_mh = min(traj_adaptive_cap, traj_len * traj_adaptive_multiplier)
+                    with temporal_cache_lock:
+                        _max_hold_frames = new_mh
+                        _consecutive_skip_count = 0
 
             t1 = time.time()
 
@@ -807,6 +835,14 @@ def get_async_metrics():
         "adaptive_sim_window_size": len(_similarity_window),
         "adaptive_sim_variance": float(np.var(_similarity_window[-_ADAPTIVE_WINDOW_SIZE:])) if len(_similarity_window) >= _ADAPTIVE_WINDOW_SIZE else None,
 
+        # I-051: trajectory-length-adaptive max_hold (Gate 3h)
+        "traj_adaptive_hold_enabled": _traj_adaptive_hold_enabled,
+        "traj_adaptive_hold_multiplier": _traj_adaptive_hold_multiplier,
+        "traj_adaptive_hold_cap": _traj_adaptive_hold_cap,
+        "avg_trajectory_length": round(
+            m.get("traj_lengths_sum", 0) / max(1, m.get("traj_lengths_count", 1)), 2
+        ),
+
         # Gate 3c (I-010): cold-start diagnostics
         "waiting_responses": m.get("waiting_responses", 0),
         "pre_warm_frames_queued": m.get("pre_warm_frames_queued", 0),
@@ -884,6 +920,32 @@ def set_adaptive_max_hold_endpoint():
         if not enabled:
             _similarity_window.clear()
     return jsonify({'status': 'ok', 'adaptive_max_hold_enabled': enabled})
+
+
+@app.route("/set_trajectory_adaptive_hold", methods=['POST', 'GET'])
+def set_trajectory_adaptive_hold_endpoint():
+    """I-051 (Gate 3h): Toggle trajectory-length-adaptive max_hold.
+    When enabled, each time a new trajectory is cached, max_hold is updated to
+    min(cap, len(trajectory) * multiplier).  Long plans → longer hold; short
+    plans → shorter hold.  This couples staleness budget to semantic plan richness.
+    GET ?enabled=true|false&multiplier=7&cap=50"""
+    global _traj_adaptive_hold_enabled, _traj_adaptive_hold_multiplier, _traj_adaptive_hold_cap
+    enabled_str = request.args.get('enabled', 'true').lower()
+    enabled = enabled_str in ('1', 'true', 'yes', 'on')
+    multiplier = int(request.args.get('multiplier', _traj_adaptive_hold_multiplier))
+    cap = int(request.args.get('cap', _traj_adaptive_hold_cap))
+    multiplier = max(1, min(100, multiplier))
+    cap = max(1, min(1000, cap))
+    with temporal_cache_lock:
+        _traj_adaptive_hold_enabled = enabled
+        _traj_adaptive_hold_multiplier = multiplier
+        _traj_adaptive_hold_cap = cap
+    return jsonify({
+        'status': 'ok',
+        'traj_adaptive_hold_enabled': enabled,
+        'traj_adaptive_hold_multiplier': multiplier,
+        'traj_adaptive_hold_cap': cap,
+    })
 
 
 def annotate_image(idx, image, llm_output, trajectory, pixel_goal, output_dir, filename):
