@@ -71,6 +71,9 @@ _last_fingerprint = None  # numpy float32 vector, normalized
 _last_fresh_was_action = False
 _consecutive_skip_count = 0
 _max_hold_frames = 10  # Forced refresh threshold; tuned per experiment
+# I-046 runtime toggle for ablation study (Gate 3d).
+# True = default (action-aware); False = disabled for ablation condition 3.
+_action_aware_enabled = True
 
 def _image_fingerprint(rgb):
     """32x32 grayscale, raw pixel values 0-255 (no normalization).
@@ -228,10 +231,11 @@ def async_continuous_loop():
                 last_was_action = _last_fresh_was_action
                 skip_count = _consecutive_skip_count
                 max_hold = _max_hold_frames
+                action_aware_on = _action_aware_enabled
             was_forced_bypass = False
             if threshold > 0.0:
                 forced = None
-                if last_was_action:
+                if action_aware_on and last_was_action:
                     forced = "action_aware_bypasses"  # I-046
                 elif skip_count >= max_hold:
                     forced = "max_hold_bypasses"  # I-047
@@ -314,8 +318,12 @@ def async_continuous_loop():
             # After a forced bypass (I-046 or I-047), reset to False: one-shot
             # semantics — the fresh output is now in the cache; cosine gating
             # can replay it for similar frames without re-triggering the bypass.
+            # When _action_aware_enabled=False (ablation), never set this flag.
             with temporal_cache_lock:
-                _last_fresh_was_action = False if was_forced_bypass else fresh_was_action
+                if not _action_aware_enabled:
+                    _last_fresh_was_action = False
+                else:
+                    _last_fresh_was_action = False if was_forced_bypass else fresh_was_action
             
             s2_request_queue.task_done()
             
@@ -747,6 +755,7 @@ def get_async_metrics():
         "action_aware_bypasses": m.get("action_aware_bypasses", 0),
         "max_hold_bypasses": m.get("max_hold_bypasses", 0),
         "max_hold_frames": _max_hold_frames,
+        "action_aware_enabled": _action_aware_enabled,
 
         # Gate 3c (I-010): cold-start diagnostics
         "waiting_responses": m.get("waiting_responses", 0),
@@ -793,6 +802,21 @@ def set_max_hold_frames_endpoint():
         _max_hold_frames = new_n
         _consecutive_skip_count = 0
     return jsonify({'status': 'ok', 'max_hold_frames': new_n})
+
+
+@app.route("/set_action_aware", methods=['POST', 'GET'])
+def set_action_aware_endpoint():
+    """Gate 3d ablation: toggle I-046 action-aware cache bypass on/off.
+    GET ?enabled=true|false. When false, the cache never forces an S2 refresh
+    after an action output — only similarity threshold + max_hold apply."""
+    global _action_aware_enabled, _last_fresh_was_action
+    enabled_str = request.args.get('enabled', 'true').lower()
+    enabled = enabled_str in ('1', 'true', 'yes', 'on')
+    with temporal_cache_lock:
+        _action_aware_enabled = enabled
+        if not enabled:
+            _last_fresh_was_action = False
+    return jsonify({'status': 'ok', 'action_aware_enabled': enabled})
 
 
 def annotate_image(idx, image, llm_output, trajectory, pixel_goal, output_dir, filename):

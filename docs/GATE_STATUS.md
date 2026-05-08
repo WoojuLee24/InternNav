@@ -4,8 +4,8 @@ _Last updated: 2026-05-07 · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
- Gate 0  ────  Gate 1  ────  Gate 2  ────  Gate 3a  ────  Gate 3b  ────  Gate 3c  ────  Gate 4  ────  Gate 5
-  ✅ PASS      ✅ PASS      ⚠️ FAIL       📋 SKIP       ✅ PASS       ✅ PASS        📋 TODO      📋 TODO
+ Gate 0  ────  Gate 1  ────  Gate 2  ────  Gate 3a  ────  Gate 3b  ────  Gate 3c  ────  Gate 3d  ────  Gate 4  ────  Gate 5
+  ✅ PASS      ✅ PASS      ⚠️ FAIL       📋 SKIP       ✅ PASS       ✅ PASS       🔄 ACTIVE      📋 TODO      📋 TODO
 ```
 
 ---
@@ -130,6 +130,30 @@ python3 http_internvla_server_debug.py --mode async --temperature 0.75 --kv-cach
 Without reset: action_rate bias V=0.25. With reset: V=0.091 (just under 0.10 threshold).
 
 **Script**: `scripts/realworld/gate3c_prewarm_3bag.sh`
+
+---
+
+## 🔄 Gate 3d — Component Ablation Study (I-048)
+
+**Commit**: pending  
+**Hypothesis**: Similarity gate, I-047 (max_hold), and I-046 (action-aware) each contribute independently to the 70% S2 reduction with V≤0.10.  
+**Pass criteria**:
+- bg_runs(A: no cache) ≥ bg_runs(B: cache only) — gate suppresses S2
+- S2 reduction (full system D vs control A) ≥ 40% all 3 bags
+- Cramer's V(A vs D) ≤ 0.10 (full system not biased vs control)
+
+**Conditions**:
+| Label | threshold | max_hold | I-046 |
+|-------|-----------|----------|-------|
+| A | 0.0 | — | off | ← control
+| B | 0.92 | 9999 | off | ← cache only
+| C | 0.92 | 10 | off | ← + I-047
+| D | 0.92 | 10 | on | ← full (Gate 3b)
+
+**New server endpoint**: `/set_action_aware?enabled={true|false}`  
+**Script**: `scripts/realworld/gate3d_ablation_3bag.sh`
+
+**Status**: Experiment in preparation.
 
 ---
 

@@ -227,9 +227,34 @@ real camera frames — deployment procedure: robot holds still 2–3s at startup
 
 ---
 
+### Step 3d — Component Ablation Study `[Task #13]`
+
+**Hypothesis**: Each component (similarity gate, I-047 max_hold, I-046 action-aware) adds independent value. The full system (D) outperforms each sub-combination by at least one metric.
+
+**Four conditions** (all runtime-mutable, single server):
+| Cond | threshold | max_hold | I-046 |
+|------|-----------|----------|-------|
+| A | 0.0 | — | off | ← control (no cache)
+| B | 0.92 | 9999 | off | ← similarity gate only
+| C | 0.92 | 10 | off | ← + I-047
+| D | 0.92 | 10 | on | ← full system (Gate 3b)
+
+**New endpoint**: `/set_action_aware?enabled={true|false}` toggles I-046.
+
+**GATE 3d:**
+| Condition | Required |
+|-----------|---------|
+| bg_runs: A ≥ B | Similarity gate suppresses S2 |
+| bg_runs: B ≈ C on stable bags | I-047 only matters on action-heavy bags |
+| S2 reduction D vs A | **≥ 40%** on all 3 bags |
+| Cramer's V (A vs D) | **≤ 0.10** (full system not biased vs control) |
+| Publishable? | **Yes** — ablation validates each component's role |
+
+---
+
 ## Phase 4 — Benchmark Validation
 
-*Blocked until Gates 3a + 3b + 3c all pass.*
+*Blocked until Gates 3a + 3b + 3c + 3d all pass.*
 
 ### Step 4.1 — Validate trajectory_ratio as optimization target `[Task #11]`
 
@@ -280,6 +305,7 @@ real camera frames — deployment procedure: robot holds still 2–3s at startup
 | **Phase 3** | **Task #8: Adaptive plan_step_gap** | **✅ SUPERSEDED by Gate 3b (temporal cache achieves adaptive scheduling)** |
 | **Phase 3** | **Task #9: Temporal S2 caching** | **✅ DONE — Gate 3b PASS @ thr=0.92, V<0.10 all 3 bags** |
 | **Phase 3** | **Task #10: Cold-Start Pre-Fetch** | **✅ DONE — Gate 3c PASS — 38.2% reduction, V=0.091** |
+| **Phase 3** | **Task #13: Component Ablation Study** | **🔄 ACTIVE — Gate 3d** |
 | Phase 4 | Task #11: Benchmark validation | ⛔ BLOCKED — Habitat + R2R data not installed |
 | Phase 5 | Task #12: Distillation | ⛔ needs #11 |
 
