@@ -51,7 +51,7 @@ print(f"{'Alpha':>8} {'Skip%':>8} {'V_073623':>10} {'V_061841':>10} {'V_063047':
 print("-" * 75)
 
 for alpha in ALPHAS:
-    alpha_tag = str(alpha).replace(".", "_")
+    alpha_tag = f"{alpha:.2f}".replace(".", "_")
     skip_vals = []
     v_vals = []
     row_data = {}
@@ -95,7 +95,7 @@ for alpha in ALPHAS:
 print()
 print("=== LaTeX rows (for tab:gate3k) ===")
 for alpha in ALPHAS:
-    alpha_tag = str(alpha).replace(".", "_")
+    alpha_tag = f"{alpha:.2f}".replace(".", "_")
     skip_vals = []
     v_vals = []
     row_data = {}
@@ -128,4 +128,4 @@ for alpha in ALPHAS:
     v073s = f"{v073:.4f}" if v073 is not None else "---"
     v061s = f"{v061:.4f}" if v061 is not None else "---"
     v063s = f"{v063:.4f}" if v063 is not None else "---"
-    print(f"{alpha} & {skip_mean:.1f}\\% & {v073s} & {v061s} & {v063s} & {v_max:.4f} & {status} \\\\")
+    print(f"{alpha:.2f} & {skip_mean:.1f}\\% & {v073s} & {v061s} & {v063s} & {v_max:.4f} & {status} \\\\")

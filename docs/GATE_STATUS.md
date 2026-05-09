@@ -1,11 +1,11 @@
 # Research Gate Status
 
-_Last updated: 2026-05-08 · Branch: research/async-foundation_
+_Last updated: 2026-05-09 · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
- Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3l ── Gate 4
-  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   📋 IMPL.   ✅ PASS    📋 NEXT    📋 NEXT    📋 BLOCKED
+ Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 4
+  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   📋 IMPL.   ✅ PASS    ❌ FAIL    🔄 RUNNING  📋 NEXT    📋 BLOCKED
 ```
 
 ---
@@ -401,35 +401,60 @@ arrive per background iteration (e.g., batched inference).
 
 ---
 
-## 📋 Gate 3k — EMA Scene Fingerprint (I-053) α Sweep
+## ❌ Gate 3k — EMA Scene Fingerprint (I-053) α Sweep
 
-**Status**: IMPLEMENTATION COMPLETE — experiment not yet run.
+**Status**: FAIL — all α values fail V ≤ 0.10 criterion.
 **Script**: `scripts/realworld/gate3k_ema_sweep.sh`
+**Commit**: `14e06779`
 
-**Design (I-053)**:
-```python
-# Update EMA on EVERY frame (including skipped frames):
-ema = (1 - alpha) * ema + alpha * fp_current
+**Results**:
 
-# Skip criterion uses EMA as reference (instead of point snapshot):
-sim = cosine_sim(fp_current, ema)
-skip if sim >= tau
+| α    | Skip% | V_073623 | V_061841 | V_063047 | V_max  | Status |
+|------|-------|----------|----------|----------|--------|--------|
+| 0.05 | 90.2% | 0.2844   | 0.0107   | 0.0350   | 0.2844 | FAIL   |
+| 0.10 | 90.9% | 0.2221   | 0.0012   | 0.0389   | 0.2221 | FAIL   |
+| 0.15 | 91.3% | 0.2007   | 0.0059   | 0.0176   | 0.2007 | FAIL   |
+| 0.20 | 91.5% | 0.1718   | 0.0071   | 0.0162   | 0.1718 | FAIL   |
+| 0.30 | 91.4% | 0.3109   | 0.0012   | 0.0035   | 0.3109 | FAIL   |
+
+**Baseline** (MH=15, EMA=off): bag=073623 AR=23.6%, bag=061841 AR=66.0%, bag=063047 AR=51.2%
+
+**Root cause — post-bypass EMA cascade**:
+After each I-047/I-046 forced bypass, the point reference jumps to the current frame (hard reset), but the EMA still tracks the old scene. For α=0.05, EMA needs ~18 frames to converge. During those 18 frames: `sim(current_fp, old_ema) < τ` → natural miss → S2 runs → action output → I-046 fires → next forced bypass → EMA reset again → perpetual cascade.
+
+**Two distinct failure modes** (non-monotonic V(α)):
+1. **Low α (cascade)**: Slow EMA convergence → post-bypass lag → cascade of natural misses
+   - α=0.05: V=0.284, AR jumps 23.6%→51.7%, AA jumps 14→38
+2. **High α (self-similarity)**: Post-update EMA includes α=30% of current frame
+   - `ema_t = (1-α)*ema_{t-1} + α*fp_t` → `sim(fp_t, ema_t)` inflated by 30% self-inclusion
+   - Natural misses suppressed (nat=1 at α=0.30 vs 14 at baseline) → staler VLM data → more action outputs → V=0.311
+
+**Context-dependence**: V_061841 and V_063047 stay <0.04 throughout. Failure driven exclusively by bag 073623 (low baseline AR=23.6%). High-AR bags mask the cascade effect.
+
+**Fix → Gate 3m (I-055)**: Hard-reset EMA to current frame after forced bypasses (transition-reset). Eliminates post-bypass lag while preserving slow-drift tracking during skip sequences.
+
+---
+
+## 🔄 Gate 3m — Transition-Reset EMA (I-055) α Sweep
+
+**Status**: RUNNING — `gate3m_tr_ema_sweep.sh` running in container.
+**Script**: `scripts/realworld/gate3m_tr_ema_sweep.sh`
+**Commit**: `14e06779`
+
+**Design (I-055)**:
+```
+After FORCED BYPASS (I-046/I-047/I-052): ema = fp_current   (hard reset)
+After SKIP frame:                          ema = (1-α)*ema + α*fp_current  (normal update)
 ```
 
-**Key insight**: Current system updates reference only on cache misses (every ~9-15 frames).
-EMA updates on every frame, tracking slow scene drift. This reduces spurious I-047
-"freshness-tax" forced refreshes in slowly-panning/drifting scenes.
+**Hypothesis**: Eliminates cascade by ensuring EMA = current frame immediately after each forced bypass.
+- Post-reset: `sim(fp_t, ema_t) = sim(fp_t, fp_t) = 1.0 ≥ τ` → next frame skips correctly
+- During stable sequences: slow EMA drift tracking preserved (same as I-053)
+- Expected: V ≈ 0 for all α ∈ {0.05, 0.10, 0.15, 0.20, 0.30}
 
-**Sweep**: α ∈ {0.05, 0.10, 0.15, 0.20, 0.30}
-**Fixed**: max_hold=15, tau=0.92, action_aware=on
-**Pass**: V(EMA_αX vs BASELINE) ≤ 0.10 all 3 bags
-**Bonus**: skip% > 91% (Gate 3g baseline) at any α
+**Endpoint**: `/set_ema_fingerprint?enabled=true&alpha=X&transition_reset=true`
 
-**Stability analysis**:
-- Slow drift: EMA tracks, similarity stays high → fewer I-047 forced runs → higher skip%
-- Abrupt transition: EMA lags by ≤1/α frames before triggering correct refresh
-- α=0.05 → ~20 frames to adapt (slow, conservative)
-- α=0.30 → ~3 frames to adapt (fast, aggressive)
+**Results**: Pending Gate 3m completion.
 
 ---
 
