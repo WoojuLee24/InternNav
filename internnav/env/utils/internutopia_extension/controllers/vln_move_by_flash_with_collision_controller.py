@@ -36,6 +36,24 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
         )  # 200 is the physics_dt
 
         self.current_action = None
+        self._footprint_radius = config.robot_platform_size  # None = compute lazily from AABB on first use
+
+        # BEV visualization via ZMQ (PUSH: controller connects, bridge binds)
+        self._zmq_enabled = False
+        self._traj_world = []
+        self._collision_count = 0
+        self._bev_save_dir = '/tmp/bev_debug'
+        import os as _os; _os.makedirs(self._bev_save_dir, exist_ok=True)
+        try:
+            import zmq
+            self._zmq_ctx = zmq.Context.instance()
+            self._zmq_sock = self._zmq_ctx.socket(zmq.PUSH)
+            self._zmq_sock.setsockopt(zmq.SNDHWM, 1)
+            self._zmq_sock.connect('tcp://localhost:5556')
+            self._zmq_enabled = True
+            print('[BEV VIS] ZMQ connected to tcp://localhost:5556')
+        except Exception as e:
+            print(f'[BEV VIS] ZMQ init failed: {e}')
 
         super().__init__(config=config, robot=robot, scene=scene)
 
@@ -144,19 +162,112 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
         Return:
             bool: True if the position is already occupied
         """
-        topdown_global_map_camera = self.robot.sensors['topdown_camera_500']
-        free_map = self.get_map_info(topdown_global_map_camera, dilation_iterations=2)
+        if self._footprint_radius is None:
+            from isaacsim.core.utils.bounds import compute_aabb, create_bbox_cache
+            bbox_cache = create_bbox_cache()
+            prim_path = self.robot.articulation.prim.GetPath().pathString
+            aabb = compute_aabb(bbox_cache, prim_path, include_children=True)
+            self._footprint_radius = max(aabb[3] - aabb[0], aabb[4] - aabb[1]) / 2
+            print(f'[COLLISION] AABB footprint_radius={self._footprint_radius:.3f}m')
 
-        # convert position to free map pixel
+        topdown_global_map_camera = self.robot.sensors['topdown_camera_500']
+        free_map = self.get_map_info(topdown_global_map_camera)
+
         camera_pose = topdown_global_map_camera.get_world_pose()[0]
         width, height = topdown_global_map_camera.resolution
-        px, py = world_to_pixel(position, camera_pose, aperture, width, height)
+        pixels_per_meter = 10.0 / aperture * width
+        robot_size = max(1, round(self._footprint_radius * pixels_per_meter))
 
+        # Step 1: erase current robot footprint (robot body shows as occupied in free_map)
+        cur_pos, _ = self.robot.articulation.get_world_pose()
+        cur_px, cur_py = world_to_pixel(cur_pos, camera_pose, aperture, width, height)
+        cur_px_int, cur_py_int = int(cur_px), int(cur_py)
+        free_map[cur_px_int - robot_size : cur_px_int + robot_size,
+                 cur_py_int - robot_size : cur_py_int + robot_size] = 1
+
+        # Step 2: check target position with robot footprint
+        px, py = world_to_pixel(position, camera_pose, aperture, width, height)
         px_int, py_int = int(px), int(py)
-        # Get a region: (px, py) and one pixel right/down
-        robot_size = 3
-        sub_map = free_map[px_int - robot_size : px_int + robot_size, py_int - robot_size : py_int + robot_size]
-        return np.any(sub_map == 0)  # 1 = free, so (any 0) = collision exists
+        sub_map = free_map[px_int - robot_size : px_int + robot_size,
+                           py_int - robot_size : py_int + robot_size]
+
+        occupied = int(np.sum(sub_map == 0))
+        collision = occupied > 0
+        if collision:
+            print(f'[COLLISION CHECK] footprint={self._footprint_radius:.3f}m ({robot_size}px) occupied={occupied}/{sub_map.size}', flush=True)
+
+        if self._zmq_enabled:
+            self._publish_bev(free_map, position, camera_pose, aperture, width, height,
+                              cur_px_int, cur_py_int, px_int, py_int, collision, robot_size)
+
+        return collision  # 1 = free, so (any 0) = collision exists
+
+    def _publish_bev(self, free_map, robot_world_pos, camera_pose, aperture, width, height,
+                     cur_px, cur_py, robot_px, robot_py, collision=False, robot_size_px=3):
+        import cv2
+        import zmq
+
+        # Build BGR visualization: free=light gray, occupied=black
+        vis = np.zeros((free_map.shape[0], free_map.shape[1], 3), dtype=np.uint8)
+        vis[free_map == 1] = [180, 180, 180]
+
+        # Draw trajectory (orange dots)
+        self._traj_world.append(robot_world_pos[:3].tolist())
+        for wp in self._traj_world[-500:]:
+            tpx, tpy = world_to_pixel(wp, camera_pose, aperture, width, height)
+            tpx_i, tpy_i = int(tpx), int(tpy)
+            if 0 <= tpx_i < free_map.shape[0] and 0 <= tpy_i < free_map.shape[1]:
+                cv2.circle(vis, (tpy_i, tpx_i), 2, (0, 140, 255), -1)
+
+        # Current robot position: cyan box (erased footprint area)
+        cv2.rectangle(vis,
+                      (cur_py - robot_size_px, cur_px - robot_size_px),
+                      (cur_py + robot_size_px, cur_px + robot_size_px),
+                      (255, 255, 0), 2)  # cyan
+        cv2.circle(vis, (cur_py, cur_px), 3, (255, 255, 0), -1)
+
+        # Target position: green (free) or red (collision)
+        color = (0, 0, 255) if collision else (0, 255, 0)
+        cv2.rectangle(vis,
+                      (robot_py - robot_size_px, robot_px - robot_size_px),
+                      (robot_py + robot_size_px, robot_px + robot_size_px),
+                      color, 2)
+        cv2.circle(vis, (robot_py, robot_px), 3, color, -1)
+
+        if collision:
+            # Highlight occupied pixels inside the target box in red
+            r0 = robot_px - robot_size_px
+            r1 = robot_px + robot_size_px
+            c0 = robot_py - robot_size_px
+            c1 = robot_py + robot_size_px
+            region = free_map[r0:r1, c0:c1]
+            occupied_mask = (region == 0)
+            vis_region = vis[r0:r1, c0:c1]
+            vis_region[occupied_mask] = [0, 0, 255]
+            vis[r0:r1, c0:c1] = vis_region
+
+        # Collision overlay: red border + text at bottom
+        if collision:
+            h, w = vis.shape[:2]
+            cv2.rectangle(vis, (0, 0), (w - 1, h - 1), (0, 0, 255), 12)
+            cv2.putText(vis, 'COLLISION', (w // 2 - 120, h - 30),
+                        cv2.FONT_HERSHEY_DUPLEX, 2.0, (0, 0, 255), 4)
+
+        _, jpeg = cv2.imencode('.jpg', vis, [cv2.IMWRITE_JPEG_QUALITY, 80])
+
+        # Always save latest frame for debugging
+        cv2.imwrite(f'{self._bev_save_dir}/latest.jpg', vis)
+        # Save collision frames separately
+        if collision:
+            self._collision_count += 1
+            path = f'{self._bev_save_dir}/collision_{self._collision_count:04d}.jpg'
+            cv2.imwrite(path, vis)
+            print(f'[BEV VIS] Saved collision frame → {path}')
+
+        try:
+            self._zmq_sock.send(jpeg.tobytes(), zmq.NOBLOCK)
+        except Exception:
+            pass
 
     def forward(self, action: int) -> ArticulationAction:
         """
