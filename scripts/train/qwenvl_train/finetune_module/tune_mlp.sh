@@ -30,9 +30,9 @@ data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce}
 
 # Output configuration
 run_name=finetune_module/tune_mlp_$(date +%Y%m%d_%H%M%S)
-output_dir=checkpoints/${run_name}
+output_dir=/home/irteam/data-vol2/checkpoints/${run_name}
 system1=nextdit_async
-system2_ckpt=checkpoints/InternVLA-N1-System2
+system2_ckpt=/home/irteam/data-vol2/checkpoints/InternVLA-N1-System2
 
 # [ablation] tune_mm_mlp: True (baseline: False)
 

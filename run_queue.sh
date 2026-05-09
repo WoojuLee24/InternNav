@@ -22,12 +22,21 @@ while true; do
 
     NEXT=$(sed -n "${LINE_NUM}p" "$QUEUE_FILE")
 
-    log "========================================"
-    log "Running: $NEXT"
-    log "========================================"
+    # 남은 non-comment 라인 수 확인
+    REMAINING=$(grep -c '^\s*[^#]' "$QUEUE_FILE" 2>/dev/null || echo 0)
 
-    # 줄 번호 기반으로 comment out (특수문자 안전)
-    sed -i "${LINE_NUM}s|.*|# [done] ${NEXT}|" "$QUEUE_FILE"
+    log "========================================"
+    if [ "$REMAINING" -gt 1 ]; then
+        log "Running: $NEXT"
+        log "========================================"
+
+        # 줄 번호 기반으로 comment out (특수문자 안전)
+        sed -i "${LINE_NUM}s|.*|# [done] ${NEXT}|" "$QUEUE_FILE"
+    else
+        log "Running (last, repeating): $NEXT"
+        log "========================================"
+        # 마지막 라인은 done 처리 없이 반복 실행
+    fi
 
     eval "$NEXT" 2>&1 | tee -a "$LOG_FILE"
 

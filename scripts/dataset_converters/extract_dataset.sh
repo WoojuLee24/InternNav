@@ -6,7 +6,7 @@
 #
 #   --delete    Delete each tar.gz after successful extraction
 
-DATA_DIR=${1:-"/ws/external/data/InternData-N1-mini"}
+DATA_DIR=${1:-"/home/irteam/git/InternNav/data/InternData-N1"}
 JOBS=${2:-4}
 DELETE=0
 

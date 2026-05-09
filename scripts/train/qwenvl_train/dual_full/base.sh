@@ -13,8 +13,8 @@ deepspeed=scripts/train/qwenvl_train/zero2.json
 
 # Training hyperparameters
 lr=1e-4
-batch_size=2
-grad_accum_steps=8  # effective batch size: 2 * 8 GPU * 8 = 128
+batch_size=4
+grad_accum_steps=4
 max_pixels=313600
 min_pixels=3136
 
@@ -23,18 +23,18 @@ val_ratio=0.1
 val_interval_steps=$((100 * 4 / batch_size))
 
 # Dataset configuration
-vln_datasets=r2r_125cm_0_30%30,r2r_60cm_15_15%30
+vln_datasets=r2r_125cm_0_30%30,r2r_60cm_15_15%30,rxr_125cm_0_30%30,rxr_60cm_15_15%30,scalevln_125cm_0_30%30,scalevln_60cm_30_30%30
 
 # Data path
-data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce}
+data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1/vln_ce} # ${1:-/ws/src/InternNav/data/InternData-N1/vln_ce}
 
 # Output configuration
-run_name=batch_size/b2_eff128_$(date +%Y%m%d_%H%M%S)
-output_dir=/home/irteam/data-vol2/checkpoints/${run_name}
+run_name=dual_full/base_$(date +%Y%m%d_%H%M%S)
+output_dir=checkpoints/${run_name}
 system1=nextdit_async
-system2_ckpt=/home/irteam/data-vol2/checkpoints/InternVLA-N1-System2
+system2_ckpt=checkpoints/InternVLA-N1-System2
 
-# num_history base value
+# [ablation] num_history: 8 (baseline: 8)
 num_history=8
 
 mkdir -p ${output_dir}

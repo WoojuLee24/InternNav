@@ -46,6 +46,188 @@ from internnav.model.utils.vln_utils import split_and_clean, traj_to_actions
 # Import for Habitat registry side effects — do not remove
 import internnav.habitat_extensions.vln.measures  # noqa: F401 # isort: skip
 
+def _install_step_monitor(env_obj):
+    """Monkey-patch env.step to check GL state before/after EVERY call."""
+    original_step = env_obj.step
+    _call = [0]
+
+    def _monitored_step(action):
+        n = _call[0]; _call[0] += 1
+        # Pre-step: check GL
+        errs = _diag_gl_errors(f"PRE#{n} action={action}")
+        reset = _diag_gl_reset(f"PRE#{n} action={action}")
+        if errs or reset:
+            print(f"[DIAG][ALARM] BAD GL STATE before env.step #{n} action={action}", flush=True)
+        result = original_step(action)
+        # Post-step: check GL
+        errs2 = _diag_gl_errors(f"POST#{n} action={action}")
+        reset2 = _diag_gl_reset(f"POST#{n} action={action}")
+        if (errs2 or reset2) and not (errs or reset):
+            print(f"[DIAG][ALARM] GL STATE DEGRADED DURING env.step #{n} action={action}", flush=True)
+        return result
+
+    env_obj.step = _monitored_step
+    print("[DIAG] env.step monitor installed", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Render diagnostics — identify SIGABRT root cause in EGL/GL layer.
+# Checks: NVIDIA_DRIVER_CAPABILITIES, GL context reset, GL errors, VRAM leak.
+# ---------------------------------------------------------------------------
+import ctypes as _ctypes
+
+_gl_lib = None
+
+
+def _get_gl_lib():
+    global _gl_lib
+    if _gl_lib is None:
+        try:
+            lib = _ctypes.CDLL('libGL.so.1')
+            lib.glGetError.restype = _ctypes.c_uint
+            lib.glGetError.argtypes = []
+            _gl_lib = lib
+        except Exception:
+            pass
+    return _gl_lib
+
+
+def _diag_gl_errors(ctx=""):
+    """Drain and print all pending GL errors. Returns True if any found."""
+    lib = _get_gl_lib()
+    if lib is None:
+        return False
+    errs = []
+    for _ in range(8):
+        e = lib.glGetError()
+        if e == 0:
+            break
+        errs.append(f"0x{e:04X}")
+    if errs:
+        print(f"[DIAG][GL_ERROR] {ctx}: {errs}", flush=True)
+    return bool(errs)
+
+
+_gl_reset_fn = None  # cached function pointer
+
+
+def _get_gl_reset_fn():
+    """Get glGetGraphicsResetStatus via libGL then eglGetProcAddress fallback."""
+    global _gl_reset_fn
+    if _gl_reset_fn is not None:
+        return _gl_reset_fn
+    # Try libGL first
+    lib = _get_gl_lib()
+    if lib:
+        for name in ("glGetGraphicsResetStatus", "glGetGraphicsResetStatusARB"):
+            fn = getattr(lib, name, None)
+            if fn:
+                fn.restype = _ctypes.c_uint
+                fn.argtypes = []
+                _gl_reset_fn = fn
+                return fn
+    # Fallback: eglGetProcAddress
+    try:
+        egl = _ctypes.CDLL('libEGL.so.1')
+        egl.eglGetProcAddress.restype = _ctypes.c_void_p
+        egl.eglGetProcAddress.argtypes = [_ctypes.c_char_p]
+        for name in (b"glGetGraphicsResetStatus", b"glGetGraphicsResetStatusARB"):
+            ptr = egl.eglGetProcAddress(name)
+            if ptr:
+                fn = _ctypes.CFUNCTYPE(_ctypes.c_uint)(ptr)
+                _gl_reset_fn = fn
+                return fn
+    except Exception:
+        pass
+    _gl_reset_fn = False  # mark as unavailable
+    return None
+
+
+def _diag_gl_reset(ctx=""):
+    """Check GL context reset status. Returns reset status code (0 = ok)."""
+    fn = _get_gl_reset_fn()
+    if not fn:
+        print(f"[DIAG][GL_RESET] {ctx}: glGetGraphicsResetStatus not available", flush=True)
+        return 0
+    try:
+        status = fn()
+        _names = {0: "NO_RESET", 0x8253: "GUILTY_RESET", 0x8254: "INNOCENT_RESET", 0x8255: "UNKNOWN_RESET"}
+        label = _names.get(status, f"0x{status:04X}")
+        print(f"[DIAG][GL_RESET] {ctx}: {label}", flush=True)
+        return status
+    except Exception as exc:
+        print(f"[DIAG][GL_RESET] {ctx}: query failed ({exc})", flush=True)
+        return 0
+
+
+def _diag_vram(ctx=""):
+    """Print PyTorch CUDA memory allocated/reserved."""
+    try:
+        alloc = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        print(f"[DIAG][VRAM] {ctx}: alloc={alloc:.3f}GB reserved={reserved:.3f}GB", flush=True)
+    except Exception:
+        pass
+
+
+def _diag_cam_rotation(sim, step_id):
+    """Log sensor rotation quaternion to detect camera drift accumulation."""
+    try:
+        agent = sim.agents[0]
+        for name in ('rgb', 'depth'):
+            sensor = agent.sensors.get(name)
+            if sensor is None:
+                continue
+            r = sensor.node.rotation
+            # Format: w + xi + yj + zk
+            print(
+                f"[DIAG][CAM] step={step_id} sensor={name}: "
+                f"w={r.real:.5f} x={r.imag[0]:.5f} y={r.imag[1]:.5f} z={r.imag[2]:.5f}",
+                flush=True,
+            )
+    except Exception as exc:
+        print(f"[DIAG][CAM] step={step_id} failed: {exc}", flush=True)
+
+
+def _diag_total_vram(step_id):
+    """Log total GPU VRAM (includes EGL/driver allocations outside PyTorch)."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['nvidia-smi', '--query-gpu=memory.used,memory.free', '--format=csv,noheader,nounits', '--id=0'],
+            capture_output=True, text=True, timeout=3,
+        )
+        if result.returncode == 0:
+            parts = result.stdout.strip().split(',')
+            used, free = int(parts[0].strip()), int(parts[1].strip())
+            print(f"[DIAG][GPU_MEM] step={step_id}: used={used}MiB free={free}MiB total={used+free}MiB", flush=True)
+    except Exception as exc:
+        print(f"[DIAG][GPU_MEM] step={step_id} nvidia-smi failed: {exc}", flush=True)
+
+
+_diag_env_printed = False
+
+
+def _diag_env_once():
+    """Print NVIDIA env diagnostics once at eval startup."""
+    global _diag_env_printed
+    if _diag_env_printed:
+        return
+    _diag_env_printed = True
+    caps = os.environ.get('NVIDIA_DRIVER_CAPABILITIES', 'NOT SET')
+    vis = os.environ.get('NVIDIA_VISIBLE_DEVICES', 'NOT SET')
+    workarounds = os.environ.get('MAGNUM_DISABLE_WORKAROUNDS', 'NOT SET')
+    print(f"[DIAG][ENV] NVIDIA_DRIVER_CAPABILITIES={caps}", flush=True)
+    print(f"[DIAG][ENV] NVIDIA_VISIBLE_DEVICES={vis}", flush=True)
+    print(f"[DIAG][ENV] MAGNUM_DISABLE_WORKAROUNDS={workarounds}", flush=True)
+    if 'graphics' not in caps.lower() and caps.lower() not in ('all',):
+        print(
+            "[DIAG][ENV] WARNING: 'graphics' missing from NVIDIA_DRIVER_CAPABILITIES — "
+            "EGL/OpenGL rendering may not be properly configured for this container.",
+            flush=True,
+        )
+# ---------------------------------------------------------------------------
+
 
 DEFAULT_IMAGE_TOKEN = "<image>"
 
@@ -261,6 +443,9 @@ class HabitatVLNEvaluator(DistributedEvaluator):
 
     def _run_eval_dual_system(self) -> tuple:  # noqa: C901
         self.model.eval()
+        _diag_env_once()
+        _diag_vram("eval_start")
+        _install_step_monitor(self.env)
 
         # resume from previous results
         sucs, spls, oss, nes, ndtw = self.resume_from_output_path()
@@ -323,6 +508,14 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                 rgb = observations["rgb"]
                 depth = observations["depth"]
                 x, y = observations["gps"]
+                # Per-step diagnostics: camera rotation + GPU memory every 10 steps
+                try:
+                    _diag_cam_rotation(self.env._env.sim, step_id)
+                except Exception:
+                    pass
+                if step_id % 10 == 0:
+                    _diag_total_vram(step_id)
+                    _diag_vram(f"step={step_id}")
                 depth = filter_depth(depth.reshape(depth.shape[:2]), blur_type=None)
                 depth = depth * (self._max_depth - self._min_depth) + self._min_depth
                 depth = depth * 1000
@@ -366,6 +559,8 @@ class HabitatVLNEvaluator(DistributedEvaluator):
 
                     self.env.step(action_code.LOOKUP)
                     self.env.step(action_code.LOOKUP)
+                    _diag_gl_errors(f"after_obs_gather step={step_id}")
+                    _diag_gl_reset(f"after_obs_gather step={step_id}")
 
                 if len(action_seq) == 0 and pixel_goal is None:
                     if action == action_code.LOOKDOWN:
@@ -423,6 +618,10 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                             past_key_values=None,
                             return_dict_in_generate=True,
                         ).sequences
+                    torch.cuda.synchronize()
+                    _diag_vram(f"after_generate step={step_id}")
+                    _diag_gl_reset(f"after_generate step={step_id}")
+                    _diag_gl_errors(f"after_generate step={step_id}")
 
                     llm_outputs = self.processor.tokenizer.decode(
                         output_ids[0][inputs.input_ids.shape[1] :], skip_special_tokens=True
@@ -555,6 +754,8 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                             cv2.circle(vis, (pixel_goal[0], pixel_goal[1]), radius=8, color=(255, 0, 0), thickness=-1)
                     vis_writer.append_data(vis)
 
+                _diag_gl_errors(f"before_step step={step_id} action={action}")
+                _diag_gl_reset(f"before_step step={step_id} action={action}")
                 if action == action_code.LOOKDOWN:
                     self.env.step(action)
                     observations, _, done, _ = self.env.step(action)
