@@ -5,7 +5,7 @@ _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
  Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3l ── Gate 4
-  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   📋 IMPL.   🔄 RUN.    📋 NEXT    📋 NEXT    📋 BLOCKED
+  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   📋 IMPL.   ✅ PASS    📋 NEXT    📋 NEXT    📋 BLOCKED
 ```
 
 ---
@@ -373,20 +373,31 @@ arrive per background iteration (e.g., batched inference).
 
 ---
 
-## 🔄 Gate 3j — MAD Threshold (τ) Sweep
+## ✅ Gate 3j — MAD Threshold (τ) Sweep
 
-**Status**: RUNNING (2026-05-09)
-**Script**: `scripts/realworld/gate3j_tau_sweep.sh`
-**Hypothesis**: Sweeping τ ∈ {0.85, 0.88, 0.92, 0.95, 0.97} with max_hold=15 (Gate 3g optimal)
-reveals the quality-efficiency frontier in the threshold axis.
+**Status**: PASS (2026-05-09) — ALL 5 τ values pass V ≤ 0.10 on all 3 bags
+**Commit**: (pending — included in Gate 3j-3l commit `76f96ffe`)
 
-**Fixed**: max_hold=15, action_aware=on, I-050 active, temp=0.75
-**Sweep**: τ ∈ {0.85, 0.88, 0.92, 0.95, 0.97}
-**Pass**: V ≤ 0.10 all 3 bags vs Gate-3d Condition A
+**Results**:
+| τ | Skip% | V_073623 | V_061841 | V_063047 | V_max | Status |
+|---|-------|----------|----------|----------|-------|--------|
+| 0.85 | 91.9% | 0.0767 | 0.0182 | 0.0004 | 0.0767 | ✅ PASS |
+| 0.88 | 91.5% | 0.0468 | 0.0251 | 0.0408 | 0.0468 | ✅ PASS |
+| **0.92** | **91.2%** | **0.0083** | **0.0043** | **0.0092** | **0.0092** | ✅ PASS |
+| 0.95 | 89.7% | 0.0393 | 0.0102 | 0.0287 | 0.0393 | ✅ PASS |
+| 0.97 | 85.7% | 0.0194 | 0.0722 | 0.0159 | 0.0722 | ✅ PASS |
 
-**Expected result**: τ=0.92 (current production) is near Pareto-optimal. Lower τ
-gives lower skip% but better V; higher τ gives more skip% but risks V>0.10 from
-MAD gate being too permissive. Non-monotonic shape possible (like Gate 3g MH sweep).
+**Key findings**:
+1. **All pass**: τ ∈ [0.85, 0.97] all satisfy V ≤ 0.10. System is robustly quality-preserving.
+2. **τ=0.92 is Pareto-optimal**: minimum V_max=0.0092 AND good skip% (91.2%)
+3. **Non-monotonic V(τ)**: V decreases then increases (V-shape with minimum at 0.92)
+   - Low τ (0.85): 78% I-047 forced runs → timing artifacts → V=0.0767
+   - Medium τ (0.92): balanced mix → minimal resonance → V=0.0092 
+   - High τ (0.97): 46% natural misses, action_rate inflated (47.6%) → V=0.0194 upward shift
+4. **Skip% monotonically ↓ with τ**: higher τ = stricter gate = fewer skips
+5. **I-047 freshness-tax fraction**: 78% (τ=0.85) → 64% (τ=0.92) → 30% (τ=0.97)
+
+**Production recommendation**: τ=0.92 confirmed as optimal. No change needed.
 
 ---
 
