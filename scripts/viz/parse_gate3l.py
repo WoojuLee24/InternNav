@@ -51,7 +51,7 @@ print(f"{'Slope':>8} {'Skip%':>8} {'V_073623':>10} {'V_061841':>10} {'V_063047':
 print("-" * 75)
 
 for sl in SLOPES:
-    sl_tag = str(sl).replace(".", "_")
+    sl_tag = f"{sl:.3f}".replace(".", "_")
     skip_vals = []
     row_data = {}
 
@@ -91,7 +91,7 @@ for sl in SLOPES:
 print()
 print("=== LaTeX rows ===")
 for sl in SLOPES:
-    sl_tag = str(sl).replace(".", "_")
+    sl_tag = f"{sl:.3f}".replace(".", "_")
     skip_vals = []
     row_data = {}
 
@@ -110,7 +110,7 @@ for sl in SLOPES:
             row_data[b] = v
 
     if not skip_vals:
-        print(f"{sl} & \\emph{{pending}} & \\emph{{---}} & \\emph{{---}} & \\emph{{---}} & \\emph{{---}} & \\emph{{---}} \\\\")
+        print(f"{sl:.3f} & \\emph{{pending}} & \\emph{{---}} & \\emph{{---}} & \\emph{{---}} & \\emph{{---}} & \\emph{{---}} \\\\")
         continue
 
     v073 = row_data.get("073623")
@@ -123,4 +123,4 @@ for sl in SLOPES:
     v073s = f"{v073:.4f}" if v073 is not None else "---"
     v061s = f"{v061:.4f}" if v061 is not None else "---"
     v063s = f"{v063:.4f}" if v063 is not None else "---"
-    print(f"{sl} & {skip_mean:.1f}\\% & {v073s} & {v061s} & {v063s} & {v_max:.4f} & {status} \\\\")
+    print(f"{sl:.3f} & {skip_mean:.1f}\\% & {v073s} & {v061s} & {v063s} & {v_max:.4f} & {status} \\\\")
