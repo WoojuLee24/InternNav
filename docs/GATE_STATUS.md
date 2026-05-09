@@ -4,8 +4,8 @@ _Last updated: 2026-05-08 · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
- Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 4
-  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   📋 DESIGN  📋 BLOCKED
+ Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3l ── Gate 4
+  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   📋 IMPL.   🔄 RUN.    📋 NEXT    📋 NEXT    📋 BLOCKED
 ```
 
 ---
@@ -325,7 +325,9 @@ as a proxy for plan consumption.
 
 ## 📋 Gate 3i — Request-Count-Adaptive Hold (I-051v2)
 
-**Status**: DESIGN ONLY — not yet implemented.
+**Status**: IMPLEMENTATION COMPLETE — experiment not yet run.
+**Script**: `scripts/realworld/gate3i_serve_count.sh`
+**Thresholds**: SC ∈ {5, 10, 15, 20, 30}
 
 **Motivation**: Gate 3h (I-051) revealed that plan-length-based adaptation degenerates
 for fixed-length model outputs (always 33 waypoints). The correct consumption signal
@@ -366,6 +368,81 @@ even for fixed-length trajectory outputs.
 rather than background loop skip iterations. In the current architecture (1:1 HTTP→queue),
 they are equivalent. I-052 would be superior in architectures where multiple HTTP requests
 arrive per background iteration (e.g., batched inference).
+
+---
+
+---
+
+## 🔄 Gate 3j — MAD Threshold (τ) Sweep
+
+**Status**: RUNNING (2026-05-09)
+**Script**: `scripts/realworld/gate3j_tau_sweep.sh`
+**Hypothesis**: Sweeping τ ∈ {0.85, 0.88, 0.92, 0.95, 0.97} with max_hold=15 (Gate 3g optimal)
+reveals the quality-efficiency frontier in the threshold axis.
+
+**Fixed**: max_hold=15, action_aware=on, I-050 active, temp=0.75
+**Sweep**: τ ∈ {0.85, 0.88, 0.92, 0.95, 0.97}
+**Pass**: V ≤ 0.10 all 3 bags vs Gate-3d Condition A
+
+**Expected result**: τ=0.92 (current production) is near Pareto-optimal. Lower τ
+gives lower skip% but better V; higher τ gives more skip% but risks V>0.10 from
+MAD gate being too permissive. Non-monotonic shape possible (like Gate 3g MH sweep).
+
+---
+
+## 📋 Gate 3k — EMA Scene Fingerprint (I-053) α Sweep
+
+**Status**: IMPLEMENTATION COMPLETE — experiment not yet run.
+**Script**: `scripts/realworld/gate3k_ema_sweep.sh`
+
+**Design (I-053)**:
+```python
+# Update EMA on EVERY frame (including skipped frames):
+ema = (1 - alpha) * ema + alpha * fp_current
+
+# Skip criterion uses EMA as reference (instead of point snapshot):
+sim = cosine_sim(fp_current, ema)
+skip if sim >= tau
+```
+
+**Key insight**: Current system updates reference only on cache misses (every ~9-15 frames).
+EMA updates on every frame, tracking slow scene drift. This reduces spurious I-047
+"freshness-tax" forced refreshes in slowly-panning/drifting scenes.
+
+**Sweep**: α ∈ {0.05, 0.10, 0.15, 0.20, 0.30}
+**Fixed**: max_hold=15, tau=0.92, action_aware=on
+**Pass**: V(EMA_αX vs BASELINE) ≤ 0.10 all 3 bags
+**Bonus**: skip% > 91% (Gate 3g baseline) at any α
+
+**Stability analysis**:
+- Slow drift: EMA tracks, similarity stays high → fewer I-047 forced runs → higher skip%
+- Abrupt transition: EMA lags by ≤1/α frames before triggering correct refresh
+- α=0.05 → ~20 frames to adapt (slow, conservative)
+- α=0.30 → ~3 frames to adapt (fast, aggressive)
+
+---
+
+---
+
+## 📋 Gate 3l — Similarity Slope Predictive Refresh (I-054)
+
+**Status**: IMPLEMENTATION COMPLETE — experiment not yet run.
+**Script**: `scripts/realworld/gate3l_slope_predict.sh`
+
+**Design (I-054)**:
+- Track d(sim)/dt = (sim[t] - sim[t-w]) / w over window w=3 frames
+- If sim >= τ BUT slope < -δ_s → pre-emptive S2 run (PREDICTIVE BYPASS)
+- All other mechanisms (I-046/I-047/I-050) are reactive; I-054 is the first predictive one
+- Fires BEFORE threshold is crossed, catching doorway/turn transitions 2-3 frames early
+
+**Key novelty**: Unlike I-046 (fires AFTER action), I-047 (fires on period), τ gate (fires AFTER crossing):
+I-054 fires BEFORE the similarity would drop below τ, by detecting the rate of descent.
+
+**Sweep**: δ_s ∈ {0.005, 0.010, 0.015, 0.020, 0.030}, window=3
+**Fixed**: max_hold=15, tau=0.92, action_aware=on
+**Pass**: V ≤ 0.10 all 3 bags vs Gate-3l baseline
+**Prediction**: Intermediate δ_s should IMPROVE V (lower) by getting fresh plans at transitions,
+at cost of reduced skip% (more bypasses). This would make δ_s a new efficiency knob.
 
 ---
 

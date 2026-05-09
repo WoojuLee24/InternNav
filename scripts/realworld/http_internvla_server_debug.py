@@ -111,6 +111,45 @@ _serve_hold_threshold = 15          # force refresh after N serve cycles
 _traj_serve_count = 0               # HTTP responses serving current cached traj
 _serve_count_lock = threading.Lock()
 
+# I-053: EMA Scene Fingerprint (Gate 3k)
+# Current system: compare fp_current vs fp_at_last_cache_miss only.
+# EMA variant: maintain an exponential moving average of ALL frame fingerprints
+# (including skipped frames). The EMA tracks the "recent scene baseline" rather
+# than a snapshot, reducing sensitivity to transient lighting/motion artifacts
+# and adapting to slow scene drift without triggering I-047 forced refreshes.
+#
+# Skip criterion: cosine_sim(fp_current, _ema_fingerprint) >= tau
+# (identical semantics to current; only the reference changes)
+#
+# alpha controls EMA adaptation speed:
+#   alpha=0.0 → equivalent to current point-fingerprint (no update on skip)
+#   alpha=0.1 → slow drift tracking (~10 frames to adapt fully)
+#   alpha=0.5 → fast adaptation (~2 frames to adapt)
+# The key difference from current: EMA updates on EVERY frame, including skips.
+_ema_fingerprint_enabled = False
+_ema_fingerprint_alpha = 0.15       # EMA smoothing factor; tuned per experiment
+_ema_fingerprint = None             # running EMA vector (same shape as _last_fingerprint)
+_ema_fp_lock = threading.Lock()
+
+# I-054: Similarity Slope Detector — Predictive Refresh (Gate 3l)
+# All previous cache mechanisms are reactive: they trigger a refresh AFTER the
+# similarity drops below τ or the hold count exceeds H_max.
+# I-054 is predictive: by tracking the temporal derivative of the similarity
+# signal, it fires a pre-emptive S2 run when the similarity is DECLINING RAPIDLY,
+# anticipating cache invalidation before it occurs.
+#
+# Skip decision: if sim >= τ BUT d(sim)/dt < -_slope_threshold → predictive bypass
+#   d(sim)/dt estimated as (sim[t] - sim[t-k]) / k  over the last _slope_window frames
+#
+# Impact: catches doorway/turn transitions 2-3 frames earlier than the reactive τ gate,
+# reducing the probability that stale cache is served at safety-critical decision points.
+# Allows higher τ (more permissive skip) while maintaining V ≤ 0.10.
+_slope_predict_enabled = False
+_slope_threshold = 0.015           # |Δsim / frame| trigger level; tuned by Gate 3l
+_slope_window = 3                  # frames over which to estimate slope
+_similarity_history = []           # rolling buffer of recent similarity scores
+_slope_history_lock = threading.Lock()
+
 def _image_fingerprint(rgb):
     """32x32 grayscale, raw pixel values 0-255 (no normalization).
     Returns a 1D float32 vector or None if input is unusable.
@@ -206,11 +245,16 @@ async_metrics_lock = threading.Lock()
 
 def reset_dual_metrics():
     global _last_fresh_was_action, _consecutive_skip_count, _last_fingerprint, _similarity_window
+    global _ema_fingerprint
     with temporal_cache_lock:
         _last_fresh_was_action = False
         _consecutive_skip_count = 0
         _last_fingerprint = None
         _similarity_window.clear()  # I-049: reset adaptive window on metrics reset
+    with _ema_fp_lock:
+        _ema_fingerprint = None   # I-053: reset EMA on metrics reset
+    with _slope_history_lock:
+        _similarity_history.clear()  # I-054: reset slope history on metrics reset
     with async_metrics_lock:
         async_metrics["start_time"] = time.time()
         async_metrics["http_requests"] = 0
@@ -254,6 +298,7 @@ def async_continuous_loop():
     camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
 
     global _last_fingerprint, _last_fresh_was_action, _consecutive_skip_count, _max_hold_frames
+    global _ema_fingerprint, _traj_serve_count, _similarity_history
     while async_thread_running:
         try:
             # Wait for new frame data from queue (non-blocking with timeout)
@@ -281,10 +326,18 @@ def async_continuous_loop():
                 serve_count = _traj_serve_count
                 serve_bypass_on = _serve_count_bypass_enabled
                 serve_threshold = _serve_hold_threshold
+            with _ema_fp_lock:
+                ema_on = _ema_fingerprint_enabled
+                ema_alpha = _ema_fingerprint_alpha
+            with _slope_history_lock:
+                slope_on = _slope_predict_enabled
+                slope_thr = _slope_threshold
+                slope_win = _slope_window
             was_forced_bypass = False
             was_i046_bypass = False  # I-050: track bypass type for flag propagation
             was_i047_bypass = False
             was_i052_bypass = False
+            was_i054_bypass = False
             if threshold > 0.0:
                 # I-049: compute adaptive max_hold if enabled
                 if adaptive_on and len(_similarity_window) >= _ADAPTIVE_WINDOW_SIZE:
@@ -321,25 +374,67 @@ def async_continuous_loop():
                     fp = _image_fingerprint(image)
                     if fp is not None:
                         _last_fingerprint = fp
+                        # I-053: update EMA on forced frames too
+                        if ema_on:
+                            with _ema_fp_lock:
+                                if _ema_fingerprint is None:
+                                    _ema_fingerprint = fp.copy()
+                                else:
+                                    _ema_fingerprint = (1 - ema_alpha) * _ema_fingerprint + ema_alpha * fp
                     with temporal_cache_lock:
                         _consecutive_skip_count = 0
                 else:
                     fp = _image_fingerprint(image)
-                    if fp is not None and _last_fingerprint is not None:
-                        sim = _cosine_sim(fp, _last_fingerprint)
+                    if fp is not None:
+                        # I-053: update EMA on every frame (including would-be skips)
+                        if ema_on:
+                            with _ema_fp_lock:
+                                if _ema_fingerprint is None:
+                                    _ema_fingerprint = fp.copy()
+                                else:
+                                    _ema_fingerprint = (1 - ema_alpha) * _ema_fingerprint + ema_alpha * fp
+                        # I-053: choose reference fingerprint (EMA or point)
+                        ref_fp = _ema_fingerprint if (ema_on and _ema_fingerprint is not None) else _last_fingerprint
+                    else:
+                        ref_fp = None
+                    if fp is not None and ref_fp is not None:
+                        sim = _cosine_sim(fp, ref_fp)
+                        # I-054: update slope history on every frame
+                        if slope_on:
+                            with _slope_history_lock:
+                                _similarity_history.append(sim)
+                                if len(_similarity_history) > slope_win * 4:
+                                    del _similarity_history[:-slope_win * 2]
                         # I-049: track similarity for adaptive max_hold window
                         if adaptive_on:
                             _similarity_window.append(sim)
                             if len(_similarity_window) > _ADAPTIVE_WINDOW_SIZE * 2:
                                 del _similarity_window[:-_ADAPTIVE_WINDOW_SIZE]
                         if sim >= threshold:
-                            with async_metrics_lock:
-                                async_metrics["temporal_cache_skips"] = async_metrics.get("temporal_cache_skips", 0) + 1
-                            with temporal_cache_lock:
-                                _consecutive_skip_count += 1
-                            s2_request_queue.task_done()
-                            continue
-                    # First frame, or below threshold → process and update fingerprint
+                            # I-054: predictive bypass — if similarity is DECLINING rapidly,
+                            # fire a pre-emptive S2 run even though sim >= τ
+                            if slope_on:
+                                with _slope_history_lock:
+                                    hist = _similarity_history
+                                if len(hist) >= slope_win + 1:
+                                    slope = (hist[-1] - hist[-1 - slope_win]) / slope_win
+                                    if slope < -slope_thr:
+                                        was_i054_bypass = True
+                                        was_forced_bypass = True
+                                        with async_metrics_lock:
+                                            async_metrics["slope_predict_bypasses"] = (
+                                                async_metrics.get("slope_predict_bypasses", 0) + 1)
+                                        with temporal_cache_lock:
+                                            _consecutive_skip_count = 0
+                                        # Fall through to S2 run
+                            if not was_i054_bypass:
+                                with async_metrics_lock:
+                                    async_metrics["temporal_cache_skips"] = async_metrics.get("temporal_cache_skips", 0) + 1
+                                with temporal_cache_lock:
+                                    _consecutive_skip_count += 1
+                                s2_request_queue.task_done()
+                                continue
+                    # First frame, or below threshold → process and update point fingerprint
                     if fp is not None:
                         _last_fingerprint = fp
                     with temporal_cache_lock:
@@ -621,6 +716,7 @@ def eval_dual_async():
     - This achieves TRUE async decoupling!
     """
     global idx, output_dir, start_time, async_thread_running, async_cached_trajectory, async_cached_action
+    global _traj_serve_count
     try:
         start_time = time.time()
 
@@ -883,6 +979,17 @@ def get_async_metrics():
         # Gate 3c (I-010): cold-start diagnostics
         "waiting_responses": m.get("waiting_responses", 0),
         "pre_warm_frames_queued": m.get("pre_warm_frames_queued", 0),
+
+        # I-053: EMA scene fingerprint (Gate 3k)
+        "ema_fingerprint_enabled": _ema_fingerprint_enabled,
+        "ema_fingerprint_alpha": _ema_fingerprint_alpha,
+        "ema_fingerprint_initialized": _ema_fingerprint is not None,
+
+        # I-054: similarity slope predictive refresh (Gate 3l)
+        "slope_predict_enabled": _slope_predict_enabled,
+        "slope_threshold": _slope_threshold,
+        "slope_window": _slope_window,
+        "slope_predict_bypasses": m.get("slope_predict_bypasses", 0),
     }
 
     return jsonify(metrics)
@@ -1006,6 +1113,58 @@ def set_serve_count_hold_endpoint():
         'status': 'ok',
         'serve_count_bypass_enabled': enabled,
         'serve_hold_threshold': threshold,
+    })
+
+
+@app.route("/set_ema_fingerprint", methods=['POST', 'GET'])
+def set_ema_fingerprint_endpoint():
+    """I-053 (Gate 3k): Toggle EMA scene fingerprint.
+    When enabled, the cache comparison reference is an exponential moving average
+    of ALL frame fingerprints (including skipped frames) rather than a snapshot
+    of the last cache-miss frame.  The EMA tracks slow scene drift, reducing
+    spurious I-047 forced-refreshes on gradually-changing scenes.
+    GET ?enabled=true|false&alpha=0.15"""
+    global _ema_fingerprint_enabled, _ema_fingerprint_alpha, _ema_fingerprint
+    enabled_str = request.args.get('enabled', 'true').lower()
+    enabled = enabled_str in ('1', 'true', 'yes', 'on')
+    alpha = float(request.args.get('alpha', _ema_fingerprint_alpha))
+    alpha = max(0.01, min(1.0, alpha))
+    with _ema_fp_lock:
+        _ema_fingerprint_enabled = enabled
+        _ema_fingerprint_alpha = alpha
+        _ema_fingerprint = None  # reset EMA on config change
+    return jsonify({
+        'status': 'ok',
+        'ema_fingerprint_enabled': enabled,
+        'ema_fingerprint_alpha': alpha,
+    })
+
+
+@app.route("/set_slope_predict", methods=['POST', 'GET'])
+def set_slope_predict_endpoint():
+    """I-054 (Gate 3l): Toggle similarity-slope predictive refresh.
+    When enabled, fires a pre-emptive S2 run when the similarity score is
+    declining rapidly (d(sim)/dt < -threshold), even if sim >= tau.
+    This anticipates cache invalidation before it occurs (doorway transitions,
+    turns) rather than reacting after the threshold is crossed.
+    GET ?enabled=true|false&threshold=0.015&window=3"""
+    global _slope_predict_enabled, _slope_threshold, _slope_window
+    enabled_str = request.args.get('enabled', 'true').lower()
+    enabled = enabled_str in ('1', 'true', 'yes', 'on')
+    threshold = float(request.args.get('threshold', _slope_threshold))
+    threshold = max(0.001, min(0.5, threshold))
+    window = int(request.args.get('window', _slope_window))
+    window = max(1, min(20, window))
+    with _slope_history_lock:
+        _slope_predict_enabled = enabled
+        _slope_threshold = threshold
+        _slope_window = window
+        _similarity_history.clear()
+    return jsonify({
+        'status': 'ok',
+        'slope_predict_enabled': enabled,
+        'slope_threshold': threshold,
+        'slope_window': window,
     })
 
 
