@@ -40,7 +40,7 @@ eval_cfg = EvalCfg(
         env_type='internutopia',
         env_settings={
             'use_fabric': False,  # Please set use_fabric=False due to the render delay;
-            'headless': True,
+            'headless': False, # Isaac-sim
         },
     ),
     task=TaskCfg(
@@ -57,7 +57,8 @@ eval_cfg = EvalCfg(
         ),
         robot_name='h1',
         robot_flash=True,  # If robot_flash is True, the mode is flash (set world_pose directly); else you choose physical mode.
-        flash_collision=False,  # If flash_collision is True, the robot will stop when collision detected.
+        robot_platform_size=0.12, # 0.12 (Default), None (robot prim) # The robot platform size (diameter) used for collision detection in flash mode. If None, it will be set to 0.12m by default.
+        flash_collision=True, #False,  # If flash_collision is True, the robot will stop when collision detected.
         robot_usd_path='/ws/src/InternNav/data/InternData-N1-v0.5-mini/Embodiments/vln-pe/h1/h1_internvla.usd',
         camera_resolution=[640, 480],  # (W,H)
         camera_prim_path='torso_link/h1_1_25_down_30',

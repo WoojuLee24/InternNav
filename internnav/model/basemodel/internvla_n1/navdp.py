@@ -1,3 +1,11 @@
+import sys
+from pathlib import Path
+
+_navdp_project_root = Path(__file__).resolve().parent.parent.parent.parent.parent
+for _dp_path in [str(_navdp_project_root / 'third_party/diffusion-policy'), str(_navdp_project_root / 'src/diffusion-policy')]:
+    if _dp_path not in sys.path:
+        sys.path.insert(0, _dp_path)
+
 import torch
 import torch.nn as nn
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
