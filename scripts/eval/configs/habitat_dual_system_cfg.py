@@ -29,5 +29,7 @@ eval_cfg = EvalCfg(
         "max_steps_per_episode": 500,
         "port": "2333",
         "dist_url": "env://",
+        "use_wandb": True,
+        "wandb_project": "huggingface",
     },
 )
