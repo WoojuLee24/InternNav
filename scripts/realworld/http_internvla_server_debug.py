@@ -131,6 +131,15 @@ _ema_fingerprint_alpha = 0.15       # EMA smoothing factor; tuned per experiment
 _ema_fingerprint = None             # running EMA vector (same shape as _last_fingerprint)
 _ema_fp_lock = threading.Lock()
 
+# I-055: Transition-Reset EMA (Gate 3m correction of I-053)
+# I-053 design flaw: slow EMA update after forced bypasses (I-046/I-047/I-052) causes
+# a cascade — EMA lags ~1/α frames behind the new scene, triggering natural misses
+# at each lag frame (EMA still represents the old scene). Fix: hard-reset EMA to current
+# frame after any forced bypass, so post-bypass comparison is against the current scene.
+# During skip sequences, EMA still slowly tracks drift (same as I-053).
+# _ema_transition_reset is a flag on the existing _ema_fingerprint_enabled path.
+_ema_transition_reset = False           # True = I-055 (TR-EMA); False = I-053 (standard EMA)
+
 # I-054: Similarity Slope Detector — Predictive Refresh (Gate 3l)
 # All previous cache mechanisms are reactive: they trigger a refresh AFTER the
 # similarity drops below τ or the hold count exceeds H_max.
@@ -298,7 +307,7 @@ def async_continuous_loop():
     camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
 
     global _last_fingerprint, _last_fresh_was_action, _consecutive_skip_count, _max_hold_frames
-    global _ema_fingerprint, _traj_serve_count, _similarity_history
+    global _ema_fingerprint, _traj_serve_count, _similarity_history, _ema_transition_reset
     while async_thread_running:
         try:
             # Wait for new frame data from queue (non-blocking with timeout)
@@ -329,6 +338,7 @@ def async_continuous_loop():
             with _ema_fp_lock:
                 ema_on = _ema_fingerprint_enabled
                 ema_alpha = _ema_fingerprint_alpha
+                ema_tr_reset = _ema_transition_reset
             with _slope_history_lock:
                 slope_on = _slope_predict_enabled
                 slope_thr = _slope_threshold
@@ -374,10 +384,12 @@ def async_continuous_loop():
                     fp = _image_fingerprint(image)
                     if fp is not None:
                         _last_fingerprint = fp
-                        # I-053: update EMA on forced frames too
+                        # I-053/I-055: update EMA on forced frames
+                        # I-055 (TR-EMA): hard-reset to current frame to prevent post-bypass cascade
+                        # I-053 (standard EMA): slow update (original behavior)
                         if ema_on:
                             with _ema_fp_lock:
-                                if _ema_fingerprint is None:
+                                if _ema_fingerprint is None or ema_tr_reset:
                                     _ema_fingerprint = fp.copy()
                                 else:
                                     _ema_fingerprint = (1 - ema_alpha) * _ema_fingerprint + ema_alpha * fp
@@ -980,10 +992,11 @@ def get_async_metrics():
         "waiting_responses": m.get("waiting_responses", 0),
         "pre_warm_frames_queued": m.get("pre_warm_frames_queued", 0),
 
-        # I-053: EMA scene fingerprint (Gate 3k)
+        # I-053/I-055: EMA scene fingerprint (Gate 3k/3m)
         "ema_fingerprint_enabled": _ema_fingerprint_enabled,
         "ema_fingerprint_alpha": _ema_fingerprint_alpha,
         "ema_fingerprint_initialized": _ema_fingerprint is not None,
+        "ema_transition_reset": _ema_transition_reset,
 
         # I-054: similarity slope predictive refresh (Gate 3l)
         "slope_predict_enabled": _slope_predict_enabled,
@@ -1118,25 +1131,28 @@ def set_serve_count_hold_endpoint():
 
 @app.route("/set_ema_fingerprint", methods=['POST', 'GET'])
 def set_ema_fingerprint_endpoint():
-    """I-053 (Gate 3k): Toggle EMA scene fingerprint.
-    When enabled, the cache comparison reference is an exponential moving average
-    of ALL frame fingerprints (including skipped frames) rather than a snapshot
-    of the last cache-miss frame.  The EMA tracks slow scene drift, reducing
-    spurious I-047 forced-refreshes on gradually-changing scenes.
-    GET ?enabled=true|false&alpha=0.15"""
-    global _ema_fingerprint_enabled, _ema_fingerprint_alpha, _ema_fingerprint
+    """I-053 (Gate 3k) / I-055 (Gate 3m): Toggle EMA scene fingerprint.
+    I-053: standard EMA reference — slow update on ALL frames including forced bypasses.
+    I-055 (transition_reset=true): Transition-Reset EMA — hard-reset EMA to current frame
+    after each forced bypass (I-046/I-047/I-052), preventing the post-bypass lag cascade.
+    GET ?enabled=true|false&alpha=0.15&transition_reset=false"""
+    global _ema_fingerprint_enabled, _ema_fingerprint_alpha, _ema_fingerprint, _ema_transition_reset
     enabled_str = request.args.get('enabled', 'true').lower()
     enabled = enabled_str in ('1', 'true', 'yes', 'on')
     alpha = float(request.args.get('alpha', _ema_fingerprint_alpha))
     alpha = max(0.01, min(1.0, alpha))
+    tr_str = request.args.get('transition_reset', 'false').lower()
+    tr_reset = tr_str in ('1', 'true', 'yes', 'on')
     with _ema_fp_lock:
         _ema_fingerprint_enabled = enabled
         _ema_fingerprint_alpha = alpha
+        _ema_transition_reset = tr_reset
         _ema_fingerprint = None  # reset EMA on config change
     return jsonify({
         'status': 'ok',
         'ema_fingerprint_enabled': enabled,
         'ema_fingerprint_alpha': alpha,
+        'ema_transition_reset': tr_reset,
     })
 
 
