@@ -1,7 +1,14 @@
+import os
 import sys
 
 sys.path.append('.')
 sys.path.append('./third_party/diffusion-policy')
+
+if os.environ.get('DEBUGPY_ENABLE'):
+    import debugpy
+    debugpy.listen(('0.0.0.0', 5679))
+    print('[debugpy] Waiting for debugger on port 5679...')
+    debugpy.wait_for_client()
 
 import argparse
 import importlib.util
