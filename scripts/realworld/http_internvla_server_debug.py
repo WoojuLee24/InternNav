@@ -291,6 +291,7 @@ def reset_dual_metrics():
         async_metrics["traj_lengths_sum"] = 0
         async_metrics["traj_lengths_count"] = 0
         async_metrics["serve_count_bypasses"] = 0
+        async_metrics["slope_predict_bypasses"] = 0
         # pre_warm_frames_queued is NOT reset here — it's a server-lifetime counter
 
 def async_continuous_loop():
