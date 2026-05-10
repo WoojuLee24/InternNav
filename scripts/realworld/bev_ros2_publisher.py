@@ -21,7 +21,7 @@ from std_msgs.msg import Header
 import cv2
 
 
-ZMQ_ADDR = 'tcp://localhost:5556'
+ZMQ_ADDR = 'tcp://localhost:5577'
 ROS_TOPIC = '/bev/map'
 PUBLISH_HZ = 10
 

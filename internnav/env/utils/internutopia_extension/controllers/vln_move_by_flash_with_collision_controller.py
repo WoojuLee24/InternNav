@@ -1,4 +1,5 @@
 import math
+import os
 from typing import Any, Dict, List
 
 import numpy as np
@@ -44,13 +45,13 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
         self._traj_world = []
         self._collision_count = 0
         self._bev_save_dir = '/tmp/bev_debug'
-        import os as _os; _os.makedirs(self._bev_save_dir, exist_ok=True)
+        os.makedirs(self._bev_save_dir, exist_ok=True)
         try:
             import zmq
             self._zmq_ctx = zmq.Context.instance()
             self._zmq_sock = self._zmq_ctx.socket(zmq.PUSH)
             self._zmq_sock.setsockopt(zmq.SNDHWM, 1)
-            self._zmq_sock.connect('tcp://localhost:5556')
+            self._zmq_sock.connect('tcp://localhost:5577')
             self._zmq_enabled = True
             print('[BEV VIS] ZMQ connected to tcp://localhost:5556')
         except Exception as e:
@@ -139,20 +140,33 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
                 - 0: occupied or invalid space
         """
 
-        min_height = self.robot.get_robot_base().get_world_pose()[0][2] + 0.6  # default robot height
         max_height = 1.55 + 8
         data_info = topdown_global_map_camera.get_data()
         depth = np.array(data_info['depth'])
         flat_surface_mask = np.ones_like(depth, dtype=bool)
+        base_height = self.robot.get_robot_base().get_world_pose()[0][2]
+        foot_height = self.robot.get_ankle_height()
+        min_height = base_height - foot_height + 0.05
         if self.robot.config.type == 'VLNH1Robot':
             depth_mask = ((depth >= min_height) & (depth < max_height)) | ((depth <= 0.5) & (depth > 0.02))
         elif self.robot.config.type == 'VLNAliengoRobot':
-            base_height = self.robot.get_robot_base().get_world_pose()[0][2]
-            foot_height = self.robot.get_ankle_height()
-            min_height = base_height - foot_height + 0.05
             depth_mask = (depth >= min_height) & (depth < max_height)
         free_map = np.zeros_like(depth, dtype=int)
         free_map[flat_surface_mask & depth_mask] = 1  # 1: free, 0: occupied
+
+        import os
+        if os.environ.get('DEBUGPY_ENABLE', '0') == '1':
+            finite = depth[np.isfinite(depth)]
+            camera_z = topdown_global_map_camera.get_world_pose()[0][2]
+            robot_base_z = self.robot.get_robot_base().get_world_pose()[0][2]
+            foot_height = self.robot.get_ankle_height()
+            cx, cy = depth.shape[0] // 2, depth.shape[1] // 2
+            print(f'[FREEMAP DEBUG] camera_Z={camera_z:.3f} robot_base_Z={robot_base_z:.3f} foot_height={foot_height:.3f}')
+            print(f'[FREEMAP DEBUG] min_height={min_height:.3f} max_height={max_height:.3f} (base-foot={robot_base_z-foot_height:.3f})')
+            print(f'[FREEMAP DEBUG] depth finite={len(finite)}/{depth.size} center={depth[cx,cy]:.4f}')
+            print(f'[FREEMAP DEBUG] depth pct(10,25,50,75,90)={np.percentile(finite, [10,25,50,75,90]).round(3).tolist()}')
+            print(f'[FREEMAP DEBUG] free={int((free_map==1).sum())} occupied={int((free_map==0).sum())}', flush=True)
+
         return free_map
 
     def check_collision(self, position, aperture=200) -> bool:
@@ -256,14 +270,13 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
 
         _, jpeg = cv2.imencode('.jpg', vis, [cv2.IMWRITE_JPEG_QUALITY, 80])
 
-        # Always save latest frame for debugging
-        cv2.imwrite(f'{self._bev_save_dir}/latest.jpg', vis)
-        # Save collision frames separately
-        if collision:
-            self._collision_count += 1
-            path = f'{self._bev_save_dir}/collision_{self._collision_count:04d}.jpg'
-            cv2.imwrite(path, vis)
-            print(f'[BEV VIS] Saved collision frame → {path}')
+        if os.environ.get('DEBUGPY_ENABLE') == '1':
+            cv2.imwrite(f'{self._bev_save_dir}/latest.jpg', vis)
+            if collision:
+                self._collision_count += 1
+                path = f'{self._bev_save_dir}/collision_{self._collision_count:04d}.jpg'
+                cv2.imwrite(path, vis)
+                print(f'[BEV VIS] Saved collision frame → {path}')
 
         try:
             self._zmq_sock.send(jpeg.tobytes(), zmq.NOBLOCK)
