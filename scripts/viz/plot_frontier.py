@@ -112,7 +112,7 @@ def load_gate3k():
     ALPHA_VALUES = [0.05, 0.10, 0.15, 0.20, 0.30]
     points = []
     for alpha in ALPHA_VALUES:
-        alpha_tag = str(alpha).replace(".", "_")
+        alpha_tag = f"{alpha:.2f}".replace(".", "_")
         skip_vals = []
         v_vals = []
         baseline_v_vals = []
@@ -142,30 +142,67 @@ def load_gate3k():
             })
     return points
 
-def plot_frontier(g3g_pts, g3j_pts, g3k_pts, output_path):
+def load_gate3m():
+    """Load Gate 3m TR-EMA sweep results (if available)."""
+    GATE3M_LOG = "/tmp/gate3m_tr_ema"
+    ALPHA_VALUES = [0.05, 0.10, 0.15, 0.20, 0.30]
+    points = []
+    for alpha in ALPHA_VALUES:
+        alpha_tag = f"{alpha:.2f}".replace(".", "_")
+        skip_vals = []
+        v_vals = []
+        for b in BAGS:
+            tag = f"{b}_TREMA{alpha_tag}"
+            base_tag = f"{b}_BASELINE"
+            path = f"{GATE3M_LOG}/{tag}/metrics.json"
+            base_path = f"{GATE3M_LOG}/{base_tag}/metrics.json"
+            if not (os.path.exists(path) and os.path.exists(base_path)):
+                continue
+            d = load(path)
+            da = load(base_path)
+            v = cramers_v(d, da)
+            skip = d.get("temporal_cache_skip_ratio", 0)
+            if v is not None:
+                skip_vals.append(skip)
+                v_vals.append(v)
+        if skip_vals:
+            points.append({
+                "param": "tr_ema",
+                "value": alpha,
+                "label": f"α={alpha:.2f}",
+                "skip": np.mean(skip_vals),
+                "v_max": max(v_vals),
+                "v_vals": v_vals,
+                "pass": max(v_vals) <= 0.10,
+            })
+    return points
+
+def plot_frontier(g3g_pts, g3j_pts, g3k_pts, g3m_pts, output_path):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
 
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig, ax = plt.subplots(figsize=(8, 5))
 
     COLORS = {
-        "MH": "#1f77b4",    # blue
-        "tau": "#d62728",   # red
-        "alpha": "#2ca02c", # green
+        "MH":     "#1f77b4",   # blue
+        "tau":    "#d62728",   # red
+        "alpha":  "#2ca02c",   # green (Gate 3k FAIL)
+        "tr_ema": "#9467bd",   # purple (Gate 3m PASS)
     }
     MARKERS = {
-        "MH": "o",
-        "tau": "s",
-        "alpha": "^",
+        "MH":     "o",
+        "tau":    "s",
+        "alpha":  "^",
+        "tr_ema": "D",
     }
 
     v_limit = 0.10
     ax.axhline(v_limit, color="gray", linestyle="--", linewidth=1, label=f"$V$ limit ({v_limit})", zorder=1)
     ax.axhline(0, color="lightgray", linewidth=0.5, zorder=0)
 
-    all_points = g3g_pts + g3j_pts + g3k_pts
+    all_points = g3g_pts + g3j_pts + g3k_pts + g3m_pts
 
     for pt in all_points:
         p = pt["param"]
@@ -187,18 +224,32 @@ def plot_frontier(g3g_pts, g3j_pts, g3k_pts, output_path):
         ax.plot(px, py, linestyle=":", color="gray", linewidth=1, alpha=0.5, zorder=2)
 
     legend_patches = [
-        mpatches.Patch(color=COLORS["MH"],    label="$H_{\\max}$ sweep (Gate 3g)"),
-        mpatches.Patch(color=COLORS["tau"],   label="$\\tau$ sweep (Gate 3j)"),
-        mpatches.Patch(color=COLORS["alpha"], label="EMA $\\alpha$ sweep (Gate 3k)"),
+        mpatches.Patch(color=COLORS["MH"],     label="$H_{\\max}$ sweep (Gate 3g)"),
+        mpatches.Patch(color=COLORS["tau"],    label="$\\tau$ sweep (Gate 3j)"),
+        mpatches.Patch(color=COLORS["alpha"],  label="EMA $\\alpha$ sweep (Gate 3k, FAIL)"),
+        mpatches.Patch(color=COLORS["tr_ema"], label="TR-EMA $\\alpha$ sweep (Gate 3m)"),
     ]
     ax.legend(handles=legend_patches, loc="upper left", fontsize=9)
+
+    # Annotate the co-located production point (H=15, τ=0.92)
+    prod_pts = [p for p in all_points if
+                (p["param"] == "MH" and p["value"] == 15) or
+                (p["param"] == "tau" and p["value"] == 0.92)]
+    if prod_pts:
+        px = np.mean([p["skip"] for p in prod_pts])
+        py = np.mean([p["v_max"] for p in prod_pts])
+        ax.annotate("★ Production\n(H=15, τ=0.92)",
+                    (px, py), xytext=(-65, -40), textcoords="offset points",
+                    fontsize=8, color="darkgreen",
+                    arrowprops=dict(arrowstyle="->", color="darkgreen", lw=1.2))
 
     ax.set_xlabel("Skip rate (%)", fontsize=11)
     ax.set_ylabel("$V_{\\max}$ (worst bag)", fontsize=11)
     ax.set_title("Quality–Efficiency Frontier: MAD Temporal S2 Cache", fontsize=12)
     ax.grid(True, alpha=0.3)
-    ax.set_xlim(left=0)
-    ax.set_ylim(bottom=0)
+    # Zoom to the relevant region (Gate 3k fails up to 0.31, clip for readability)
+    ax.set_xlim(left=74, right=98)
+    ax.set_ylim(bottom=-0.005, top=0.32)
 
     plt.tight_layout()
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -216,15 +267,18 @@ def main():
     print("Loading Gate 3k results...")
     g3k = load_gate3k()
     print(f"  {len(g3k)} points loaded")
+    print("Loading Gate 3m results...")
+    g3m = load_gate3m()
+    print(f"  {len(g3m)} points loaded")
 
     print("\n--- All frontier points ---")
     print(f"{'Param':>8} {'Value':>8} {'Skip%':>8} {'V_max':>8} {'Pass':>6}")
-    for pt in g3g + g3j + g3k:
+    for pt in g3g + g3j + g3k + g3m:
         status = "✓" if pt["pass"] else "✗"
         print(f"{pt['param']:>8} {str(pt['value']):>8} {pt['skip']:>7.1f}% {pt['v_max']:>8.4f} {status:>6}")
 
     output = "figures/frontier_2d.pdf"
-    plot_frontier(g3g, g3j, g3k, output)
+    plot_frontier(g3g, g3j, g3k, g3m, output)
 
 if __name__ == "__main__":
     main()

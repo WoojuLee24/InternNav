@@ -110,7 +110,7 @@ for alpha in ALPHAS:
             row_data[b] = v
 
     if not skip_vals:
-        print(f"{alpha} & \\emph{{pending}} & \\emph{{---}} & \\emph{{---}} & \\emph{{---}} & \\emph{{---}} & \\emph{{---}} \\\\")
+        print(f"{alpha:.2f} & \\emph{{pending}} & \\emph{{---}} & \\emph{{---}} & \\emph{{---}} & \\emph{{---}} & \\emph{{---}} \\\\")
         continue
 
     v073 = row_data.get("073623")
