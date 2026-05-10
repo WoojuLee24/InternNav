@@ -1,11 +1,11 @@
 # Research Gate Status
 
-_Last updated: 2026-05-10 · Branch: research/async-foundation_
+_Last updated: 2026-05-10 (Gate 3i complete) · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
  Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 4
-  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   📋 IMPL.   ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    📋 BLOCKED
+  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    📋 BLOCKED
 ```
 
 ---
@@ -323,51 +323,33 @@ as a proxy for plan consumption.
 
 ---
 
-## 📋 Gate 3i — Request-Count-Adaptive Hold (I-051v2)
+## ❌ Gate 3i — Request-Count-Adaptive Hold (I-052)
 
-**Status**: IMPLEMENTATION COMPLETE — experiment not yet run.
-**Script**: `scripts/realworld/gate3i_serve_count.sh`
-**Thresholds**: SC ∈ {5, 10, 15, 20, 30}
+**Commit**: `parse_gate3i.py` script only; experiment ran 2026-05-10
+**Hypothesis**: HTTP serve count is a model-agnostic plan-consumption signal → replace I-047 (frame count) with I-052 (serve count), which would be superior for batched-inference architectures.
+**Result**: FAIL — I-052 mechanism never provides benefit; PASS at SC≥20 only because SC=0 (MH fires first).
 
-**Motivation**: Gate 3h (I-051) revealed that plan-length-based adaptation degenerates
-for fixed-length model outputs (always 33 waypoints). The correct consumption signal
-is "how many HTTP responses have served the current cached trajectory" — each response
-represents one robot control step consuming the plan.
+| $T_{\text{serve}}$ | Skip% | V_073623 | V_061841 | V_063047 | V_max | SC bypasses |
+|---|---|---|---|---|---|---|
+| Baseline (off) | 91.3% | 0.000 | 0.000 | 0.000 | 0.000 | N/A |
+| 5  | 85.0% | 0.0977 | 0.1355 | 0.1105 | 0.1355 ❌ | 120/414/514 |
+| 10 | 89.4% | 0.1259 | 0.0159 | 0.0769 | 0.1259 ❌ | 87/259/361 |
+| 15 | 91.5% | **0.2085** | 0.0325 | 0.0433 | **0.2085 ❌** | 0/0/0 (AA broken) |
+| 20 | 91.3% | 0.0097 | 0.0051 | 0.0096 | 0.0097 ✅ | 0/0/0 (MH wins) |
+| 30 | 91.2% | 0.0301 | 0.0234 | 0.0230 | 0.0301 ✅ | 0/0/0 (MH wins) |
+
+**Root cause: serve count ≈ frame count at 12 Hz**
+At ~12 Hz HTTP polling, one serve ≈ one frame. So SC and MH measure nearly the same thing:
+- SC < 15: SC fires before MH → extra refreshes → shifts action/traj balance → V↑ (FAIL)
+- SC = 15: SC and MH compete at same threshold → AA mechanism disrupted (AA=13 vs baseline 26) → action_rate collapses from 42.6% to 22.9% on bag 073623 → V=0.2085 (worst case)
+- SC > 15: MH fires first → resets serve counter → SC never reaches threshold → SC=0 bypasses → equivalent to Gate 3g baseline → PASS by default, not by mechanism
+
+**Key finding**: I-052 is not a new independent signal. It duplicates I-047 at the HTTP layer. In the current synchronous 1:1 HTTP↔frame architecture, serve count and frame count are interchangeable. I-052 would only add value in batch-inference architectures where multiple HTTP requests arrive per S2 cycle (not this deployment).
 
 **Design (I-052)**:
-```python
-# Global state
-_traj_serve_count = 0          # HTTP responses serving current cached traj
-_serve_hold_threshold = 15     # force refresh after N serve cycles (configurable)
-_serve_count_bypass = False    # enable/disable I-052
-
-# In eval_dual_async (HTTP handler, after reading cache):
-if cached_traj is not None:
-    with temporal_cache_lock:
-        _traj_serve_count += 1   # increment per serve
-
-# In async_continuous_loop (background thread, before similarity check):
-if serve_count_bypass and _traj_serve_count >= serve_threshold:
-    forced = "serve_count_bypasses"  # I-052
-    was_i052_bypass = True
-    with temporal_cache_lock:
-        _traj_serve_count = 0
-
-# Reset serve_count when cache is updated by background thread:
-# (in the async_cache_lock block where async_cached_trajectory is written)
-_traj_serve_count = 0
-```
-
-**Pass criterion**: V ≤ 0.10 all 3 bags; equivalent or better skip% than Gate 3g (MH=15)
-
-**Note**: This approach is independent of trajectory length — the serve count directly
-measures robot step consumption regardless of model output format. It works correctly
-even for fixed-length trajectory outputs.
-
-**Comparison with I-047**: I-052 is similar to I-047 but counts HTTP serve cycles
-rather than background loop skip iterations. In the current architecture (1:1 HTTP→queue),
-they are equivalent. I-052 would be superior in architectures where multiple HTTP requests
-arrive per background iteration (e.g., batched inference).
+- Endpoint: `/set_serve_count_hold?enabled=true&threshold=N`
+- In HTTP handler: `_traj_serve_count += 1` per cache hit
+- In background loop: if `_traj_serve_count >= threshold` → force S2 + reset counter
 
 ---
 

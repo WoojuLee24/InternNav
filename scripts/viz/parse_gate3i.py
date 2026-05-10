@@ -27,9 +27,9 @@ def cramers_v(d, da):
     )
     return math.sqrt(chi2 / n)
 
-print("=== Gate 3i: Serve Count Adaptive Hold Sweep ===\n")
+print("=== Gate 3i: Serve-Count Hold Sweep ===\n")
 
-print("--- BASELINE (I-052=off, MH=15) ---")
+print("--- BASELINE (I-052=off, MH=15, tau=0.92) ---")
 for b in BAGS:
     path = f"{LOG}/{b}_BASELINE/metrics.json"
     if os.path.exists(path):
@@ -72,23 +72,21 @@ for thr in THRESHOLDS:
             row_data[b] = v
 
     if not skip_vals:
-        print(f"{thr:>8}   N/A (not run)")
+        print(f"{'SC='+str(thr):>8}   N/A (not run yet)")
         continue
 
     v073 = row_data.get("073623")
     v061 = row_data.get("061841")
     v063 = row_data.get("063047")
-    v_max = max(v for v in [v073, v061, v063] if v is not None)
+    v_max = max(v for v in row_data.values())
     skip_mean = sum(skip_vals) / len(skip_vals)
     status = "PASS" if v_max <= 0.10 else "FAIL"
 
-    v073s = f"{v073:.4f}" if v073 is not None else "N/A"
-    v061s = f"{v061:.4f}" if v061 is not None else "N/A"
-    v063s = f"{v063:.4f}" if v063 is not None else "N/A"
-    print(f"{thr:>8} {skip_mean:>7.1f}% {v073s:>10} {v061s:>10} {v063s:>10} {v_max:>8.4f} {status:>8}")
+    def fmt(v): return f"{v:.4f}" if v is not None else "  N/A"
+    print(f"{'SC='+str(thr):>8} {skip_mean:>7.1f}%  {fmt(v073):>10} {fmt(v061):>10} {fmt(v063):>10} {fmt(v_max):>8}  {status}")
 
 print()
-print("=== LaTeX rows ===")
+print("--- LaTeX table rows ---")
 for thr in THRESHOLDS:
     skip_vals = []
     row_data = {}
@@ -97,12 +95,15 @@ for thr in THRESHOLDS:
         tag = f"{b}_SC{thr}"
         path = f"{LOG}/{tag}/metrics.json"
         base_path = f"{LOG}/{b}_BASELINE/metrics.json"
+
         if not (os.path.exists(path) and os.path.exists(base_path)):
             continue
+
         d = load(path)
         da = load(base_path)
         v = cramers_v(d, da)
         skip = d.get("temporal_cache_skip_ratio", 0)
+
         if v is not None:
             skip_vals.append(skip)
             row_data[b] = v
@@ -111,14 +112,29 @@ for thr in THRESHOLDS:
         print(f"{thr} & \\emph{{pending}} & \\emph{{---}} & \\emph{{---}} & \\emph{{---}} & \\emph{{---}} & \\emph{{---}} \\\\")
         continue
 
-    v073 = row_data.get("073623")
-    v061 = row_data.get("061841")
-    v063 = row_data.get("063047")
-    v_max = max(v for v in [v073, v061, v063] if v is not None)
+    v073 = row_data.get("073623", 0)
+    v061 = row_data.get("061841", 0)
+    v063 = row_data.get("063047", 0)
+    v_max = max(row_data.values())
     skip_mean = sum(skip_vals) / len(skip_vals)
-    status = "\\checkmark" if v_max <= 0.10 else "\\ding{55}"
+    chk = "\\checkmark" if v_max <= 0.10 else "\\times"
+    print(f"{thr} & {skip_mean:.1f}\\% & {v073:.4f} & {v061:.4f} & {v063:.4f} & {v_max:.4f} & {chk} \\\\")
 
-    v073s = f"{v073:.4f}" if v073 is not None else "---"
-    v061s = f"{v061:.4f}" if v061 is not None else "---"
-    v063s = f"{v063:.4f}" if v063 is not None else "---"
-    print(f"{thr} & {skip_mean:.1f}\\% & {v073s} & {v061s} & {v063s} & {v_max:.4f} & {status} \\\\")
+print()
+print("--- Detailed bypass counts ---")
+for thr in THRESHOLDS:
+    for b in BAGS:
+        path = f"{LOG}/{b}_SC{thr}/metrics.json"
+        if not os.path.exists(path):
+            continue
+        d = load(path)
+        bg  = d.get("background_s2_runs", 0)
+        aa  = d.get("action_aware_bypasses", 0)
+        mh  = d.get("max_hold_bypasses", 0)
+        sc  = d.get("serve_count_bypasses", 0)
+        skip = d.get("temporal_cache_skip_ratio", 0)
+        ft  = d.get("fresh_traj_outputs", 0)
+        fa  = d.get("fresh_action_outputs", 0)
+        ar  = fa / max(1, ft+fa) * 100
+        nat = bg - aa - mh - sc
+        print(f"  SC={thr:>2}  bag={b}  bg={bg:>4}  skip={skip:.1f}%  nat={nat:>4}  AA={aa:>4}  MH={mh:>4}  SC={sc:>4}  ar={ar:.1f}%")
