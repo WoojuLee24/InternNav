@@ -177,7 +177,43 @@ def load_gate3m():
             })
     return points
 
-def plot_frontier(g3g_pts, g3j_pts, g3k_pts, g3m_pts, output_path):
+def load_gate3l():
+    """Load Gate 3l slope predictive refresh sweep results (if available)."""
+    GATE3L_LOG = "/tmp/gate3l_slope"
+    SL_VALUES = [0.005, 0.010, 0.015, 0.020, 0.030]
+    points = []
+    for sl in SL_VALUES:
+        sl_tag = f"{sl:.3f}".replace(".", "_")
+        skip_vals = []
+        v_vals = []
+        for b in BAGS:
+            tag = f"{b}_SL{sl_tag}"
+            base_tag = f"{b}_BASELINE"
+            path = f"{GATE3L_LOG}/{tag}/metrics.json"
+            base_path = f"{GATE3L_LOG}/{base_tag}/metrics.json"
+            if not (os.path.exists(path) and os.path.exists(base_path)):
+                continue
+            d = load(path)
+            da = load(base_path)
+            v = cramers_v(d, da)
+            skip = d.get("temporal_cache_skip_ratio", 0)
+            if v is not None:
+                skip_vals.append(skip)
+                v_vals.append(v)
+        if skip_vals:
+            points.append({
+                "param": "slope",
+                "value": sl,
+                "label": f"δ={sl:.3f}",
+                "skip": np.mean(skip_vals),
+                "v_max": max(v_vals),
+                "v_vals": v_vals,
+                "pass": max(v_vals) <= 0.10,
+            })
+    return points
+
+
+def plot_frontier(g3g_pts, g3j_pts, g3k_pts, g3m_pts, g3l_pts, output_path):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -190,19 +226,21 @@ def plot_frontier(g3g_pts, g3j_pts, g3k_pts, g3m_pts, output_path):
         "tau":    "#d62728",   # red
         "alpha":  "#2ca02c",   # green (Gate 3k FAIL)
         "tr_ema": "#9467bd",   # purple (Gate 3m PASS)
+        "slope":  "#ff7f0e",   # orange (Gate 3l PASS)
     }
     MARKERS = {
         "MH":     "o",
         "tau":    "s",
         "alpha":  "^",
         "tr_ema": "D",
+        "slope":  "P",
     }
 
     v_limit = 0.10
     ax.axhline(v_limit, color="gray", linestyle="--", linewidth=1, label=f"$V$ limit ({v_limit})", zorder=1)
     ax.axhline(0, color="lightgray", linewidth=0.5, zorder=0)
 
-    all_points = g3g_pts + g3j_pts + g3k_pts + g3m_pts
+    all_points = g3g_pts + g3j_pts + g3k_pts + g3m_pts + g3l_pts
 
     for pt in all_points:
         p = pt["param"]
@@ -228,6 +266,7 @@ def plot_frontier(g3g_pts, g3j_pts, g3k_pts, g3m_pts, output_path):
         mpatches.Patch(color=COLORS["tau"],    label="$\\tau$ sweep (Gate 3j)"),
         mpatches.Patch(color=COLORS["alpha"],  label="EMA $\\alpha$ sweep (Gate 3k, FAIL)"),
         mpatches.Patch(color=COLORS["tr_ema"], label="TR-EMA $\\alpha$ sweep (Gate 3m)"),
+        mpatches.Patch(color=COLORS["slope"],  label="Slope $\\delta_s$ sweep (Gate 3l)"),
     ]
     ax.legend(handles=legend_patches, loc="upper left", fontsize=9)
 
@@ -270,15 +309,18 @@ def main():
     print("Loading Gate 3m results...")
     g3m = load_gate3m()
     print(f"  {len(g3m)} points loaded")
+    print("Loading Gate 3l results...")
+    g3l = load_gate3l()
+    print(f"  {len(g3l)} points loaded")
 
     print("\n--- All frontier points ---")
     print(f"{'Param':>8} {'Value':>8} {'Skip%':>8} {'V_max':>8} {'Pass':>6}")
-    for pt in g3g + g3j + g3k + g3m:
+    for pt in g3g + g3j + g3k + g3m + g3l:
         status = "✓" if pt["pass"] else "✗"
         print(f"{pt['param']:>8} {str(pt['value']):>8} {pt['skip']:>7.1f}% {pt['v_max']:>8.4f} {status:>6}")
 
     output = "figures/frontier_2d.pdf"
-    plot_frontier(g3g, g3j, g3k, g3m, output)
+    plot_frontier(g3g, g3j, g3k, g3m, g3l, output)
 
 if __name__ == "__main__":
     main()
