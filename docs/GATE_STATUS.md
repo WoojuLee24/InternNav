@@ -1,11 +1,11 @@
 # Research Gate Status
 
-_Last updated: 2026-05-09 · Branch: research/async-foundation_
+_Last updated: 2026-05-10 · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
  Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 4
-  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   📋 IMPL.   ✅ PASS    ❌ FAIL    ✅ PASS    📋 NEXT    📋 BLOCKED
+  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   📋 IMPL.   ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    📋 BLOCKED
 ```
 
 ---
@@ -472,25 +472,34 @@ After SKIP frame:                          ema = (1-α)*ema + α*fp_current  (no
 
 ---
 
-## 📋 Gate 3l — Similarity Slope Predictive Refresh (I-054)
+## ✅ Gate 3l — Similarity Slope Predictive Refresh (I-054)
 
-**Status**: IMPLEMENTATION COMPLETE — experiment not yet run.
-**Script**: `scripts/realworld/gate3l_slope_predict.sh`
+**Commit**: (included in paper commit `f41ea8b`)
+**Hypothesis**: Track d(sim)/dt; if sim ≥ τ but slope < -δ_s, trigger S2 pre-emptively → catch doorway/turn transitions before threshold is crossed.
+**Result**: PASS — all 5 δ_s values pass V ≤ 0.10.
+
+| δ_s   | skip%  | V_073623 | V_061841 | V_063047 | V_max  | pass? |
+|-------|--------|----------|----------|----------|--------|-------|
+| 0.005 | 90.1%  | 0.0397   | 0.0620   | 0.0598   | 0.0620 | ✅    |
+| 0.010 | 91.0%  | 0.0236   | 0.0006   | 0.0144   | 0.0236 | ✅    |
+| 0.015 | 91.1%  | 0.0280   | 0.0006   | 0.0292   | 0.0292 | ✅    |
+| 0.020 | 91.1%  | 0.0000   | 0.0093   | 0.0445   | 0.0445 | ✅    |
+| 0.030 | 91.2%  | 0.0190   | 0.0307   | 0.0042   | 0.0307 | ✅    |
 
 **Design (I-054)**:
 - Track d(sim)/dt = (sim[t] - sim[t-w]) / w over window w=3 frames
-- If sim >= τ BUT slope < -δ_s → pre-emptive S2 run (PREDICTIVE BYPASS)
+- If sim ≥ τ BUT slope < -δ_s → pre-emptive S2 run (PREDICTIVE BYPASS)
 - All other mechanisms (I-046/I-047/I-050) are reactive; I-054 is the first predictive one
-- Fires BEFORE threshold is crossed, catching doorway/turn transitions 2-3 frames early
+- Endpoint: `/set_slope_predictive_refresh?enabled=true&delta_slope=0.010&window=3`
 
-**Key novelty**: Unlike I-046 (fires AFTER action), I-047 (fires on period), τ gate (fires AFTER crossing):
-I-054 fires BEFORE the similarity would drop below τ, by detecting the rate of descent.
+**Key findings**:
+- Non-monotone V(δ_s): minimum at δ_s=0.010 (V_max=0.0236), not monotone in either direction
+- Skip% nearly flat (90.1–91.2%): slope detection fires rarely, marginal S2 increase only
+- δ_s=0.010 optimal: 4.2× margin below V threshold; small δ_s catches more transitions but some are false positives
+- δ_s=0.020: V_073623=0.0000 (perfect on that bag) but V_063047=0.0445 shifts the worst bag
 
-**Sweep**: δ_s ∈ {0.005, 0.010, 0.015, 0.020, 0.030}, window=3
-**Fixed**: max_hold=15, tau=0.92, action_aware=on
-**Pass**: V ≤ 0.10 all 3 bags vs Gate-3l baseline
-**Prediction**: Intermediate δ_s should IMPROVE V (lower) by getting fresh plans at transitions,
-at cost of reduced skip% (more bypasses). This would make δ_s a new efficiency knob.
+**Production recommendation**: δ_s=0.010, window=3.
+- Complete stack: H_max=15, τ=0.92, I-046/I-047/I-050 active, TR-EMA α=0.10, slope δ_s=0.010
 
 ---
 
@@ -538,3 +547,5 @@ git show 6a09126b:scripts/realworld/http_internvla_server_debug.py > /tmp/server
 | 3c   | ✅    | 0.75 | ON (thr=0.92) | 10       | 3 frames| ~12 Hz      | ~68%  | 0.091   | ✅ PASS |
 | 3f   | ✅    | 0.75 | ON (thr=0.92) | 10       | 3 frames| ~12 Hz      | 88%   | 0.090   | ✅ PASS |
 | **3g** | ✅  | 0.75 | ON (thr=0.92) | **15**   | 3 frames| ~12 Hz    | **91%** | **0.009** | **✅ PASS** |
+| **3m** | ✅  | 0.75 | ON (thr=0.92) | 15       | 3 frames| ~12 Hz    | **91.2%** | **0.068** | **✅ PASS** (TR-EMA α=0.10) |
+| **3l** | ✅  | 0.75 | ON (thr=0.92) | 15       | 3 frames| ~12 Hz    | **91.0%** | **0.024** | **✅ PASS** (slope δ_s=0.010) |
