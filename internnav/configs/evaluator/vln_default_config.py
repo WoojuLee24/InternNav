@@ -240,7 +240,7 @@ def get_config(evaluator_cfg: EvalCfg):
     # add the flash controller in, by flash flag.
     if evaluator_cfg.task.robot_flash:
         vln_move_by_flash_cfg.type = (
-            'VlnMoveByFlashCollisionController' if evaluator_cfg.task.flash_collision else 'VlnMoveByFlashController'
+            'VlnMoveByFlashCollisionController' if evaluator_cfg.task.flash_collision in ('stop', 'reset') else 'VlnMoveByFlashController'
         )
         if evaluator_cfg.task.robot_platform_size is not None:
             vln_move_by_flash_cfg.robot_platform_size = evaluator_cfg.task.robot_platform_size

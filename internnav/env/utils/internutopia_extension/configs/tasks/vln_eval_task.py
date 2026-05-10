@@ -14,4 +14,5 @@ class VLNEvalTaskCfg(TaskCfg):
     warm_up_step: int
     data: Dict
     robot_flash: Optional[bool] = False
+    flash_collision: Optional[str] = None
     one_step_stand_still: Optional[bool] = False

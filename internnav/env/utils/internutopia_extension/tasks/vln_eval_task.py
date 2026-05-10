@@ -188,12 +188,19 @@ class VLNEvalTask(BaseTask):
 
         elif action_name == 'move_by_flash':
             obs.update(self.get_rgb_depth())
+            if getattr(self.config, 'flash_collision', None) == 'reset' and 'move_by_flash' in self.robot.controllers:
+                flash_obs = self.robot.controllers['move_by_flash'].get_obs()
+                if flash_obs.get('collision_detected', False):
+                    obs['collision_detected'] = True
 
         obs['finish_action'] = True
         self.robot.current_action = None
         # update when stop
         dones, reason = self.done_checker.execute(obs, action_name, self.step_count)
         self._done = dones[0]
+        if not self._done and obs.get('collision_detected', False):
+            self._done = True
+            reason = 'collision'
         if self._done:
             self.update_metrics({self.robot_name: obs})
             obs['metrics'] = self.calculate_metrics()
