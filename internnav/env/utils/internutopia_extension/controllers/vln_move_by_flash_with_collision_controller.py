@@ -37,6 +37,7 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
 
         self.current_action = None
         self._footprint_radius = config.robot_platform_size  # None = compute lazily from AABB on first use
+        self._collision_detected = False
 
         # BEV visualization via ZMQ (PUSH: controller connects, bridge binds)
         self._zmq_enabled = False
@@ -280,6 +281,7 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
         Returns:
             ArticulationAction: joint signals to apply (nothing).
         """
+        self._collision_detected = False
         # get robot new position
         positions, orientations = self.robot.articulation.get_world_pose()
         new_robot_position, new_robot_rotation = self.get_new_position_and_rotation(positions, orientations, action)
@@ -289,6 +291,7 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
             # set robot to new state
             self.reset_robot_state(new_robot_position, new_robot_rotation)
         else:
+            self._collision_detected = True
             print("[FLASH CONTROLLER]: Collision detected, flash abort")
 
         # Dummy action to do nothing
@@ -311,4 +314,5 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
     def get_obs(self) -> Dict[str, Any]:
         return {
             'finished': True,
+            'collision_detected': self._collision_detected,
         }

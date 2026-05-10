@@ -73,6 +73,7 @@ def generate_vln_episode(dataloader: ResumablePathKeyEpisodeloader, task: TaskCf
             scene_scale = (1, 1, 1)
 
         robot_flash = getattr(task, "robot_flash", False)
+        flash_collision = getattr(task, "flash_collision", None)
         one_step_stand_still = getattr(task, "one_step_stand_still", False)
         if task.metric.metric_setting['metric_config'].get('name', None) is None:
             task.metric.metric_setting['metric_config']['name'] = 'default_eval_name'
@@ -80,6 +81,7 @@ def generate_vln_episode(dataloader: ResumablePathKeyEpisodeloader, task: TaskCf
             VLNEvalTaskCfg(
                 **task.task_settings,
                 robot_flash=robot_flash,
+                flash_collision=flash_collision,
                 one_step_stand_still=one_step_stand_still,
                 metrics=[VLNPEMetricCfg(**task.metric.metric_setting['metric_config'])],
                 scene_asset_path=load_scene_func(scene_data_dir, dataloader.path_key_scan[path_key])

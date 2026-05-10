@@ -44,7 +44,7 @@ class TaskCfg(BaseModel):
     robot_name: Optional[str] = None
     robot: Optional[RobotCfg] = None
     robot_flash: Optional[bool] = None
-    flash_collision: Optional[bool] = None
+    flash_collision: Optional[str] = None  # None: no detection, 'stop': stop on collision, 'reset': episode failure
     robot_platform_size: Optional[float] = None  # robot platform radius in meters; None = auto from AABB
     robot_usd_path: Optional[str] = None
     camera_resolution: Optional[List[int]] = None
