@@ -1,11 +1,11 @@
 # Research Gate Status
 
-_Last updated: 2026-05-11 (Gate 3o MARGINAL, Gate 3p PENDING) · Branch: research/async-foundation_
+_Last updated: 2026-05-11 (Gate 3o MARGINAL, Gate 3p PASS θ_d=1.5m only, Gate 3q PENDING) · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
- Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 3n ── Gate 3o ── Gate 3p ── Gate 4
-  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    ✅ PASS     ⚠️ MARG.   📋 PENDING   📋 BLOCKED
+ Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 3n ── Gate 3o ── Gate 3p ── Gate 3q ── Gate 4
+  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    ✅ PASS     ⚠️ MARG.   ⚠️ MARG.    📋 PENDING   📋 BLOCKED
 ```
 
 ---
@@ -531,13 +531,37 @@ between configs are sampling noise, not mechanism-induced bias.
 
 ---
 
-## 📋 Gate 3p — Odometry-Progress Hold I-058 (PENDING)
+## ⚠️ Gate 3p — Odometry-Progress Hold I-058 (MARGINAL — θ_d=1.5m only)
 
-**Status**: PENDING (2026-05-11) — I-058 implemented, sweep script ready
+**Status**: MARGINAL (2026-05-11) — only θ_d=1.5m passes; I-058 not added to production stack
 **Script**: `scripts/realworld/gate3p_odom_progress.sh`
 **Design**: θ_d ∈ {0.3, 0.5, 0.7, 1.0, 1.5} m, on top of Gate 3n production stack
-**Baseline**: Gate 3n no-cache data reused
-**Pass criterion**: V_max ≤ 0.10 all 3 bags
+**Baseline**: Gate 3n no-cache data (`/tmp/gate3n_prod/`)
+**Results** (`/tmp/gate3p_odom/`):
+
+| θ_d (m) | Skip% | V_073623 | V_061841 | V_063047 | V_max  | OP | Status |
+|---------|-------|----------|----------|----------|--------|----|--------|
+| 0.3     | 91.4% | 0.1331   | 0.0282   | 0.0272   | 0.1331 | 10 | ❌ FAIL |
+| 0.5     | 91.3% | 0.1235   | 0.0405   | 0.0022   | 0.1235 |  1 | ❌ FAIL |
+| 0.7     | 91.3% | 0.1142   | 0.0158   | 0.0505   | 0.1142 |  1 | ❌ FAIL |
+| 1.0     | 91.2% | 0.1142   | 0.0054   | 0.0514   | 0.1142 |  1 | ❌ FAIL |
+| **1.5** | 91.2% | 0.0962   | 0.0206   | 0.0422   | **0.0962** | 1 | ✅ PASS |
+
+**Key findings**:
+- Small θ_d (≤1.0m) raises V above threshold — forced spatial re-runs disrupt action distribution
+- θ_d=1.5m barely passes (V_max=0.0962) but OP≈1 — trigger is nearly inert at this scale
+- Physical: MH=15 at 12Hz fires every ~0.31m, preempting spatial trigger at θ_d≥0.5m
+- **I-058 not added to production stack** — temporal/visual mechanisms already cover spatial change; spatial bypass adds noise without coverage benefit
+
+---
+
+## 📋 Gate 3q — Single-Run Variance Analysis (PENDING)
+
+**Status**: PENDING (2026-05-11) — script ready, starting after Gate 3p commit
+**Script**: `scripts/realworld/gate3q_variance_analysis.sh`
+**Design**: 3× NOCACHE + 3× PROD on bag 073623; computes V_intra_nocache, V_intra_prod, V_cross
+**Pass criterion**: V_intra_nocache < 0.05 (noise floor below half the 0.10 threshold)
+**Purpose**: Establish empirical ±σ for all gate V measurements; validate that V ≤ 0.10 criterion is meaningful
 
 ---
 
