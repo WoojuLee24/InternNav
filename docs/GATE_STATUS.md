@@ -1,11 +1,11 @@
 # Research Gate Status
 
-_Last updated: 2026-05-11 (Gate 3o MARGINAL, Gate 3p PASS θ_d=1.5m only, Gate 3q PENDING) · Branch: research/async-foundation_
+_Last updated: 2026-05-11 (Gate 3o MARGINAL, Gate 3p MARGINAL, Gate 3q PASS) · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
  Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 3n ── Gate 3o ── Gate 3p ── Gate 3q ── Gate 4
-  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    ✅ PASS     ⚠️ MARG.   ⚠️ MARG.    📋 PENDING   📋 BLOCKED
+  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    ✅ PASS     ⚠️ MARG.   ⚠️ MARG.    ✅ PASS    📋 BLOCKED
 ```
 
 ---
@@ -555,13 +555,24 @@ between configs are sampling noise, not mechanism-induced bias.
 
 ---
 
-## 📋 Gate 3q — Single-Run Variance Analysis (PENDING)
+## ✅ Gate 3q — Single-Run Variance Analysis (PASS)
 
-**Status**: PENDING (2026-05-11) — script ready, starting after Gate 3p commit
+**Status**: PASS (2026-05-11) — V_intra_nocache=0.0072 << 0.05; SNR=19.67×
 **Script**: `scripts/realworld/gate3q_variance_analysis.sh`
-**Design**: 3× NOCACHE + 3× PROD on bag 073623; computes V_intra_nocache, V_intra_prod, V_cross
-**Pass criterion**: V_intra_nocache < 0.05 (noise floor below half the 0.10 threshold)
-**Purpose**: Establish empirical ±σ for all gate V measurements; validate that V ≤ 0.10 criterion is meaningful
+**Design**: 3× NOCACHE + 3× PROD on bag 073623; 3 pairwise V per group + 9 cross-pairs
+**Results** (`/tmp/gate3q_variance/`):
+
+| Comparison | Mean V | Max V |
+|---|---|---|
+| Intra-baseline (NOCACHE vs NOCACHE) | 0.0048 | 0.0072 |
+| Intra-PROD (PROD vs PROD) | 0.0215 | 0.0322 |
+| Cross-condition (PROD vs NOCACHE) | 0.1274 | 0.1412 |
+
+**Key findings**:
+- Noise floor: V_intra_nocache_max = 0.0072 (< 0.05) → PASS; NOCACHE is near-deterministic at n≈460
+- PROD variance: ±0.03 run-to-run (n≈120, fewer outputs due to 91% skip) — explains Gate 3o C/D/E near-threshold
+- Signal-to-noise: 19.67× — V ≤ 0.10 criterion sits 14× above noise floor
+- Gate 3n V=0.0791 on bag 073623 was a favorable draw; expected V_cross ≈ 0.13; multi-bag pass criterion corrects for this
 
 ---
 
