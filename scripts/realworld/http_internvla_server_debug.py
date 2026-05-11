@@ -159,6 +159,16 @@ _slope_window = 3                  # frames over which to estimate slope
 _similarity_history = []           # rolling buffer of recent similarity scores
 _slope_history_lock = threading.Lock()
 
+# I-058 (Gate 3p): Odometry-Progress Hold
+# Force S2 when robot has traveled > threshold meters since last S2 run.
+# Provides a SPATIAL invalidation signal orthogonal to I-047 (temporal) and I-052 (count).
+# Requires client to send odom=[x, y, theta] in request JSON.
+_odom_progress_enabled = False
+_odom_progress_threshold = 0.5    # meters; swept by Gate 3p
+_current_odom = None              # [x, y, theta] from latest HTTP request
+_last_s2_odom = None              # [x, y, theta] at last completed S2 run
+_odom_lock = threading.Lock()
+
 def _image_fingerprint(rgb):
     """32x32 grayscale, raw pixel values 0-255 (no normalization).
     Returns a 1D float32 vector or None if input is unusable.
@@ -292,6 +302,7 @@ def reset_dual_metrics():
         async_metrics["traj_lengths_count"] = 0
         async_metrics["serve_count_bypasses"] = 0
         async_metrics["slope_predict_bypasses"] = 0
+        async_metrics["odom_progress_bypasses"] = 0
         # pre_warm_frames_queued is NOT reset here — it's a server-lifetime counter
 
 def async_continuous_loop():
@@ -309,6 +320,7 @@ def async_continuous_loop():
 
     global _last_fingerprint, _last_fresh_was_action, _consecutive_skip_count, _max_hold_frames
     global _ema_fingerprint, _traj_serve_count, _similarity_history, _ema_transition_reset
+    global _current_odom, _last_s2_odom
     while async_thread_running:
         try:
             # Wait for new frame data from queue (non-blocking with timeout)
@@ -344,11 +356,17 @@ def async_continuous_loop():
                 slope_on = _slope_predict_enabled
                 slope_thr = _slope_threshold
                 slope_win = _slope_window
+            with _odom_lock:
+                odom_progress_on = _odom_progress_enabled
+                odom_progress_thr = _odom_progress_threshold
+                cur_odom = _current_odom[:] if _current_odom is not None else None
+                last_s2_pos = _last_s2_odom[:] if _last_s2_odom is not None else None
             was_forced_bypass = False
             was_i046_bypass = False  # I-050: track bypass type for flag propagation
             was_i047_bypass = False
             was_i052_bypass = False
             was_i054_bypass = False
+            was_i058_bypass = False
             if threshold > 0.0:
                 # I-049: compute adaptive max_hold if enabled
                 if adaptive_on and len(_similarity_window) >= _ADAPTIVE_WINDOW_SIZE:
@@ -377,6 +395,13 @@ def async_continuous_loop():
                     was_i052_bypass = True
                     with _serve_count_lock:
                         _traj_serve_count = 0
+                elif odom_progress_on and cur_odom is not None and last_s2_pos is not None:
+                    dx = cur_odom[0] - last_s2_pos[0]
+                    dy = cur_odom[1] - last_s2_pos[1]
+                    dist = math.sqrt(dx * dx + dy * dy)
+                    if dist >= odom_progress_thr:
+                        forced = "odom_progress_bypasses"  # I-058
+                        was_i058_bypass = True
                 if forced is not None:
                     was_forced_bypass = True
                     # Forced refresh: skip the similarity check entirely
@@ -492,6 +517,11 @@ def async_continuous_loop():
                         # I-052: reset serve count when cache is refreshed
                         with _serve_count_lock:
                             _traj_serve_count = 0
+
+            # I-058: record odom at S2 completion so odom-progress-hold knows last planned position
+            with _odom_lock:
+                if _current_odom is not None:
+                    _last_s2_odom = _current_odom[:]
 
             # I-051: trajectory-length-adaptive max_hold
             # After trajectory is cached, update max_hold based on plan richness.
@@ -729,7 +759,7 @@ def eval_dual_async():
     - This achieves TRUE async decoupling!
     """
     global idx, output_dir, start_time, async_thread_running, async_cached_trajectory, async_cached_action
-    global _traj_serve_count
+    global _traj_serve_count, _current_odom
     try:
         start_time = time.time()
 
@@ -758,6 +788,12 @@ def eval_dual_async():
         camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
         instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
         
+        # I-058: store current odometry for odom-progress-hold check
+        odom_val = data.get('odom', None)
+        if odom_val is not None and len(odom_val) >= 2:
+            with _odom_lock:
+                _current_odom = list(odom_val[:3])
+
         policy_init = data.get('reset', False)
         req_mode = data.get('mode', 'async')
         
@@ -1004,6 +1040,11 @@ def get_async_metrics():
         "slope_threshold": _slope_threshold,
         "slope_window": _slope_window,
         "slope_predict_bypasses": m.get("slope_predict_bypasses", 0),
+
+        # I-058: odometry-progress hold (Gate 3p)
+        "odom_progress_enabled": _odom_progress_enabled,
+        "odom_progress_threshold": _odom_progress_threshold,
+        "odom_progress_bypasses": m.get("odom_progress_bypasses", 0),
     }
 
     return jsonify(metrics)
@@ -1182,6 +1223,28 @@ def set_slope_predict_endpoint():
         'slope_predict_enabled': enabled,
         'slope_threshold': threshold,
         'slope_window': window,
+    })
+
+
+@app.route("/set_odom_progress_hold", methods=['POST', 'GET'])
+def set_odom_progress_hold_endpoint():
+    """I-058 (Gate 3p): Toggle odometry-progress hold.
+    Forces a fresh S2 run whenever the robot has traveled >= threshold meters
+    since the last completed S2. Orthogonal to temporal (I-047) and count (I-052) signals.
+    GET ?enabled=true|false&threshold=0.5"""
+    global _odom_progress_enabled, _odom_progress_threshold, _last_s2_odom
+    enabled_str = request.args.get('enabled', 'true').lower()
+    enabled = enabled_str in ('1', 'true', 'yes', 'on')
+    threshold = float(request.args.get('threshold', _odom_progress_threshold))
+    threshold = max(0.05, min(10.0, threshold))
+    _odom_progress_enabled = enabled
+    _odom_progress_threshold = threshold
+    with _odom_lock:
+        _last_s2_odom = None  # reset so first frame always runs S2
+    return jsonify({
+        'status': 'ok',
+        'odom_progress_enabled': enabled,
+        'odom_progress_threshold': threshold,
     })
 
 

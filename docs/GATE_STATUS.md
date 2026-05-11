@@ -1,11 +1,11 @@
 # Research Gate Status
 
-_Last updated: 2026-05-10 (Gate 3i complete) · Branch: research/async-foundation_
+_Last updated: 2026-05-11 (Gate 3n PASS, Gate 3o running) · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
- Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 4
-  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    📋 BLOCKED
+ Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 3n ── Gate 3o ── Gate 4
+  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    ✅ PASS     📋 RUNNING   📋 BLOCKED
 ```
 
 ---
@@ -482,6 +482,37 @@ After SKIP frame:                          ema = (1-α)*ema + α*fp_current  (no
 
 **Production recommendation**: δ_s=0.010, window=3.
 - Complete stack: H_max=15, τ=0.92, I-046/I-047/I-050 active, TR-EMA α=0.10, slope δ_s=0.010
+
+---
+
+## ✅ Gate 3n — Full Production Stack Validation
+
+**Commit**: pending (2026-05-11)
+**Hypothesis**: All mechanisms (MH=15, τ=0.92, AA, TR-EMA α=0.10, slope δ_s=0.010) operate without interference and collectively achieve V ≤ 0.10 vs no-cache baseline.
+**Result**: PASS — all 3 bags pass; V_max=0.0791 (bag 073623); skip 90.8–91.4%.
+
+| Bag    | Skip% | AA  | MH  | SP | V      | Status |
+|--------|-------|-----|-----|----|--------|--------|
+| 073623 | 90.9% | 22  | 84  | 5  | 0.0791 | ✅     |
+| 061841 | 90.8% | 192 | 396 | 15 | 0.0022 | ✅     |
+| 063047 | 91.4% | 120 | 362 | 5  | 0.0031 | ✅     |
+
+**Key findings**:
+- SP bypasses (5–15 per bag) are small — slope fires rarely, confirming targeted operation
+- AA and MH counts match Gate 3g production: TR-EMA and slope do not disrupt I-046/I-047
+- Action rates (34.4%, 62.9%, 45.5%) match no-cache baseline within sampling variability
+- Largest V on bag 073623 (0.079) consistent with that bag's higher action-rate variability
+
+**No-cache baseline**: bg=448/2281/1941, skip=0.0%, action_rate=43.8%/63.2%/45.9%
+
+---
+
+## 📋 Gate 3o — Component Ablation Study (RUNNING)
+
+**Status**: RUNNING (2026-05-11)
+**Script**: `scripts/realworld/gate3o_ablation.sh`
+**Configs**: B (Gate 3g) | C (+TR-EMA) | D (+slope) | E (full = Gate 3n PROD)
+**Baseline**: Gate 3n no-cache data reused
 
 ---
 

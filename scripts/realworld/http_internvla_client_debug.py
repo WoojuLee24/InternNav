@@ -84,6 +84,7 @@ def dual_sys_eval(image_bytes, depth_bytes, front_image_bytes, url='http://127.0
         "optimizations": CLIENT_OPT_FLAGS,
         "temperature": args.temperature,
         "repetition_penalty": args.repetition_penalty,
+        "odom": list(manager.odom[:3]) if (manager and manager.odom is not None) else None,
     }
     json_data = json.dumps(data)
 
