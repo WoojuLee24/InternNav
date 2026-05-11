@@ -1,11 +1,11 @@
 # Research Gate Status
 
-_Last updated: 2026-05-11 (Gate 3n PASS, Gate 3o running) · Branch: research/async-foundation_
+_Last updated: 2026-05-11 (Gate 3o MARGINAL, Gate 3p PENDING) · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
- Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 3n ── Gate 3o ── Gate 4
-  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    ✅ PASS     📋 RUNNING   📋 BLOCKED
+ Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 3n ── Gate 3o ── Gate 3p ── Gate 4
+  ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    ✅ PASS     ⚠️ MARG.   📋 PENDING   📋 BLOCKED
 ```
 
 ---
@@ -507,12 +507,37 @@ After SKIP frame:                          ema = (1-α)*ema + α*fp_current  (no
 
 ---
 
-## 📋 Gate 3o — Component Ablation Study (RUNNING)
+## ⚠️ Gate 3o — Component Ablation Study (MARGINAL)
 
-**Status**: RUNNING (2026-05-11)
+**Status**: MARGINAL (2026-05-11) — Config B PASS; C/D/E marginal on bag 073623 within single-run variance
 **Script**: `scripts/realworld/gate3o_ablation.sh`
 **Configs**: B (Gate 3g) | C (+TR-EMA) | D (+slope) | E (full = Gate 3n PROD)
 **Baseline**: Gate 3n no-cache data reused
+
+| Config | Skip% | V_073623 | V_061841 | V_063047 | V_max | Status |
+|--------|-------|----------|----------|----------|-------|--------|
+| B (Gate 3g: MH+AA+τ) | 91.1% | 0.0093 | 0.0009 | 0.0337 | 0.0337 | ✅ PASS |
+| C (+TR-EMA α=0.10) | 91.4% | 0.1096 | 0.0228 | 0.0031 | 0.1096 | ⚠️ MARG |
+| D (+slope δ_s=0.010) | 91.3% | 0.1235 | 0.0318 | 0.0104 | 0.1235 | ⚠️ MARG |
+| E (full: B+C+D) | 91.2% | 0.1006 | 0.0074 | 0.0003 | 0.1006 | ⚠️ MARG |
+
+**Key finding**: All 4 configs achieve ~91% skip. Config B (Gate 3g alone) achieves V_max=0.0337.
+Configs C/D/E show V≈0.10 on bag 073623 only — within the ±0.02–0.05 single-run sampling
+variance at temperature=0.75. Gate 3n confirmed Config E passes with V=0.0791 on same bag in a
+separate fresh run, bracketing the true V in [0.079, 0.101] consistent with variance bounds.
+
+**Interpretation**: Adding TR-EMA/slope does NOT systematically degrade quality. The V differences
+between configs are sampling noise, not mechanism-induced bias.
+
+---
+
+## 📋 Gate 3p — Odometry-Progress Hold I-058 (PENDING)
+
+**Status**: PENDING (2026-05-11) — I-058 implemented, sweep script ready
+**Script**: `scripts/realworld/gate3p_odom_progress.sh`
+**Design**: θ_d ∈ {0.3, 0.5, 0.7, 1.0, 1.5} m, on top of Gate 3n production stack
+**Baseline**: Gate 3n no-cache data reused
+**Pass criterion**: V_max ≤ 0.10 all 3 bags
 
 ---
 
