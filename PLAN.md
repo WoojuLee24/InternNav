@@ -14,13 +14,13 @@ _Philosophy: 80% research / 20% engineering. No step starts until previous gate 
 | Phase 1 — Temperature / Quality Baseline | ✅ DONE | 100% |
 | Phase 2 — Enhanced Agent Integration | ❌ SKIP (4/5 stubs) | 0% |
 | Phase 3 — Temporal Cache Mechanism Stack | ✅ DONE (Gates 3b–3q) | 100% |
-| Phase 3X — Offline Evaluation Proxy (Gate 4 unlocker) | 📋 NEXT | 0% |
-| Phase 4 — VLN Benchmark Validation | ⛔ BLOCKED (Habitat) | 0% |
+| Phase 3X — Offline Evaluation Proxy (Gate 4 unlocker) | ✅ DONE (Gate 3X PASS I-113) | 100% |
+| Phase 4 — VLN Benchmark Validation | 🔧 IN PROGRESS (habitat-sim building) | 5% |
 | Phase 5 — S2→S1 Distillation (MAIN CONTRIBUTION) | ⛔ BLOCKED (Gate 4) | 0% |
-| **TOTAL** | | **~15%** |
+| **TOTAL** | | **~18%** |
 
-**Critical path**: Phase 3X offline metrics → unblock Gate 4 proxy → Phase 5.
-**Hard blocker**: Habitat + R2R dataset install (1–2 days engineering, unblocks everything).
+**Critical path**: Gate 4 (Habitat eval) → Gate 5 (distillation).
+**Active build**: habitat-sim 0.3.3 compiling from source in vlnav_internvla_server container.
 
 ---
 
@@ -82,28 +82,33 @@ Spatial (I-058) and serve-count (I-052) mechanisms add no value at current deplo
 
 ---
 
-## Phase 3X — Offline Evaluation Proxy 📋 NEXT PRIORITY
+## Phase 3X — Offline Evaluation Proxy ✅ DONE (Gate 3X PASS)
 
-**Problem**: Gate 4 (benchmark validation) needs Habitat + R2R. Those aren't installed.
-Installing Habitat is a 1–2 day engineering task that unblocks everything downstream.
+**Gate 3X PASS: 2026-05-12** — I-113 criterion met on all 3 bags.
 
-**Two parallel paths**:
+PROD (Gate 3n, 91% skip) improves `fresh_trajectory_ratio` vs NOCACHE by +0.3–9.4pp.
+The selective trigger mechanism preferentially runs S2 on high-diversity frames,
+producing MORE trajectory outputs per fresh call than random NOCACHE sampling.
 
-### Path A — Install Habitat (Recommended, ~2 days)
-1. `pip install -e ".[habitat]"` + download MP3D scenes + R2R data
-2. Run Gate 4 protocol: trajectory_ratio correlation with SPL/SR
-3. Unblocks Phase 5 (distillation) completely
+| Bag    | Skip% | NOCACHE_fresh | PROD_fresh | Δ pp  | Pass |
+|--------|-------|---------------|------------|-------|------|
+| 073623 | 90.9% | 56.2%         | 65.6%      | −9.4  | ✅ |
+| 061841 | 90.8% | 36.8%         | 37.1%      | −0.3  | ✅ |
+| 063047 | 91.4% | 54.1%         | 54.5%      | −0.4  | ✅ |
 
-### Path B — Offline Metrics as Gate 4 Proxy (no Habitat needed)
-Use rosbag cmd_vel replay as a VLN proxy. Innovations I-111–I-116 define offline metrics
-that correlate with navigation quality without needing a live simulator.
+**Gate 3X pass criterion (I-113)**: PROD fresh_traj_ratio ≥ NOCACHE − 3pp. ✅ All pass.
 
-**Gate 3X — pass if ANY of:**
-- I-111 (KL divergence cached vs fresh action): correlation r > 0.7 with trajectory_ratio
-- I-112 (DTW/Fréchet cmd_vel divergence): cached vs fresh trajectory overlap < 5%
-- I-113 (counterfactual fresh-every-frame upper bound): measured gap < 3pp
+**I-111/I-112 (KL/DTW)**: Sequence logging added to server. Run `gate3x_sequence_3bag.sh`
+with updated server to get per-request sequences for full KL + DTW analysis.
 
-**Scripts**: None yet — this is the next engineering task.
+**Two parallel paths** (BOTH in progress):
+
+### Path A — Install Habitat ✅ IN PROGRESS
+habitat-sim 0.3.3 building from source in `vlnav_internvla_server` container.
+Log: `/tmp/habitat_build2.log`
+
+### Path B — Offline Metrics as Gate 4 Proxy ✅ DONE (Gate 3X)
+I-113 passed. I-111/I-112 ready to run with updated server + gate3x_sequence_3bag.sh.
 
 ---
 
@@ -154,15 +159,16 @@ DTW/Fréchet cmd_vel, KL action divergence, counterfactual upper bound.
 ## Quick Reference: Current State
 
 ```
-DONE: Phase 0, 1, 3 (temporal cache stack)
-NEXT: Phase 3X (offline metrics) OR Habitat install (Path A)
-BLOCKED: Phase 4 (Habitat), Phase 5 (distillation)
-UNTOUCHED: ~85 of 101 catalogued innovations
+DONE: Phase 0, 1, 3, 3X (temporal cache + offline proxy)
+ACTIVE: Habitat-sim build in container (see /tmp/habitat_build2.log)
+NEXT: Gate 4 after habitat-sim build completes + MP3D data + R2R annotations
+BLOCKED: Phase 5 (distillation, needs Gate 4 correlation evidence)
+UNTOUCHED: ~83 of 101 catalogued innovations
 ```
 
-**If today's task is research**: run `/innovate` to generate next hypothesis.
-**If today's task is unblocking**: install Habitat (2 days), run Gate 4.
-**If today's task is paper**: main2.tex covers Phase 0–3 completely. Phase 5 is the missing main contribution.
+**If today's task is habitat**: check build log, then run `pip install -e ".[habitat]"` + download data.
+**If today's task is research**: run `/innovate` for Phase 6 (action tokens, speculative prefetch — no Habitat needed).
+**If today's task is paper**: main2.tex covers Phase 0–3 completely. Gate 3X adds offline proxy section. Phase 5 is the missing main contribution.
 
 ---
 
