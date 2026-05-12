@@ -259,6 +259,9 @@ async_metrics = {
     # Gate 3c (I-010): cold-start pre-fetch diagnostics
     "waiting_responses": 0,       # HTTP responses returned before any cache hit
     "pre_warm_frames_queued": 0,  # synthetic frames queued at server start
+
+    # Phase 3X (I-111/I-112): per-request response-type sequence for offline proxy analysis
+    "response_sequence": [],      # list of 'T', 'W', or action-index per HTTP request
 }
 async_metrics_lock = threading.Lock()
 
@@ -304,6 +307,7 @@ def reset_dual_metrics():
         async_metrics["serve_count_bypasses"] = 0
         async_metrics["slope_predict_bypasses"] = 0
         async_metrics["odom_progress_bypasses"] = 0
+        async_metrics["response_sequence"] = []  # Phase 3X: reset per-run sequence log
         # pre_warm_frames_queued is NOT reset here — it's a server-lifetime counter
 
 def async_continuous_loop():
@@ -861,6 +865,18 @@ def eval_dual_async():
                 async_metrics["waiting_responses"] = async_metrics.get("waiting_responses", 0) + 1
             json_output = {'status': 'waiting'}
 
+        # Phase 3X (I-111/I-112): log response type for offline sequence analysis
+        with async_metrics_lock:
+            seq = async_metrics.get("response_sequence")
+            if seq is not None and len(seq) < 10000:
+                if cached_traj is not None:
+                    seq.append('T')
+                elif cached_action is not None:
+                    act = cached_action
+                    seq.append(act[0] if isinstance(act, list) and act else str(act))
+                else:
+                    seq.append('W')
+
         return jsonify(json_output)
     except Exception as e:
         import traceback
@@ -1046,6 +1062,9 @@ def get_async_metrics():
         "odom_progress_enabled": _odom_progress_enabled,
         "odom_progress_threshold": _odom_progress_threshold,
         "odom_progress_bypasses": m.get("odom_progress_bypasses", 0),
+
+        # Phase 3X (I-111/I-112): per-request response-type sequence
+        "response_sequence": m.get("response_sequence", []),
     }
 
     return jsonify(metrics)
