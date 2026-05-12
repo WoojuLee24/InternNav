@@ -592,24 +592,49 @@ between configs are sampling noise, not mechanism-induced bias.
 
 ---
 
-## Commit Map — Checkout Guide for Real Robot Testing
+## Robot Testing — Git Tag Checkout Guide
+
+Each gate that PASS has an annotated git tag under `robot/`. Use these to quickly
+restore any gate's exact server configuration for live robot testing.
 
 ```bash
-# Switch to exact gate configuration for robot testing:
+# List all robot-testable checkpoints:
+git tag -l "robot/*"
 
-git log --oneline
-# 6a09126b feat(gate3b): PASS ...      ← Gate 3b production (use this for temporal cache)
-# 942059f1 feat(gate0): TRUE async ... ← Gate 0 baseline (pure async, no cache)
-# 9b82bae2 feat(phase1): temp sweep .. ← Gate 1 (temp=0.75 baseline)
+# Checkout server for a specific gate:
+git show robot/gate-3n-production:scripts/realworld/http_internvla_server_debug.py > /tmp/server_prod.py
+git show robot/gate-0-true-async:scripts/realworld/http_internvla_server_debug.py > /tmp/server_nocache.py
 
-# Checkout a specific gate's server script only:
-git show 942059f1:scripts/realworld/http_internvla_server_debug.py > /tmp/server_gate0.py
-git show 6a09126b:scripts/realworld/http_internvla_server_debug.py > /tmp/server_gate3b.py
+# Or checkout the full working tree at a gate (use worktree to avoid disrupting main):
+git worktree add /tmp/gate3n-robot robot/gate-3n-production
+cd /tmp/gate3n-robot && python3 scripts/realworld/http_internvla_server_debug.py --mode async --temperature 0.75 --kv-cache --pre-warm-frames 3
 
-# Compare behavior at runtime:
-#   Gate 0:  curl ?threshold=0.0  (cache off)
-#   Gate 3b: curl ?threshold=0.92 (cache on, I-046+I-047)
+# Then configure via API (same commands work for all gates):
+curl "http://localhost:5802/set_temporal_threshold?threshold=0.92"
+curl "http://localhost:5802/set_max_hold_frames?frames=15"
+curl "http://localhost:5802/set_action_aware?enabled=true"
+curl "http://localhost:5802/set_ema_fingerprint?enabled=true&alpha=0.10&transition_reset=true"
+curl "http://localhost:5802/set_slope_predict?enabled=true&threshold=0.010&window=3"
+
+# For NOCACHE baseline (Gate 0 behavior on any tag):
+curl "http://localhost:5802/set_temporal_threshold?threshold=0.0"
+curl "http://localhost:5802/set_max_hold_frames?frames=0"
+curl "http://localhost:5802/set_action_aware?enabled=false"
 ```
+
+### Robot Tag Map
+
+| Tag | Config | skip% | V_worst | Notes |
+|-----|--------|-------|---------|-------|
+| `robot/gate-0-true-async` | NOCACHE, no cache | 0% | 0.000 | Pure async baseline |
+| `robot/gate-3b-temporal-cache` | τ=0.92, MH=10, AA | ~68% | 0.094 | First cache version |
+| `robot/gate-3c-prewarm` | + pre-warm 3 frames | ~68% | 0.091 | Cold-start fix |
+| `robot/gate-3f-flag-fix` | + I-050 flag fix | 88% | 0.090 | AA working correctly |
+| `robot/gate-3g-maxhold15` | MH=15 | 91% | 0.009 | MH tuned |
+| `robot/gate-3j-tau092` | + τ sweep locked | 91.2% | 0.009 | τ Pareto-optimal |
+| `robot/gate-3m-trema` | + TR-EMA α=0.10 | 91.2% | 0.068 | EMA cascade fixed |
+| `robot/gate-3l-slope` | + slope δ_s=0.010 | 91.0% | 0.024 | Predictive refresh |
+| **`robot/gate-3n-production`** | **Full stack** | **91.1%** | **0.079** | **→ USE THIS** |
 
 ### Quick reference: What each gate's server does
 
