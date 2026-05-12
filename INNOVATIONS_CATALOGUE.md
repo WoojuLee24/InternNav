@@ -1,8 +1,36 @@
 # InternNav Innovations Catalogue
 
-_Maintained by: OpenCode (W0·P1, branch opencode-exp)_  
-_Updated by: Claude Main after gate results_  
-_Target: 50+ innovations, grounded in literature, ordered by priority_
+_Maintained by: Claude Code · Branch: research/async-foundation_
+_Last updated: 2026-05-12_
+_Target: 101 innovations catalogued · 16 tested · 85 queued_
+
+## Status Legend
+- ✅ PASS — implemented, gate passed, in production or validated
+- ❌ FAIL — implemented, gate failed (documented finding)
+- ⚠️ MARG. — marginal pass, not added to production
+- 📋 queued — not yet implemented
+- ⛔ BLOCKED — needs upstream gate
+
+## Tested Innovations Summary (as of 2026-05-12)
+
+| Innovation | Gate | Result | Notes |
+|-----------|------|--------|-------|
+| I-001: Remove agent.step() from HTTP | Gate 0 | ✅ PASS | latency 300ms→0.02ms |
+| I-010: Cold-start pre-warm | Gate 3c | ✅ PASS | 38.2% cold-start reduction |
+| I-046: Action-aware bypass | Gate 3d/3f | ✅ PASS | AA=26 after flag fix |
+| I-047: Max-hold forced refresh | Gate 3g | ✅ PASS | MH=15 optimal |
+| I-048: Component ablation study | Gate 3d | ⚠️ COND. | V=0.17 bug found+fixed |
+| I-049: Adaptive max_hold | Gate 3e | ❌ FAIL | no V improvement |
+| I-050: Flag propagation fix | Gate 3f | ✅ PASS | prerequisite for I-046 |
+| I-051: Traj-adaptive hold | Gate 3h | ❌ FAIL | decoder always 33 wpts |
+| I-052: Serve-count hold | Gate 3i | ❌ FAIL | serve≈frame at 1:1 arch |
+| I-053: EMA fingerprint | Gate 3k | ❌ FAIL | post-bypass lag cascade |
+| I-054: Slope predictive refresh | Gate 3l | ✅ PASS | δ_s=0.010, V=0.0236 |
+| I-055: TR-EMA (reset on bypass) | Gate 3m | ✅ PASS | α=0.10, V=0.0679 |
+| I-056: τ sweep | Gate 3j | ✅ PASS | τ=0.92 Pareto-optimal |
+| I-057: Production stack validation | Gate 3n | ✅ PASS | V=0.0791, 91% skip |
+| I-058: Odom-progress hold | Gate 3p | ⚠️ MARG. | only θ_d=1.5m passes, inert |
+| Variance analysis | Gate 3q | ✅ PASS | SNR=19.67×, floor=0.007 |
 
 ---
 

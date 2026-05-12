@@ -1,6 +1,6 @@
 # InternNav Research Tracking
 
-_Last updated: 2026-04-27_
+_Last updated: 2026-05-12_
 _Active branch: research/async-foundation (forked from true_async_background_thread @ 091350ac)_
 _Original branch preserved: true_async_background_thread (DO NOT MODIFY)_
 _Maintainer: kemal-mudie_
@@ -14,7 +14,49 @@ Every code change must be motivated by a testable hypothesis. Experiments are th
 
 ---
 
-## SYSTEM STATE (Verified 2026-04-27)
+## SYSTEM STATE (Verified 2026-05-12)
+
+### Current Production Stack (Gate 3n, PASS)
+- **Config**: τ=0.92, max_hold=15, action_aware=true, tr_ema α=0.10, slope δ_s=0.010
+- **Metrics**: 90.8–91.4% skip rate · V_max=0.0791 all 3 bags · 12 Hz
+- **Quality**: V criterion validated — SNR=19.67× (Gate 3q), noise floor=0.0072
+- **Server**: `scripts/realworld/http_internvla_server_debug.py` on branch `research/async-foundation`
+- **Papers**: `main2.tex` covers full Phase 0–3 narrative (Phases 3g–3q all written up)
+
+### Progress Summary (Honest)
+- **~15% of overall plan complete**: Phase 0–3 done; Phase 4–5 not started
+- **~16 of 101 innovations tested** (I-001, I-010, I-046–I-058 range)
+- **Critical blocker**: Gate 4 needs Habitat + R2R data (1–2 days engineering)
+- **Main contribution (Phase 5 distillation)**: not started, needs Gate 4 first
+
+### What's Next (Priority Order)
+1. **Install Habitat** (1–2 days, unblocks Gate 4 + 5 + distillation)
+2. **Phase 3X offline metrics** (I-111–I-116, proxy for Gate 4 without Habitat)
+3. **Action token representation** (I-020–I-027, cut S2 latency 40–60%)
+4. **Speculative S2 prefetch** (I-060–I-065, push skip% above 93%)
+
+### Architecture (Verified, Gate 0 PASS)
+
+```
+TRUE Async (confirmed working, Gate 0):
+  HTTP → return cached output immediately [0.02ms latency]
+  Background Thread: continuous agent.step() → writes cache [~12 Hz]
+  Skip logic: 91% of frames served from cache (Gate 3n production stack)
+```
+
+### Baseline Metrics (Locked)
+
+| Metric | Gate 0 | Gate 3n Production |
+|--------|--------|-------------------|
+| joint_latency_ms | 0.02 ms | 0.02 ms |
+| joint_req_hz | 12.3 Hz | 11.8–12.2 Hz |
+| skip% | 0% | 90.8–91.4% |
+| V_max (3 bags) | 0.0 | 0.0791 |
+| bg_s2_runs (bag 073623) | ~470 | ~120 |
+
+---
+
+## SYSTEM STATE (Original — 2026-04-27)
 
 ### Architecture (Correct Design)
 

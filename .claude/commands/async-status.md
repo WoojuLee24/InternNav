@@ -1,5 +1,5 @@
 ---
-allowed-tools: Read, Bash(cat *), Bash(grep*), Bash(git log*), Bash(git branch*), Bash(curl*)
+allowed-tools: Read, Bash(cat *), Bash(grep*), Bash(git log*), Bash(git branch*), Bash(curl*), Bash(docker ps*)
 description: Current verified async system state — active innovations, gate results, deployment config. Run at start of any session.
 ---
 
@@ -7,72 +7,65 @@ description: Current verified async system state — active innovations, gate re
 **Current branch**: !`git branch --show-current`
 **Recent commits**: !`git log --oneline -8`
 
-## Gate Status Summary
-!`grep -A2 "^## [✅⚠️📋🔄]" docs/GATE_STATUS.md 2>/dev/null | head -60`
+## Overall Progress
+!`head -12 PLAN.md 2>/dev/null`
 
-## Live Server Metrics (if running)
+## Gate Pipeline
+!`head -12 docs/GATE_STATUS.md 2>/dev/null`
+
+## Container & Live Metrics
+!`docker ps --format "{{.Names}}: {{.Status}}" 2>/dev/null | grep vlnav || echo "[container not running]"`
 !`curl -s http://localhost:5802/async_metrics 2>/dev/null | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
     print(f'  hz={d[\"joint_req_hz\"]:.2f}  latency={d[\"joint_latency_ms\"]:.3f}ms  bg_runs={d[\"background_s2_runs\"]}')
-    print(f'  thr={d[\"temporal_cache_threshold\"]}  max_hold={d[\"max_hold_frames\"]}  skip%={d[\"temporal_cache_skip_ratio\"]:.1f}')
-    print(f'  AA_bypasses={d[\"action_aware_bypasses\"]}  MH_bypasses={d[\"max_hold_bypasses\"]}')
-    print(f'  waiting_responses={d[\"waiting_responses\"]}  pre_warm_queued={d[\"pre_warm_frames_queued\"]}')
-except: print('  [Server not running or metrics endpoint error]')
+    print(f'  thr={d[\"temporal_cache_threshold\"]}  MH={d[\"max_hold_frames\"]}  skip%={d[\"temporal_cache_skip_ratio\"]:.1f}')
+    print(f'  AA={d[\"action_aware_bypasses\"]}  SP={d.get(\"slope_predict_bypasses\",0)}  EMA_alpha={d.get(\"ema_fingerprint_alpha\",\"off\")}')
+except: print('  [Server not running]')
 " 2>/dev/null || echo "  [Server not running on localhost:5802]"`
 
 ---
 
-## Verified System State (2026-05-07)
+## Verified System State (Gate 3n Production Stack)
 
-### TRUE Async is IMPLEMENTED and VERIFIED (Gate 0 ✅)
-The HTTP handler `/eval_dual_async` does NOT call `agent.step()`.
-S2 runs in a background thread (`async_continuous_loop`).
-HTTP latency: **0.02ms** (not 300ms). Throughput: **12 Hz**.
+### TRUE Async — PASS (Gate 0)
+HTTP handler: cache-only, 0.02ms latency, 12 Hz throughput.
+Background thread: `async_continuous_loop` runs S2 at ~12 Hz, writes cache.
 
-### Active Innovation Stack (Gate 3b ✅ + Gate 3c 🔄)
-
-**Gate 3b — Temporal S2 cache (PASS)**
+### Production Stack (Gate 3n PASS, 2026-05-11)
 ```
-Background thread gate before each S2 call:
-  1. I-046 (one-shot): force fresh if last output was action
-  2. I-047 (max-hold): force fresh if skipped ≥ max_hold_frames consecutively
-  3. cosine_sim(current, last) ≥ threshold → SKIP (serve cache)
+τ=0.92              → temporal similarity gate (Gate 3j)
+max_hold=15         → forced refresh ceiling (Gate 3g)
+action_aware=true   → I-046 one-shot post-action refresh (Gate 3f)
+tr_ema α=0.10       → EMA fingerprint with bypass reset (Gate 3m)
+slope δ_s=0.010     → predictive refresh on falling similarity (Gate 3l)
 
-Result: 70% S2 reduction, V<0.10, Hz maintained
-Runtime control:
-  curl http://localhost:5802/set_temporal_threshold?threshold=0.92
-  curl http://localhost:5802/set_max_hold_frames?frames=10
+Result: 90.8–91.4% skip, V_max=0.0791, SNR=19.67×
+NOT in production: I-058 (odom-progress, inert at useful thresholds)
 ```
 
-**Gate 3c — Cold-start pre-fetch (🔄 in progress)**
-```
-At server startup (before first real request):
-  --pre-warm-frames 3 → queues 3 synthetic S2 runs
-  Cache pre-populated by t=0.9s
-  Eliminates "waiting" responses at bag start
-
-Metric: waiting_responses (in /async_metrics)
-```
-
-### Production Deployment Config
+### Production Deployment Commands
 ```bash
+# In container:
 python3 scripts/realworld/http_internvla_server_debug.py \
-    --mode async \
-    --temperature 0.75 \
-    --kv-cache \
+    --mode async --temperature 0.75 --kv-cache \
     --calib scripts/realworld/calib/calib_scout.txt \
-    --pre-warm-frames 3   # Gate 3c
+    --pre-warm-frames 3
 
-# After server starts:
-curl http://localhost:5802/set_temporal_threshold?threshold=0.92  # Gate 3b
-curl http://localhost:5802/set_max_hold_frames?frames=10          # Gate 3b
-```
+# Configure Gate 3n stack:
+curl "http://localhost:5802/set_temporal_threshold?threshold=0.92"
+curl "http://localhost:5802/set_max_hold_frames?frames=15"
+curl "http://localhost:5802/set_action_aware?enabled=true"
+curl "http://localhost:5802/set_ema_fingerprint?enabled=true&alpha=0.10&transition_reset=true"
+curl "http://localhost:5802/set_slope_predict?enabled=true&threshold=0.010&window=3"
 
-### Disabling Cache (back to Gate 0 behavior):
-```bash
-curl http://localhost:5802/set_temporal_threshold?threshold=0.0
+# Disable cache (Gate 0 / NOCACHE baseline):
+curl "http://localhost:5802/set_temporal_threshold?threshold=0.0"
+curl "http://localhost:5802/set_max_hold_frames?frames=0"
+curl "http://localhost:5802/set_action_aware?enabled=false"
+curl "http://localhost:5802/set_ema_fingerprint?enabled=false"
+curl "http://localhost:5802/set_slope_predict?enabled=false"
 ```
 
 ---
@@ -80,10 +73,10 @@ curl http://localhost:5802/set_temporal_threshold?threshold=0.0
 ## Task
 Given `$ARGUMENTS` (or no arguments for full report):
 
-1. **GATE MAP**: Print current pass/fail for all gates
-2. **ACTIVE CONFIG**: Exact flags/thresholds for production
-3. **METRICS**: Interpret live /async_metrics dump
-4. **NEXT EXPERIMENT**: What gate to run next and why
+1. **GATE MAP**: Print current pass/fail status for all gates
+2. **ACTIVE CONFIG**: Exact flags/thresholds currently running
+3. **NEXT PRIORITY**: What needs to happen to get from 15% → 25% (Phase 4 or Phase 3X)
+4. **METRICS**: Interpret live /async_metrics if server running
 
 See `docs/GATE_STATUS.md` for full gate documentation.
-See `docs/ARCHITECTURE.md` for before/after diagrams of each innovation.
+See `PLAN.md` for Phase 3X / Phase 4 / Phase 5 roadmap.
