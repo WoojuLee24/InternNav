@@ -27,6 +27,7 @@ class VLNPEMetrics(BaseMetric):
         self.sim_step = 0
         self.fail_reason = []
         self.ne = None
+        self.collision_count = 0
         self.prev_position = None
         self.reset()
 
@@ -60,6 +61,7 @@ class VLNPEMetrics(BaseMetric):
         obs = task_obs[robot_name]
         current_position = obs['globalgps']
         self.fail_reason = obs['fail_reason'] if 'fail_reason' in obs else ''
+        self.collision_count = obs.get('collision_count', 0)
 
         # update step count
         self.sim_step += 1
@@ -108,6 +110,7 @@ class VLNPEMetrics(BaseMetric):
         # calculate NDTW
         self.metrics['ndtw'] = self._calc_ndtw()
         self.metrics['steps'] = self.sim_step
+        self.metrics['collision_count'] = self.collision_count
 
         self.metrics['episode_id'] = self.path_data['episode_id']  # episode ID
         self.metrics['trajectory_id'] = self.path_data['trajectory_id']  # trajectory ID

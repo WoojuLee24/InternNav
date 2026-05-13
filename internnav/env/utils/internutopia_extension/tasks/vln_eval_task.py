@@ -17,6 +17,7 @@ class VLNEvalTask(BaseTask):
         self.done_checker: DoneChecker = None
         self._done = None
         self.config = config
+        self._episode_collision_count = 0
 
     def _get_robot_poses_without_offset(self):
         pre_position, pre_rotation = self.robot.articulation.get_world_pose()
@@ -83,9 +84,20 @@ class VLNEvalTask(BaseTask):
             self.robots[list(self.robots.keys())[0]],
             self.config,
         )
+        self._zmq_enabled = False
+        try:
+            import zmq
+            self._zmq_ctx = zmq.Context.instance()
+            self._zmq_sock = self._zmq_ctx.socket(zmq.PUSH)
+            self._zmq_sock.setsockopt(zmq.SNDHWM, 1)
+            self._zmq_sock.connect('tcp://localhost:5577')
+            self._zmq_enabled = True
+        except Exception:
+            pass
 
     def post_reset(self) -> None:
         self.steps = 0
+        self._episode_collision_count = 0
         for robot in self.robots.values():
             robot.post_reset()
         self.reset_light_position(self.data['start_position'])
@@ -120,6 +132,29 @@ class VLNEvalTask(BaseTask):
             obs['topdown_rgb'] = cur_obs['rgba'][..., :3]
             obs['topdown_depth'] = norm_depth(cur_obs['depth'])
         return obs
+
+    def _publish_episode_result(self, reason: str):
+        if not self._zmq_enabled:
+            return
+        import cv2
+        import numpy as np
+        import zmq
+
+        controller = self.robot.controllers.get('move_by_flash')
+        last_bev = getattr(controller, '_last_bev', None)
+        vis = last_bev.copy() if last_bev is not None else np.zeros((512, 512, 3), dtype=np.uint8)
+        h, w = vis.shape[:2]
+        success = reason == 'success'
+        color = (0, 200, 0) if success else (0, 0, 255)
+        label = 'SUCCESS' if success else reason.upper()
+        cv2.rectangle(vis, (0, 0), (w - 1, h - 1), color, 12)
+        cv2.putText(vis, label, (w // 2 - min(120, w // 3), h // 2),
+                    cv2.FONT_HERSHEY_DUPLEX, 2.0, color, 4)
+        _, jpeg = cv2.imencode('.jpg', vis, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        try:
+            self._zmq_sock.send(jpeg.tobytes(), zmq.NOBLOCK)
+        except Exception:
+            pass
 
     def update_metrics(self, obs):
         for metric in self.metrics.values():
@@ -188,10 +223,13 @@ class VLNEvalTask(BaseTask):
 
         elif action_name == 'move_by_flash':
             obs.update(self.get_rgb_depth())
-            if getattr(self.config, 'flash_collision', None) == 'reset' and 'move_by_flash' in self.robot.controllers:
+            flash_collision = getattr(self.config, 'flash_collision', None)
+            if flash_collision and 'move_by_flash' in self.robot.controllers:
                 flash_obs = self.robot.controllers['move_by_flash'].get_obs()
                 if flash_obs.get('collision_detected', False):
-                    obs['collision_detected'] = True
+                    self._episode_collision_count += 1
+                    if flash_collision == 'reset':
+                        obs['collision_detected'] = True
 
         obs['finish_action'] = True
         self.robot.current_action = None
@@ -201,6 +239,7 @@ class VLNEvalTask(BaseTask):
         if not self._done and obs.get('collision_detected', False):
             self._done = True
             reason = 'collision'
+        obs['collision_count'] = self._episode_collision_count
         if self._done:
             self.update_metrics({self.robot_name: obs})
             obs['metrics'] = self.calculate_metrics()
@@ -213,6 +252,7 @@ class VLNEvalTask(BaseTask):
             obs['metrics'][list(obs['metrics'].keys())[0]][0]['fail_reason'] = reason
             for metric in self.metrics.values():
                 metric.fail_reason = reason
+            self._publish_episode_result(reason)
 
         # calculate metrics
         obs['fail_reason'] = reason
