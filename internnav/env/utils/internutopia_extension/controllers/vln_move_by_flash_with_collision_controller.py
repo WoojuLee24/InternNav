@@ -44,6 +44,7 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
         self._zmq_enabled = False
         self._traj_world = []
         self._collision_count = 0
+        self._last_bev = None
         self._bev_save_dir = '/tmp/bev_debug'
         os.makedirs(self._bev_save_dir, exist_ok=True)
         try:
@@ -53,7 +54,7 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
             self._zmq_sock.setsockopt(zmq.SNDHWM, 1)
             self._zmq_sock.connect('tcp://localhost:5577')
             self._zmq_enabled = True
-            print('[BEV VIS] ZMQ connected to tcp://localhost:5556')
+            print('[BEV VIS] ZMQ connected to tcp://localhost:5577')
         except Exception as e:
             print(f'[BEV VIS] ZMQ init failed: {e}')
 
@@ -268,6 +269,7 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
             cv2.putText(vis, 'COLLISION', (w // 2 - 120, h - 30),
                         cv2.FONT_HERSHEY_DUPLEX, 2.0, (0, 0, 255), 4)
 
+        self._last_bev = vis.copy()
         _, jpeg = cv2.imencode('.jpg', vis, [cv2.IMWRITE_JPEG_QUALITY, 80])
 
         if os.environ.get('DEBUGPY_ENABLE') == '1':
