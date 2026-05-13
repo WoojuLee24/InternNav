@@ -37,7 +37,9 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
         )  # 200 is the physics_dt
 
         self.current_action = None
-        self._footprint_radius = config.robot_platform_size  # None = compute lazily from AABB on first use
+        self._footprint_radius = config.robot_platform_size  # target check radius (configurable)
+        self._erase_radius = None  # erase radius: max(AABB, robot_platform_size), lazy init
+        self._aabb_scale = 1.3  # scale factor to account for AABB underestimating actual robot size
         self._collision_detected = False
 
         # BEV visualization via ZMQ (PUSH: controller connects, bridge binds)
@@ -178,13 +180,16 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
         Return:
             bool: True if the position is already occupied
         """
-        if self._footprint_radius is None:
+        if self._erase_radius is None:
             from isaacsim.core.utils.bounds import compute_aabb, create_bbox_cache
             bbox_cache = create_bbox_cache()
             prim_path = self.robot.articulation.prim.GetPath().pathString
             aabb = compute_aabb(bbox_cache, prim_path, include_children=True)
-            self._footprint_radius = max(aabb[3] - aabb[0], aabb[4] - aabb[1]) / 2
-            print(f'[COLLISION] AABB footprint_radius={self._footprint_radius:.3f}m')
+            aabb_radius = max(aabb[3] - aabb[0], aabb[4] - aabb[1]) / 2 * self._aabb_scale
+            if self._footprint_radius is None:
+                self._footprint_radius = aabb_radius
+            self._erase_radius = max(aabb_radius, self._footprint_radius)
+            print(f'[COLLISION] AABB radius={aabb_radius:.3f}m footprint_radius={self._footprint_radius:.3f}m erase_radius={self._erase_radius:.3f}m')
 
         topdown_global_map_camera = self.robot.sensors['topdown_camera_500']
         free_map = self.get_map_info(topdown_global_map_camera)
@@ -192,16 +197,17 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
         camera_pose = topdown_global_map_camera.get_world_pose()[0]
         width, height = topdown_global_map_camera.resolution
         pixels_per_meter = 10.0 / aperture * width
+        erase_size = max(1, round(self._erase_radius * pixels_per_meter))
         robot_size = max(1, round(self._footprint_radius * pixels_per_meter))
 
-        # Step 1: erase current robot footprint (robot body shows as occupied in free_map)
+        # Step 1: erase current robot footprint using max(AABB, robot_platform_size)
         cur_pos, _ = self.robot.articulation.get_world_pose()
         cur_px, cur_py = world_to_pixel(cur_pos, camera_pose, aperture, width, height)
         cur_px_int, cur_py_int = int(cur_px), int(cur_py)
-        free_map[cur_px_int - robot_size : cur_px_int + robot_size,
-                 cur_py_int - robot_size : cur_py_int + robot_size] = 1
+        free_map[cur_px_int - erase_size : cur_px_int + erase_size,
+                 cur_py_int - erase_size : cur_py_int + erase_size] = 1
 
-        # Step 2: check target position with robot footprint
+        # Step 2: check target position with robot_platform_size footprint
         px, py = world_to_pixel(position, camera_pose, aperture, width, height)
         px_int, py_int = int(px), int(py)
         sub_map = free_map[px_int - robot_size : px_int + robot_size,
@@ -210,7 +216,7 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
         occupied = int(np.sum(sub_map == 0))
         collision = occupied > 0
         if collision:
-            print(f'[COLLISION CHECK] footprint={self._footprint_radius:.3f}m ({robot_size}px) occupied={occupied}/{sub_map.size}', flush=True)
+            print(f'[COLLISION CHECK] footprint={self._footprint_radius:.3f}m ({robot_size}px) erase={self._erase_radius:.3f}m ({erase_size}px) occupied={occupied}/{sub_map.size}', flush=True)
 
         if self._zmq_enabled:
             self._publish_bev(free_map, position, camera_pose, aperture, width, height,
@@ -301,8 +307,9 @@ class VlnMoveByFlashCollisionController(BaseController):  # codespell:ignore
         positions, orientations = self.robot.articulation.get_world_pose()
         new_robot_position, new_robot_rotation = self.get_new_position_and_rotation(positions, orientations, action)
 
-        # Check if there is a collision with obstacles. Abort the teleport if there is
-        if action != 1 or not self.check_collision(new_robot_position):
+        # Always publish BEV; for forward also abort if collision detected
+        collision = self.check_collision(new_robot_position)
+        if action != 1 or not collision:
             # set robot to new state
             self.reset_robot_state(new_robot_position, new_robot_rotation)
         else:
