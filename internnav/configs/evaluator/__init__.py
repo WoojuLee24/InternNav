@@ -51,6 +51,8 @@ class TaskCfg(BaseModel):
     metric: Optional[MetricCfg] = None
     camera_prim_path: Optional[str] = None
     one_step_stand_still: Optional[bool] = None
+    camera_translation: Optional[tuple] = None
+    camera_orientation: Optional[tuple] = None
 
 
 class EvalDatasetCfg(BaseModel):

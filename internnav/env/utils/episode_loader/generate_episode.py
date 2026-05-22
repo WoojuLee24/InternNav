@@ -50,12 +50,18 @@ def generate_vln_episode(dataloader: ResumablePathKeyEpisodeloader, task: TaskCf
     from internnav.env.utils.internutopia_extension.configs.metrics import (
         VLNPEMetricCfg,
     )
+    from internnav.env.utils.internutopia_extension.configs.sensors.vln_camera import VLNCameraCfg
     from internnav.env.utils.internutopia_extension.configs.tasks import VLNEvalTaskCfg
+
+    def _build_sensor_cfg(sensor_settings):
+        if sensor_settings.get('type') == 'VLNCamera':
+            return VLNCameraCfg(**sensor_settings)
+        return RepCameraCfg(**sensor_settings)
 
     robot = H1RobotCfg(
         **task.robot.robot_settings,
         controllers=[ControllerCfg(**cfg.controller_settings) for cfg in task.robot.controllers],
-        sensors=[RepCameraCfg(**cfg.sensor_settings) for cfg in task.robot.sensors],
+        sensors=[_build_sensor_cfg(cfg.sensor_settings) for cfg in task.robot.sensors],
     )
 
     for path_key in eval_path_key_list:
