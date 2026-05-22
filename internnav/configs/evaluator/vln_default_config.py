@@ -221,6 +221,8 @@ def get_config(evaluator_cfg: EvalCfg):
                     prim_path=camera_prim_path,
                     enable=True,
                     resolution=camera_resolution,
+                    translation=evaluator_cfg.task.camera_translation,
+                    orientation=evaluator_cfg.task.camera_orientation,
                 ).model_dump(),
             ),
         ],

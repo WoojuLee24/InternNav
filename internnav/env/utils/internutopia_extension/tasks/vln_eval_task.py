@@ -125,6 +125,9 @@ class VLNEvalTask(BaseTask):
             depth_info = norm_depth(cur_obs['depth'])
             obs['depth'] = depth_info[..., np.newaxis]
             obs['rgb'] = rgb_info
+            c_pos, c_ori = camera.get_world_pose()
+            obs['camera_position'] = c_pos - self.env_offset
+            obs['camera_orientation'] = c_ori
 
         if 'topdown_camera_500' in self.robot.sensors:
             topdown_global_map_camera = self.robot.sensors['topdown_camera_500']

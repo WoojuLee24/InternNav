@@ -45,6 +45,8 @@ class VLNCamera(BaseSensor):
     def restore_sensor_info(self):
         self.cleanup()
         prim_path = self._robot.config.prim_path + '/' + self.config.prim_path
+        _translation = getattr(self.config, 'translation', None)
+        _orientation = getattr(self.config, 'orientation', None)
         _camera = ICamera.create(
             name=self.config.name,
             prim_path=prim_path,
@@ -53,6 +55,8 @@ class VLNCamera(BaseSensor):
             distance_to_image_plane=True,
             camera_params=False,
             resolution=self.config.resolution,
+            translation=_translation,
+            orientation=_orientation,
         )
         self._camera: ICamera = _camera
 
