@@ -1,24 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git diff*)",
-      "Bash(git log*)",
-      "Bash(git status*)",
       "Bash(pytest tests/*)",
       "Bash(nvidia-smi)",
-      "Bash(ros2 topic*)",
-      "Bash(sed:*)",
-      "Bash(cat:*)",
-      "Bash(grep:*)",
-      "Bash(find:*)",
-      "Bash(ls:*)",
-      "Bash(head:*)",
-      "Bash(tail:*)",
-      "Bash(wc:*)",
-      "Bash(echo:*)",
-      "Bash(which:*)",
-      "Bash(python:*)",
-      "Bash(python3:*)"
+      "Bash(ros2 topic *)",
+      "Bash(dpkg -l *)",
+      "Bash(source /opt/ros/jazzy/setup.bash)"
     ],
     "deny": [
       "Bash(git push --force*)",
