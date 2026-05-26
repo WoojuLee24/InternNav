@@ -170,6 +170,43 @@ _current_odom = None              # [x, y, theta] from latest HTTP request
 _last_s2_odom = None              # [x, y, theta] at last completed S2 run
 _odom_lock = threading.Lock()
 
+# I-202 (Gate 7): Optical Flow Cache Invalidation
+# Force S2 refresh when mean optical flow magnitude exceeds a threshold,
+# catching rapid robot motion (turns, stops) that visual embeddings miss.
+# The cosine-similarity gate misses scene changes where the embedding
+# space is locally flat (e.g., first few frames of a turn). Optical flow
+# directly measures pixel displacement and fires immediately on motion onset.
+_flow_bypass_enabled = False
+_flow_magnitude_threshold = 20.0   # mean pixels/frame at 80x60 resolution
+_prev_flow_frame = None             # last grayscale 80x60 frame for flow
+_flow_frame_lock = threading.Lock()
+
+
+def _check_flow_bypass(rgb, threshold):
+    """I-202: compute mean optical flow vs previous frame. Returns True if
+    magnitude exceeds threshold. Always updates _prev_flow_frame."""
+    global _prev_flow_frame
+    try:
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY) if rgb.ndim == 3 else rgb
+        small = cv2.resize(gray, (80, 60), interpolation=cv2.INTER_AREA)
+    except Exception:
+        return False
+    with _flow_frame_lock:
+        prev = _prev_flow_frame
+        _prev_flow_frame = small
+    if prev is None:
+        return False
+    try:
+        flow = cv2.calcOpticalFlowFarneback(
+            prev, small, None,
+            pyr_scale=0.5, levels=3, winsize=15,
+            iterations=3, poly_n=5, poly_sigma=1.2, flags=0)
+        mag = float(np.sqrt(flow[..., 0] ** 2 + flow[..., 1] ** 2).mean())
+        return mag > threshold
+    except Exception:
+        return False
+
+
 def _image_fingerprint(rgb):
     """32x32 grayscale, raw pixel values 0-255 (no normalization).
     Returns a 1D float32 vector or None if input is unusable.
@@ -307,6 +344,7 @@ def reset_dual_metrics():
         async_metrics["serve_count_bypasses"] = 0
         async_metrics["slope_predict_bypasses"] = 0
         async_metrics["odom_progress_bypasses"] = 0
+        async_metrics["flow_bypasses"] = 0      # I-202: optical flow triggers
         async_metrics["response_sequence"] = []  # Phase 3X: reset per-run sequence log
         # pre_warm_frames_queued is NOT reset here — it's a server-lifetime counter
 
@@ -366,12 +404,15 @@ def async_continuous_loop():
                 odom_progress_thr = _odom_progress_threshold
                 cur_odom = _current_odom[:] if _current_odom is not None else None
                 last_s2_pos = _last_s2_odom[:] if _last_s2_odom is not None else None
+            flow_on = _flow_bypass_enabled
+            flow_thr = _flow_magnitude_threshold
             was_forced_bypass = False
             was_i046_bypass = False  # I-050: track bypass type for flag propagation
             was_i047_bypass = False
             was_i052_bypass = False
             was_i054_bypass = False
             was_i058_bypass = False
+            was_flow_bypass = False
             if threshold > 0.0:
                 # I-049: compute adaptive max_hold if enabled
                 if adaptive_on and len(_similarity_window) >= _ADAPTIVE_WINDOW_SIZE:
@@ -395,6 +436,9 @@ def async_continuous_loop():
                 elif skip_count >= max_hold:
                     forced = "max_hold_bypasses"  # I-047
                     was_i047_bypass = True
+                elif flow_on and _check_flow_bypass(image, flow_thr):
+                    forced = "flow_bypasses"  # I-202: optical flow motion onset
+                    was_flow_bypass = True
                 elif serve_bypass_on and serve_count >= serve_threshold:
                     forced = "serve_count_bypasses"  # I-052
                     was_i052_bypass = True
@@ -1068,6 +1112,11 @@ def get_async_metrics():
         "odom_progress_threshold": _odom_progress_threshold,
         "odom_progress_bypasses": m.get("odom_progress_bypasses", 0),
 
+        # I-202: optical flow cache invalidation (Gate 7)
+        "flow_bypass_enabled": _flow_bypass_enabled,
+        "flow_magnitude_threshold": _flow_magnitude_threshold,
+        "flow_bypasses": m.get("flow_bypasses", 0),
+
         # Phase 3X (I-111/I-112): per-request response-type sequence
         "response_sequence": m.get("response_sequence", []),
 
@@ -1287,6 +1336,27 @@ def set_odom_progress_hold_endpoint():
         'status': 'ok',
         'odom_progress_enabled': enabled,
         'odom_progress_threshold': threshold,
+    })
+
+
+@app.route("/set_flow_bypass", methods=['POST', 'GET'])
+def set_flow_bypass_endpoint():
+    """I-202 (Gate 7): Toggle optical flow cache invalidation.
+    Forces S2 refresh when mean frame-to-frame flow magnitude > threshold (80x60 px).
+    GET ?enabled=true|false&threshold=20.0"""
+    global _flow_bypass_enabled, _flow_magnitude_threshold, _prev_flow_frame
+    enabled_str = request.args.get('enabled', 'true').lower()
+    enabled = enabled_str in ('1', 'true', 'yes', 'on')
+    threshold = float(request.args.get('threshold', _flow_magnitude_threshold))
+    threshold = max(0.1, min(200.0, threshold))
+    _flow_bypass_enabled = enabled
+    _flow_magnitude_threshold = threshold
+    with _flow_frame_lock:
+        _prev_flow_frame = None  # reset frame reference on config change
+    return jsonify({
+        'status': 'ok',
+        'flow_bypass_enabled': enabled,
+        'flow_magnitude_threshold': threshold,
     })
 
 
