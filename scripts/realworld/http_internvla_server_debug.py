@@ -172,6 +172,19 @@ _slope_window = 3                  # frames over which to estimate slope
 _similarity_history = []           # rolling buffer of recent similarity scores
 _slope_history_lock = threading.Lock()
 
+# I-204: Cosine Similarity Variance Gating (Gate 9)
+# Slope predict (I-054) catches monotone declining similarity (smooth transitions).
+# Variance gating catches OSCILLATORY similarity (robot at doorways, looking left/right,
+# or hovering between two distinct scenes). High std(sim) over W frames indicates the
+# scene content is unstable even if the current sim >= τ.
+#
+# Bypass condition: sim >= τ AND std(sim_history[-W:]) > σ_threshold → force S2
+# Mechanistically orthogonal to I-054 (slope) and I-047 (max_hold).
+_var_gate_enabled = False
+_var_gate_sigma = 0.03       # std(sim) threshold; tuned by Gate 9 sweep
+_var_gate_window = 5         # frames of sim history to compute std over
+_var_gate_lock = threading.Lock()
+
 # I-058 (Gate 3p): Odometry-Progress Hold
 # Force S2 when robot has traveled > threshold meters since last S2 run.
 # Provides a SPATIAL invalidation signal orthogonal to I-047 (temporal) and I-052 (count).
@@ -357,6 +370,7 @@ def reset_dual_metrics():
         async_metrics["slope_predict_bypasses"] = 0
         async_metrics["odom_progress_bypasses"] = 0
         async_metrics["flow_bypasses"] = 0      # I-202: optical flow triggers
+        async_metrics["var_gate_bypasses"] = 0  # I-204: cosine variance gating
         async_metrics["response_sequence"] = []  # Phase 3X: reset per-run sequence log
         # pre_warm_frames_queued is NOT reset here — it's a server-lifetime counter
 
@@ -376,7 +390,7 @@ def async_continuous_loop():
     global _last_fingerprint, _last_fresh_was_action, _consecutive_skip_count, _max_hold_frames
     global _ema_fingerprint, _traj_serve_count, _similarity_history, _ema_transition_reset
     global _current_odom, _last_s2_odom
-    global _ema_frames_since_reset
+    global _ema_frames_since_reset, _var_gate_enabled, _var_gate_sigma, _var_gate_window
     while async_thread_running:
         try:
             # Wait for new frame data from queue (non-blocking with timeout)
@@ -429,6 +443,10 @@ def async_continuous_loop():
                 last_s2_pos = _last_s2_odom[:] if _last_s2_odom is not None else None
             flow_on = _flow_bypass_enabled
             flow_thr = _flow_magnitude_threshold
+            with _var_gate_lock:
+                var_on = _var_gate_enabled
+                var_sigma = _var_gate_sigma
+                var_win = _var_gate_window
             was_forced_bypass = False
             was_i046_bypass = False  # I-050: track bypass type for flag propagation
             was_i047_bypass = False
@@ -546,7 +564,24 @@ def async_continuous_loop():
                                         with temporal_cache_lock:
                                             _consecutive_skip_count = 0
                                         # Fall through to S2 run
-                            if not was_i054_bypass:
+                            # I-204: variance gate — high std(sim) over last W frames
+                            # indicates oscillatory scene even though sim >= τ right now
+                            was_var_bypass = False
+                            if not was_i054_bypass and var_on:
+                                with _slope_history_lock:
+                                    vh = _similarity_history[-var_win:] if len(_similarity_history) >= var_win else []
+                                if len(vh) >= var_win:
+                                    import statistics
+                                    sim_std = statistics.stdev(vh)
+                                    if sim_std > var_sigma:
+                                        was_var_bypass = True
+                                        was_forced_bypass = True
+                                        with async_metrics_lock:
+                                            async_metrics["var_gate_bypasses"] = (
+                                                async_metrics.get("var_gate_bypasses", 0) + 1)
+                                        with temporal_cache_lock:
+                                            _consecutive_skip_count = 0
+                            if not was_i054_bypass and not was_var_bypass:
                                 with async_metrics_lock:
                                     async_metrics["temporal_cache_skips"] = async_metrics.get("temporal_cache_skips", 0) + 1
                                 with temporal_cache_lock:
@@ -1154,6 +1189,12 @@ def get_async_metrics():
         "ema_warmup_frames": _ema_warmup_frames,
         "ema_warmup_alpha": _ema_warmup_alpha,
 
+        # I-204 (Gate 9): cosine similarity variance gating
+        "var_gate_enabled": _var_gate_enabled,
+        "var_gate_sigma": _var_gate_sigma,
+        "var_gate_window": _var_gate_window,
+        "var_gate_bypasses": m.get("var_gate_bypasses", 0),
+
         # Phase 3X (I-111/I-112): per-request response-type sequence
         "response_sequence": m.get("response_sequence", []),
 
@@ -1420,6 +1461,31 @@ def set_ema_warmup_endpoint():
         'ema_warmup_enabled': enabled,
         'ema_warmup_frames': warmup_frames,
         'ema_warmup_alpha': alpha_warm,
+    })
+
+
+@app.route("/set_var_gate", methods=['POST', 'GET'])
+def set_var_gate_endpoint():
+    """I-204 (Gate 9): Cosine similarity variance gating.
+    Forces S2 refresh when std(sim_history[-W:]) > sigma, catching oscillatory
+    scenes where current sim >= τ but recent sim history is unstable.
+    GET ?enabled=true|false&sigma=0.03&window=5"""
+    global _var_gate_enabled, _var_gate_sigma, _var_gate_window
+    enabled_str = request.args.get('enabled', 'true').lower()
+    enabled = enabled_str in ('1', 'true', 'yes', 'on')
+    sigma = float(request.args.get('sigma', _var_gate_sigma))
+    sigma = max(0.001, min(1.0, sigma))
+    window = int(request.args.get('window', _var_gate_window))
+    window = max(2, min(30, window))
+    with _var_gate_lock:
+        _var_gate_enabled = enabled
+        _var_gate_sigma = sigma
+        _var_gate_window = window
+    return jsonify({
+        'status': 'ok',
+        'var_gate_enabled': enabled,
+        'var_gate_sigma': sigma,
+        'var_gate_window': window,
     })
 
 
