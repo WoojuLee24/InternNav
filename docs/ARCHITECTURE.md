@@ -276,3 +276,177 @@ curl -X GET "http://localhost:5802/set_temporal_threshold?threshold=0.0"
 ```bash
 watch -n 1 'curl -sf http://localhost:5802/async_metrics | python3 -m json.tool'
 ```
+
+---
+
+## 8. Gate 3n Production Stack — Full Innovation Diagram
+
+```
+HTTP Request arrives at /eval_dual_async  (S1 ~12 Hz)
+        │
+        ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                    /eval_dual_async handler                          │
+│                   latency: 0.02ms                                    │
+│                                                                      │
+│  read async_cache (lock, <0.01ms)                                    │
+│  queue image for background S2 (non-blocking, <0.01ms)              │
+│  return cached {trajectory | action | waiting}                       │
+└────────────────────────┬─────────────────────────────────────────────┘
+                         │ non-blocking queue push
+                         ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│              Background S2 Thread (async_continuous_loop)            │
+│                                                                      │
+│  ┌─────── Gate 3b: Temporal Similarity Gate ─────────────────────┐  │
+│  │                                                               │  │
+│  │  ① TR-EMA fingerprint (I-055, α=0.10)                        │  │
+│  │     f_t = α·embed_t + (1-α)·f_{t-1}   [transition_reset=True]│  │
+│  │                                                               │  │
+│  │  ② I-046 one-shot action-aware bypass:                        │  │
+│  │     if last_fresh_was_action AND NOT was_forced: FORCE FRESH  │  │
+│  │     (one-shot: resets after firing to prevent cascade)        │  │
+│  │                                                               │  │
+│  │  ③ I-047 max-hold bound (MH=15):                             │  │
+│  │     if skip_count ≥ 15: FORCE FRESH                          │  │
+│  │                                                               │  │
+│  │  ④ I-054 slope predict (δ_s=0.010, window=3):               │  │
+│  │     if slope of cosine_sim falling > 0.010: FORCE FRESH      │  │
+│  │                                                               │  │
+│  │  ⑤ cosine_sim(f_t, f_last_fresh) ≥ 0.92 → SKIP (91% frames)│  │
+│  │     cosine_sim < 0.92 → MISS → run S2                        │  │
+│  │                                                               │  │
+│  └────────────────────────┬──────────────────────────────────────┘  │
+│                            │ ~9% of frames pass gate                 │
+│                            ▼                                         │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │          InternVLA-N1 S2 Inference                          │    │
+│  │          temp=0.75, kv-cache=True, max_new_tokens=80        │    │
+│  │          ~300ms per call on RTX 3090                        │    │
+│  └────────────────────────┬────────────────────────────────────┘    │
+│                            │                                         │
+│                            ▼                                         │
+│           async_cache = {trajectory | action}                        │
+│           _last_fresh_was_action updated (I-046 state)               │
+│           _skip_count reset (I-047 state)                            │
+│           _similarity_history updated (I-054 slope state)            │
+│                                                                      │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │  Gate 3c: Pre-warm (I-010)                                  │    │
+│  │  At startup: 3 synthetic frames queued before first request │    │
+│  │  → async_cache pre-populated, waiting_responses = 0         │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**Gate 3n measured results (3 bags)**:
+
+| Bag    | Skip% | AA  | MH  | SP | V      | S2 lat | Status |
+|--------|-------|-----|-----|----|--------|--------|--------|
+| 073623 | 90.9% | 22  | 84  | 5  | 0.0791 | ~300ms | ✅ |
+| 061841 | 90.8% | 192 | 396 | 15 | 0.0022 | ~300ms | ✅ |
+| 063047 | 91.4% | 120 | 362 | 5  | 0.0031 | ~300ms | ✅ |
+
+---
+
+## 9. Gate 6a — max_new_tokens Sweep: Before & After
+
+The last performance bottleneck: **S2 inference takes ~300ms** per call. Even at 91% skip, 
+the 9% of frames that trigger S2 form the hard floor of response diversity.
+
+### BEFORE (fixed max_new_tokens=80)
+```
+S2 inference call (9% of frames):
+   model.generate(max_new_tokens=80)  →  ~300ms
+   
+   Navigation output types:
+   - Trajectory (51-63%): 33 waypoints × 3D = ~99 numbers → many tokens
+   - Action (37-49%): "turn left" / "stop" → few tokens (often <10)
+   
+   Problem: model always allocated 80 token budget even for simple action outputs.
+   Wall time dominated by token generation, not attention (for short outputs).
+```
+
+### AFTER (runtime-tunable max_new_tokens via /set_max_new_tokens)
+```
+S2 inference call:
+   model.generate(max_new_tokens=N)   →  N×(ms/token) latency
+   
+   Runtime control:
+   curl "http://localhost:5802/set_max_new_tokens?tokens=32"
+   
+   Expected tradeoff:
+   tokens=80: ~300ms  (baseline, full trajectory quality)
+   tokens=64: ~240ms  (20% reduction)
+   tokens=48: ~180ms  (40% reduction)
+   tokens=32: ~120ms  (60% reduction)  ← sweet-spot hypothesis
+   tokens=16: <80ms   (truncates trajectories)
+   
+   Hypothesis: actions (37-49% of outputs) complete in <20 tokens.
+   Trajectories may truncate at 32 tokens. V test distinguishes these cases.
+   
+   Gate 6a pass: S2 lat < 200ms  AND  V ≤ 0.10  AND  traj_ratio within 8pp
+```
+
+---
+
+## 10. Updated Metric Progression (through Gate 3n)
+
+| Gate | Innovation | HTTP lat | Hz | S2 runs/bag | action_bias_V | S2 lat |
+|------|-----------|---------|-----|------------|---------------|--------|
+| Sync baseline | none | ~300ms | 2.5 | 2000-2300 | — | ~300ms |
+| Gate 0 | TRUE async bg thread | **0.02ms** | **12** | 2000-2300 | — | ~300ms |
+| Gate 1 | temp=0.75 | 0.02ms | 12 | 2000-2300 | — | ~300ms |
+| Gate 3b | cosine gate τ=0.92, I-046, I-047 | 0.02ms | 12 | **130-620** | **0.06-0.09** | ~300ms |
+| Gate 3c | + pre-warm 3 frames | 0.02ms | 12 | 130-620 | 0.06-0.09 | ~300ms |
+| Gate 3g | + MH=15 | 0.02ms | 12 | **100-450** | **0.009** | ~300ms |
+| Gate 3j | + τ=0.92 Pareto lock | 0.02ms | 12 | 100-450 | 0.009 | ~300ms |
+| Gate 3m | + TR-EMA α=0.10 | 0.02ms | 12 | **90-400** | **0.007-0.068** | ~300ms |
+| Gate 3l | + slope δ_s=0.010 | 0.02ms | 12 | 90-400 | 0.007-0.024 | ~300ms |
+| **Gate 3n** | **Full stack validated** | 0.02ms | 12 | **~180-500** | **≤0.079** | ~300ms |
+| Gate 6a | + max_new_tokens=N | 0.02ms | 12 | ~180-500 | ≤0.10 target | **<200ms target** |
+
+---
+
+## 11. Real Robot Deployment Guide (Gate 3n Production)
+
+```bash
+# 1. Pull latest
+git fetch kemal --tags
+git checkout robot/gate-3n-production   # tag: faa86192
+
+# 2. Start server (inside Docker container with --gpus all)
+python3 scripts/realworld/http_internvla_server_debug.py \
+    --mode async \
+    --temperature 0.75 \
+    --kv-cache \
+    --calib scripts/realworld/calib/calib_scout.txt \
+    --pre-warm-frames 3
+
+# 3. Configure Gate 3n stack (after server up, ~90s model load)
+curl "http://localhost:5802/set_temporal_threshold?threshold=0.92"
+curl "http://localhost:5802/set_max_hold_frames?frames=15"
+curl "http://localhost:5802/set_action_aware?enabled=true"
+curl "http://localhost:5802/set_ema_fingerprint?enabled=true&alpha=0.10&transition_reset=true"
+curl "http://localhost:5802/set_slope_predict?enabled=true&threshold=0.010&window=3"
+
+# 4. Start ROS2 client (host with ROS2)
+source /opt/ros/jazzy/setup.bash
+python3.12 scripts/realworld/http_internvla_client_debug.py \
+    --mode async --kv-cache --temperature 0.75 \
+    --jpeg-quality 95 --depth-png-compress 6 \
+    --calib scripts/realworld/calib/calib_scout.txt
+
+# 5. Monitor (separate terminal)
+watch -n 3 'curl -s http://localhost:5802/async_metrics | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+print(f\"hz={d[chr(39)+chr(106)+chr(111)+chr(105)+chr(110)+chr(116)+chr(95)+chr(114)+chr(101)+chr(113)+chr(95)+chr(104)+chr(122)+chr(39)]:.2f}  skip={d[chr(39)+'temporal_cache_skip_ratio'+chr(39)]:.1f}%  bg={d[chr(39)+'background_s2_runs'+chr(39)]}  lat={d[chr(39)+'joint_latency_ms'+chr(39)]:.3f}ms\")
+"'
+
+# 6. Disable cache for Gate 0 baseline comparison:
+curl "http://localhost:5802/set_temporal_threshold?threshold=0.0"
+curl "http://localhost:5802/set_max_hold_frames?frames=0"
+curl "http://localhost:5802/set_action_aware?enabled=false"
+curl "http://localhost:5802/set_ema_fingerprint?enabled=false"
+curl "http://localhost:5802/set_slope_predict?enabled=false"
+```
