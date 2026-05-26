@@ -17,7 +17,7 @@ LOG_BASE="/tmp/gate3x_sequence"
 mkdir -p "$LOG_BASE"
 
 BAGS=(073623 061841 063047)
-BAG_DIR="/workspace/InternNav/data/rosbag"
+BAG_DIR="/workspace/rosbag"
 SERVER_LOG="$LOG_BASE/server.log"
 
 # ---- helpers ----------------------------------------------------------------
@@ -50,7 +50,7 @@ run_bag() {
     mkdir -p "$log_dir"
     curl -sf "http://localhost:5802/reset_metrics" > "$log_dir/reset.json"
     echo "[gate3x] Playing bag $bag ($tag)..."
-    ros2 bag play "$BAG_DIR/rosbag2_$bag" --rate 0.5 \
+    ros2 bag play "$BAG_DIR/my_camera_bag_20260317_$bag" --rate 0.5 \
         --topics /camera/camera/color/image_raw \
                  /camera/camera/aligned_depth_to_color/image_raw \
                  /gdq/msg/gdq_odom 2>&1 | tee "$log_dir/bag.log" || true
