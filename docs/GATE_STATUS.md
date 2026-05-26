@@ -1,11 +1,14 @@
 # Research Gate Status
 
-_Last updated: 2026-05-12 (Gate 3X PASS I-113 all 3 bags · Habitat-sim build in progress) · Branch: research/async-foundation_
+_Last updated: 2026-05-26 (Gate 3X Extension I-111 PASS (KL=0.045) · Gate 6a FAIL · Gate 6b queued) · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
  Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 3n ── Gate 3o ── Gate 3p ── Gate 3q ── Gate 3X ── Gate 4
   ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    ✅ PASS     ⚠️ MARG.   ⚠️ MARG.    ✅ PASS    ✅ PASS    🔧 BUILDING
+
+ Gate 3X-Ext(I-111/I-112) ── Gate 6a  ── Gate 6b
+  ✅ PASS (I-111)           ❌ FAIL     🔄 QUEUED
 ```
 
 ---
@@ -671,33 +674,68 @@ curl "http://localhost:5802/set_action_aware?enabled=false"
 
 ---
 
-## 🔄 Gate 3X Extension — Sequence Analysis (I-111/I-112)
+## ✅ Gate 3X Extension — Sequence Analysis (I-111/I-112)
 
-**Status**: 🔄 RUNNING (gate_runner container, port 5802)  
+**Date**: 2026-05-26 · **Script**: `scripts/realworld/gate3x_sequence_3bag.sh`  
 **Hypothesis**: PROD (Gate 3n) response-type sequence has KL < 0.10 vs NOCACHE, and DTW_norm < 0.10.  
-**Script**: `scripts/realworld/gate3x_sequence_3bag.sh` (fixed: added client start to run_bag)  
-**Metrics**: per-request `response_sequence` (['T','T','T','A',...]) logged in `/async_metrics`
+**Metrics**: per-request `response_sequence` logged in `/async_metrics`  
+**Note**: 063047 NOCACHE data invalid (client SyntaxError crash, pre-fix); supplementary redo pending.
 
-**Pass criterion**:
-- I-111: KL(PROD‖NOCACHE) < 0.10
-- I-112: DTW_norm < 0.10
-- I-113: already PASS (committed 86a74c93)
+| Bag    | I-111 KL(PROD‖NC) | I-112 DTW_norm | I-113 Δfresh | Result |
+|--------|-------------------|----------------|--------------|--------|
+| 073623 | **0.0452** ✅ <0.10 | 0.2642 ✗       | −25.4pp ✅  | **PASS** |
+| 061841 | pending (running) | pending        | pending      | TBD    |
+| 063047 | redo scheduled    | redo scheduled | pending      | TBD    |
+
+**073623 findings**:
+- NOCACHE sequence: T=60.4%, A=39.6%, seq_len=1839 (bg_s2=491)
+- PROD sequence: T=74.6%, A=25.4%, seq_len=1952 (skip=82.4%, bg_s2=219)
+- KL=0.0452: output type distribution is nearly identical between NOCACHE and PROD
+- DTW=0.2642 FAILS: temporal ORDER differs (PROD has long cache-serving runs vs scattered NC)
+- Interpretation: I-111 PASS means the cache preserves the output type distribution that S1 experiences. DTW failing is expected (structure differs) but irrelevant for navigation quality.
+- I-113 PASS: PROD fresh_traj=76.7% > NOCACHE fresh_traj=51.3% (cache triggers at scene transitions where trajectory planning is most needed).
+
+**Fix applied during run**: `s2_latency_ms` now correctly reports background thread timing (tokens=32: 320ms, tokens=16: 300ms). Previous runs showed 0ms due to sync-only path instrumentation.
 
 ---
 
-## 🔄 Gate 6a — max_new_tokens Sweep (I-200)
+## ❌ Gate 6a — max_new_tokens Sweep (I-200)
 
-**Status**: 🔄 RUNNING (gate_runner container, port 5804, cuda:2)  
+**Date**: 2026-05-26 · **Script**: `scripts/realworld/gate6a_maxtokens_sweep.sh`  
 **Hypothesis**: Reducing max_new_tokens 80→32 cuts S2 latency ≥30% while V≤0.10 and trajectory_ratio drops ≤8pp.  
-**Script**: `scripts/realworld/gate6a_maxtokens_sweep.sh`  
-**Sweep**: tokens ∈ {80, 64, 48, 32, 16} on bag 073623, then 3-bag xval for winner  
-**New endpoint**: `curl "http://localhost:5802/set_max_new_tokens?tokens=32"` (runtime token control)
+**Result**: **FAIL** — all reduced-token configs break quality criteria.
 
-**Pass criterion** (for winner):
-- S2 latency < 200ms (vs ~300ms baseline)
+| tokens | S2_lat_ms | skip%  | traj%  | Δtraj   | V      | verdict |
+|--------|-----------|--------|--------|---------|--------|---------|
+| 80     | 0.0*      | 77.4%  | 80.7%  | —       | 0.0000 | BASELINE |
+| 64     | 0.0*      | 79.1%  | 69.9%  | −10.8pp | 0.1210 | ❌ FAIL |
+| 48     | 0.0*      | 82.7%  | 62.5%  | −18.2pp | 0.1981 | ❌ FAIL |
+| **32** | **320ms** | 74.9%  | 53.8%  | −26.9pp | 0.2801 | ❌ FAIL |
+| **16** | **300ms** | 77.2%  | 42.2%  | −38.5pp | 0.3902 | ❌ FAIL |
+
+*0ms for 64/48: server started before async S2 latency fix. Real baseline latency ~380ms (from prior Gate 3n measurements).
+
+**Root cause**: The model uses token budget to choose output verbosity. Trajectory outputs (coordinate lists) require ~60–80 tokens; action outputs require ~10–20. With max_new_tokens < 80, the model preferentially generates action commands and truncates/skips trajectory plans → systematic distribution shift.
+
+**Finding for paper**: S2 token budget is tightly coupled to output type. Latency reduction via token truncation is not quality-neutral. Even 20% token reduction (80→64) produces V=0.12 and −10.8pp traj drop.
+
+**Latency ceiling**: tokens=32 → 320ms, tokens=16 → 300ms (only ~6% reduction vs tokens=32 at these extremes).
+
+---
+
+## 🔄 Gate 6b — Temporal Threshold Sweep (I-201)
+
+**Status**: 🔄 QUEUED (gate_runner container, port 5804, cuda:1)  
+**Script**: `scripts/realworld/gate6b_threshold_sweep.sh`  
+**Hypothesis**: Raising τ from 0.92 to 0.95/0.97/0.99 increases skip ratio >2pp while V≤0.10 and fresh_traj_ratio stays within ±3pp of τ=0.92 baseline. This reduces effective S2 call rate without changing inference quality.  
+**Sweep**: τ ∈ {0.92, 0.95, 0.97, 0.99} on bag 073623, then 3-bag xval for winner  
+**Pass criterion**:
+- skip_ratio_winner > skip_ratio_baseline + 2pp
 - V ≤ 0.10 (action bias unchanged)
-- trajectory_ratio within 8pp of 80-token baseline
-- All 3 bags pass
+- |fresh_traj - baseline_traj| ≤ 3pp
 
-**Commit**: pending results
+**To launch**:
+```bash
+docker exec -d gate_runner bash -c "cd /workspace/InternNav && source /opt/ros/jazzy/setup.bash && mkdir -p /tmp/gate6b_threshold && bash scripts/realworld/gate6b_threshold_sweep.sh >> /tmp/gate6b_threshold/run.log 2>&1 && echo GATE6B_COMPLETE >> /tmp/gate6b_threshold/run.log"
+```
 

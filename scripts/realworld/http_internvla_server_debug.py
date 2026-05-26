@@ -926,11 +926,16 @@ def get_async_metrics():
     # ===== SYSTEM 2 (Language Planner) Metrics =====
     s2_runs = m.get("s2_runs", 0)
     s2_time_total = m.get("s2_time_total", 0.0)
-    
-    if s2_runs > 0:
-        s2_latency_s = s2_time_total / s2_runs  # seconds per S2 inference
-        s2_latency_ms = s2_latency_s * 1000      # ms per S2 inference
-        s2_req_hz = s2_runs / elapsed           # S2 inferences per second
+    # In async mode, sync s2_runs is always 0; fall back to background thread counters.
+    bg_runs = m.get("background_s2_runs", 0)
+    bg_time = m.get("total_s2_time", 0.0)
+    effective_runs = s2_runs if s2_runs > 0 else bg_runs
+    effective_time = s2_time_total if s2_runs > 0 else bg_time
+
+    if effective_runs > 0:
+        s2_latency_s = effective_time / effective_runs  # seconds per S2 inference
+        s2_latency_ms = s2_latency_s * 1000             # ms per S2 inference
+        s2_req_hz = effective_runs / elapsed             # S2 inferences per second
     else:
         s2_latency_ms = 0.0
         s2_req_hz = 0.0
