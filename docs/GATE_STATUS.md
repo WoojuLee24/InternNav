@@ -668,3 +668,36 @@ curl "http://localhost:5802/set_action_aware?enabled=false"
 | **3g** | ✅  | 0.75 | ON (thr=0.92) | **15**   | 3 frames| ~12 Hz    | **91%** | **0.009** | **✅ PASS** |
 | **3m** | ✅  | 0.75 | ON (thr=0.92) | 15       | 3 frames| ~12 Hz    | **91.2%** | **0.068** | **✅ PASS** (TR-EMA α=0.10) |
 | **3l** | ✅  | 0.75 | ON (thr=0.92) | 15       | 3 frames| ~12 Hz    | **91.0%** | **0.024** | **✅ PASS** (slope δ_s=0.010) |
+
+---
+
+## 🔄 Gate 3X Extension — Sequence Analysis (I-111/I-112)
+
+**Status**: 🔄 RUNNING (gate_runner container, port 5802)  
+**Hypothesis**: PROD (Gate 3n) response-type sequence has KL < 0.10 vs NOCACHE, and DTW_norm < 0.10.  
+**Script**: `scripts/realworld/gate3x_sequence_3bag.sh` (fixed: added client start to run_bag)  
+**Metrics**: per-request `response_sequence` (['T','T','T','A',...]) logged in `/async_metrics`
+
+**Pass criterion**:
+- I-111: KL(PROD‖NOCACHE) < 0.10
+- I-112: DTW_norm < 0.10
+- I-113: already PASS (committed 86a74c93)
+
+---
+
+## 🔄 Gate 6a — max_new_tokens Sweep (I-200)
+
+**Status**: 🔄 RUNNING (gate_runner container, port 5804, cuda:2)  
+**Hypothesis**: Reducing max_new_tokens 80→32 cuts S2 latency ≥30% while V≤0.10 and trajectory_ratio drops ≤8pp.  
+**Script**: `scripts/realworld/gate6a_maxtokens_sweep.sh`  
+**Sweep**: tokens ∈ {80, 64, 48, 32, 16} on bag 073623, then 3-bag xval for winner  
+**New endpoint**: `curl "http://localhost:5802/set_max_new_tokens?tokens=32"` (runtime token control)
+
+**Pass criterion** (for winner):
+- S2 latency < 200ms (vs ~300ms baseline)
+- V ≤ 0.10 (action bias unchanged)
+- trajectory_ratio within 8pp of 80-token baseline
+- All 3 bags pass
+
+**Commit**: pending results
+

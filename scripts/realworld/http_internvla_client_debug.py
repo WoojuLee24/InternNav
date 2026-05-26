@@ -70,7 +70,11 @@ mpc_rw_lock = ReadWriteLock()
 
 async_pending_request = None
 
-def dual_sys_eval(image_bytes, depth_bytes, front_image_bytes, url='http://127.0.0.1:5802/eval_dual'):
+_SERVER_PORT = 5802  # overridden at startup by --server-port arg
+
+def dual_sys_eval(image_bytes, depth_bytes, front_image_bytes, url=None):
+    if url is None:
+        url = f'http://127.0.0.1:{_SERVER_PORT}/eval_dual'
     global policy_init, http_idx, first_running_time, async_started, async_pending_request
     
     # [LOG] HTTP 요청 준비
@@ -781,6 +785,8 @@ if __name__ == '__main__':
                         help='Enable visualize_thread (OccupancyGrid)')
     parser.add_argument('--frame_id', type=str, default='os_sensor',
                         help='Frame ID for OccupancyGrid (e.g. os_sensor, camera_init)')
+    parser.add_argument('--server-port', type=int, default=5802,
+                        help='HTTP server port (default: 5802). Use for parallel multi-port experiments.')
     parser.add_argument('--max-v', type=float, default=0.6,
                         help='Maximum linear velocity (m/s). Safe: 0.3, Fast: 0.8, Very Fast: 1.0+')
     parser.add_argument('--max-w', type=float, default=0.5,
@@ -791,9 +797,12 @@ if __name__ == '__main__':
                         help='Subgoal marker sphere radius in meters (default: 0.3)')
     args = parser.parse_args()
 
+    global _SERVER_PORT
+    _SERVER_PORT = args.server_port
+
     CLIENT_MODE = args.mode
     if args.mode == 'async':
-        print(f"[Client] Using async mode")
+        print(f"[Client] Using async mode, server: http://127.0.0.1:{_SERVER_PORT}")
     JPEG_QUALITY = max(1, min(100, int(args.jpeg_quality)))
     DEPTH_PNG_COMPRESS = max(0, min(9, int(args.depth_png_compress)))
     

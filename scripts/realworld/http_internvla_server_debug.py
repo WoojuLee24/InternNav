@@ -1065,6 +1065,9 @@ def get_async_metrics():
 
         # Phase 3X (I-111/I-112): per-request response-type sequence
         "response_sequence": m.get("response_sequence", []),
+
+        # Gate 6a: runtime max_new_tokens (S2 inference latency control)
+        "max_new_tokens": agent.max_new_tokens if agent is not None else args.max_new_tokens,
     }
 
     return jsonify(metrics)
@@ -1244,6 +1247,20 @@ def set_slope_predict_endpoint():
         'slope_threshold': threshold,
         'slope_window': window,
     })
+
+
+@app.route("/set_max_new_tokens", methods=['POST', 'GET'])
+def set_max_new_tokens_endpoint():
+    """Gate 6a (I-200): Change max_new_tokens for S2 inference at runtime.
+    Reduces model generation length → lower S2 latency at cost of possible output truncation.
+    GET ?tokens=32  (range: 8–128)"""
+    global agent
+    tokens = int(request.args.get('tokens', 80))
+    tokens = max(8, min(128, tokens))
+    old = agent.max_new_tokens if agent is not None else -1
+    if agent is not None:
+        agent.max_new_tokens = tokens
+    return jsonify({'status': 'ok', 'max_new_tokens': tokens, 'previous': old})
 
 
 @app.route("/set_odom_progress_hold", methods=['POST', 'GET'])
