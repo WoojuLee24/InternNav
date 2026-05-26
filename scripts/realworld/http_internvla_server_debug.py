@@ -4,6 +4,7 @@ import json
 import math
 import os
 import queue
+import statistics
 import threading
 import time
 from datetime import datetime
@@ -571,7 +572,6 @@ def async_continuous_loop():
                                 with _slope_history_lock:
                                     vh = _similarity_history[-var_win:] if len(_similarity_history) >= var_win else []
                                 if len(vh) >= var_win:
-                                    import statistics
                                     sim_std = statistics.stdev(vh)
                                     if sim_std > var_sigma:
                                         was_var_bypass = True

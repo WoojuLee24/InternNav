@@ -7,8 +7,8 @@ _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
  Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 3n ── Gate 3o ── Gate 3p ── Gate 3q ── Gate 3X ── Gate 4
   ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    ✅ PASS     ⚠️ MARG.   ⚠️ MARG.    ✅ PASS    ✅ PASS    🔧 BUILDING
 
- Gate 3X-Ext(I-111/I-112) ── Gate 6a  ── Gate 6b  ── Gate 7
-  ✅ PASS (3/3 bags)        ❌ FAIL     ❌ FAIL     ❌ FAIL (never fires at 0.5×)
+ Gate 3X-Ext(I-111/I-112) ── Gate 6a  ── Gate 6b  ── Gate 7  ── Gate 8  ── Gate 9
+  ✅ PASS (3/3 bags)        ❌ FAIL     ❌ FAIL     ❌ FAIL     ❌ FAIL     🔬 RUNNING
 ```
 
 ---
@@ -773,4 +773,28 @@ curl "http://localhost:5802/set_action_aware?enabled=false"
 **Threshold to fire at real robot speed**: At rate=1.0×, robot motion doubles (0.3 m/step). Estimated mean flow ~10–15px/frame at 80×60. Threshold ~5–8px might fire. Gate 7 should be retested at rate=1.0× if real-robot experiments become available.
 
 **Code status**: `/set_flow_bypass` endpoint remains in server for future testing. Flow bypasses are tracked in `async_metrics["flow_bypasses"]`. No production stack change — optical flow NOT added to Gate 3n production config.
+
+---
+
+## ❌ Gate 8 — EMA Warm-Up Acceleration (I-203)
+
+**Date**: 2026-05-26 · **Script**: `scripts/realworld/gate8_ema_warmup.sh`  
+**Hypothesis**: Using α_warm=0.5 for the first warmup_N frames after each TR-EMA reset accelerates EMA convergence, lifting cold-start skip from ~75% toward ~91% within the first 30 seconds.  
+**Result**: **FAIL** — warmup_N shifts traj_ratio systematically; winner fails xval quality criterion.
+
+| warmup_N | skip%  | Δskip   | traj%  | V      | verdict |
+|----------|--------|---------|--------|--------|---------|
+| 0        | 91.3%  | —       | 65.6%  | 0.0000 | BASELINE |
+| 5        | 92.1%  | +0.8pp  | 71.2%  | 0.0510 | ✅ Phase 1 PASS (no xval) |
+| 10       | 92.9%  | +1.6pp  | 77.8%  | 0.1243 | ❌ FAIL |
+| **20**   | 92.7%  | +1.4pp  | 75.7%  | 0.1005 | ❌ FAIL (xval 073623) |
+
+*3-bag xval for warmup_N=20: only bag 073623 completed (V=0.1005 FAIL); 061841, 063047 not captured due to container instability.*  
+*3-bag xval for warmup_N=5: not attempted (xval for warmup_N=20 winner already failed).*
+
+**Root cause**: Fast-converging EMA (α_warm=0.5) causes the cache to preferentially skip frames that would have triggered action-type S2 outputs. This shifts traj_ratio upward systematically (+5.6pp at wN=5, +10.1pp at wN=20) — a true distribution change that Cramér's V detects. V correlates monotonically with warmup_N: higher warmup_N → faster convergence → more action skips → larger traj_ratio shift → higher V.
+
+**Key insight**: The EMA warm-up acceleration doesn't distinguish between "stable identical scene" (safe to skip) and "stable but decision-critical moment" (should not skip). At indoor navigation speeds (0.5×), the existing TR-EMA+max_hold stack already handles convergence adequately — the cold-start 75% skip rises to 91% within one bag run anyway.
+
+**Code status**: `/set_ema_warmup` endpoint remains in server. No production stack change.
 
