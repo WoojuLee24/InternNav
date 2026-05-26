@@ -141,6 +141,18 @@ _ema_fp_lock = threading.Lock()
 # _ema_transition_reset is a flag on the existing _ema_fingerprint_enabled path.
 _ema_transition_reset = False           # True = I-055 (TR-EMA); False = I-053 (standard EMA)
 
+# I-203: EMA Warm-Up Acceleration (Gate 8)
+# After each TR-EMA reset (forced bypass), the EMA needs ~1/α frames to represent
+# the new scene accurately. At α=0.10, this is ~10 frames → cold-start penalty.
+# Fix: use α_warm (higher) for the first warmup_frames after each reset, then
+# drop back to α_prod. Per-bypass warm-up closes the convergence gap after EVERY
+# scene transition, not just server start.
+_ema_warmup_enabled = False
+_ema_warmup_frames = 10         # frames to use α_warm after each TR-EMA reset
+_ema_warmup_alpha = 0.5         # fast-converge α (vs production α=0.10)
+_ema_frames_since_reset = 0     # frames elapsed since last TR-EMA hard-reset
+_ema_warmup_lock = threading.Lock()
+
 # I-054: Similarity Slope Detector — Predictive Refresh (Gate 3l)
 # All previous cache mechanisms are reactive: they trigger a refresh AFTER the
 # similarity drops below τ or the hold count exceeds H_max.
@@ -364,6 +376,7 @@ def async_continuous_loop():
     global _last_fingerprint, _last_fresh_was_action, _consecutive_skip_count, _max_hold_frames
     global _ema_fingerprint, _traj_serve_count, _similarity_history, _ema_transition_reset
     global _current_odom, _last_s2_odom
+    global _ema_frames_since_reset
     while async_thread_running:
         try:
             # Wait for new frame data from queue (non-blocking with timeout)
@@ -395,6 +408,16 @@ def async_continuous_loop():
                 ema_on = _ema_fingerprint_enabled
                 ema_alpha = _ema_fingerprint_alpha
                 ema_tr_reset = _ema_transition_reset
+            # I-203: resolve effective alpha (warm-up schedule)
+            with _ema_warmup_lock:
+                warmup_on = _ema_warmup_enabled
+                warmup_n = _ema_warmup_frames
+                warmup_alpha = _ema_warmup_alpha
+                frames_since_reset = _ema_frames_since_reset
+            if warmup_on and ema_on and frames_since_reset < warmup_n:
+                effective_alpha = warmup_alpha
+            else:
+                effective_alpha = ema_alpha
             with _slope_history_lock:
                 slope_on = _slope_predict_enabled
                 slope_thr = _slope_threshold
@@ -462,12 +485,17 @@ def async_continuous_loop():
                         # I-053/I-055: update EMA on forced frames
                         # I-055 (TR-EMA): hard-reset to current frame to prevent post-bypass cascade
                         # I-053 (standard EMA): slow update (original behavior)
+                        # I-203: after TR-EMA reset, restart warm-up counter
                         if ema_on:
                             with _ema_fp_lock:
                                 if _ema_fingerprint is None or ema_tr_reset:
                                     _ema_fingerprint = fp.copy()
+                                    with _ema_warmup_lock:
+                                        _ema_frames_since_reset = 0
                                 else:
-                                    _ema_fingerprint = (1 - ema_alpha) * _ema_fingerprint + ema_alpha * fp
+                                    _ema_fingerprint = (1 - effective_alpha) * _ema_fingerprint + effective_alpha * fp
+                                    with _ema_warmup_lock:
+                                        _ema_frames_since_reset += 1
                     with temporal_cache_lock:
                         _consecutive_skip_count = 0
                 else:
@@ -478,8 +506,12 @@ def async_continuous_loop():
                             with _ema_fp_lock:
                                 if _ema_fingerprint is None:
                                     _ema_fingerprint = fp.copy()
+                                    with _ema_warmup_lock:
+                                        _ema_frames_since_reset = 0
                                 else:
-                                    _ema_fingerprint = (1 - ema_alpha) * _ema_fingerprint + ema_alpha * fp
+                                    _ema_fingerprint = (1 - effective_alpha) * _ema_fingerprint + effective_alpha * fp
+                                    with _ema_warmup_lock:
+                                        _ema_frames_since_reset += 1
                         # I-053: choose reference fingerprint (EMA or point)
                         ref_fp = _ema_fingerprint if (ema_on and _ema_fingerprint is not None) else _last_fingerprint
                     else:
@@ -1117,6 +1149,11 @@ def get_async_metrics():
         "flow_magnitude_threshold": _flow_magnitude_threshold,
         "flow_bypasses": m.get("flow_bypasses", 0),
 
+        # I-203 (Gate 8): EMA warm-up acceleration
+        "ema_warmup_enabled": _ema_warmup_enabled,
+        "ema_warmup_frames": _ema_warmup_frames,
+        "ema_warmup_alpha": _ema_warmup_alpha,
+
         # Phase 3X (I-111/I-112): per-request response-type sequence
         "response_sequence": m.get("response_sequence", []),
 
@@ -1357,6 +1394,32 @@ def set_flow_bypass_endpoint():
         'status': 'ok',
         'flow_bypass_enabled': enabled,
         'flow_magnitude_threshold': threshold,
+    })
+
+
+@app.route("/set_ema_warmup", methods=['POST', 'GET'])
+def set_ema_warmup_endpoint():
+    """I-203 (Gate 8): EMA warm-up acceleration.
+    After each TR-EMA reset, use alpha_warm for the first warmup_frames frames,
+    then drop to the production alpha. Accelerates post-bypass EMA convergence.
+    GET ?enabled=true|false&warmup_frames=10&alpha_warm=0.5"""
+    global _ema_warmup_enabled, _ema_warmup_frames, _ema_warmup_alpha, _ema_frames_since_reset
+    enabled_str = request.args.get('enabled', 'true').lower()
+    enabled = enabled_str in ('1', 'true', 'yes', 'on')
+    warmup_frames = int(request.args.get('warmup_frames', _ema_warmup_frames))
+    warmup_frames = max(1, min(100, warmup_frames))
+    alpha_warm = float(request.args.get('alpha_warm', _ema_warmup_alpha))
+    alpha_warm = max(0.1, min(1.0, alpha_warm))
+    with _ema_warmup_lock:
+        _ema_warmup_enabled = enabled
+        _ema_warmup_frames = warmup_frames
+        _ema_warmup_alpha = alpha_warm
+        _ema_frames_since_reset = 0  # reset counter on config change
+    return jsonify({
+        'status': 'ok',
+        'ema_warmup_enabled': enabled,
+        'ema_warmup_frames': warmup_frames,
+        'ema_warmup_alpha': alpha_warm,
     })
 
 
