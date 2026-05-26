@@ -797,8 +797,7 @@ if __name__ == '__main__':
                         help='Subgoal marker sphere radius in meters (default: 0.3)')
     args = parser.parse_args()
 
-    global _SERVER_PORT
-    _SERVER_PORT = args.server_port
+    _SERVER_PORT = args.server_port  # module-level var, global not needed here
 
     CLIENT_MODE = args.mode
     if args.mode == 'async':
