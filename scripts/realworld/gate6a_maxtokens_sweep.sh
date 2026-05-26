@@ -10,7 +10,7 @@
 source /opt/ros/jazzy/setup.bash 2>/dev/null || true
 
 PORT=5804
-DEVICE=cuda:2
+DEVICE=cuda:1
 CALIB="scripts/realworld/calib/calib_scout.txt"
 CLIENT="scripts/realworld/http_internvla_client_debug.py"
 BAG_DIR="/workspace/rosbag"

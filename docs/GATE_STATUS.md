@@ -1,14 +1,14 @@
 # Research Gate Status
 
-_Last updated: 2026-05-26 (Gate 3X Extension I-111 PASS (KL=0.045) · Gate 6a FAIL · Gate 6b queued) · Branch: research/async-foundation_
+_Last updated: 2026-05-26 (Gate 3X-Ext PASS (3/3 bags) · Gate 6a FAIL · Gate 6b FAIL · Gate 7 FAIL (flow never fires at 0.5×)) · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
  Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 3n ── Gate 3o ── Gate 3p ── Gate 3q ── Gate 3X ── Gate 4
   ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    ✅ PASS     ⚠️ MARG.   ⚠️ MARG.    ✅ PASS    ✅ PASS    🔧 BUILDING
 
- Gate 3X-Ext(I-111/I-112) ── Gate 6a  ── Gate 6b
-  ✅ PASS (3/3 bags)        ❌ FAIL     ❌ FAIL (τ↑→skip↓)
+ Gate 3X-Ext(I-111/I-112) ── Gate 6a  ── Gate 6b  ── Gate 7
+  ✅ PASS (3/3 bags)        ❌ FAIL     ❌ FAIL     ❌ FAIL (never fires at 0.5×)
 ```
 
 ---
@@ -747,4 +747,30 @@ curl "http://localhost:5802/set_action_aware?enabled=false"
 **Key insight**: The 91% skip rate in Gate 3n is achieved through EMA fingerprint (stable long-run similarity) + max_hold=15 (extend cache validity past threshold drops) + slope predict (preemptive refresh). These mechanisms accumulate over time — a fresh server achieves only ~75% skip, rising to ~91% after ~30 min as EMA converges.
 
 **Implication for paper**: τ=0.92 is the Pareto-optimal threshold for this system. The skip efficiency comes from the full EMA+max_hold+slope stack, not a high threshold. Document the warm-up behavior (cold-start skip ~75% → steady-state ~91%).
+
+---
+
+## ❌ Gate 7 — Optical Flow Cache Invalidation (I-202)
+
+**Date**: 2026-05-26 · **Script**: `scripts/realworld/gate7_flow_bypass.sh`  
+**Hypothesis**: Dense optical flow (Farneback) on 80×60 frames detects abrupt scene changes → additional S2 bypass triggers → faster obstacle response without reducing steady-state skip rate.  
+**Result**: **FAIL** — flow bypass never fires at 0.5× playback speed.
+
+| threshold (px) | skip%  | Δskip   | traj%  | Δtraj   | V      | flow_bypasses | verdict |
+|---------------|--------|---------|--------|---------|--------|---------------|---------|
+| off (baseline) | 91.3%  | —       | 65.6%  | —       | 0.0000 | 0  | BASELINE |
+| 40            | 91.4%  | +0.1pp  | 66.1%  | +0.5pp  | 0.0000 | 0  | ❌ FAIL |
+| 20            | 91.3%  | +0.0pp  | 65.1%  | −0.5pp  | 0.0000 | 0  | ❌ FAIL |
+| 10            | 91.3%  | +0.0pp  | 65.6%  | +0.0pp  | 0.0000 | 0  | ❌ FAIL |
+| 5             | 91.3%  | +0.0pp  | 65.6%  | +0.0pp  | 0.0000 | 0  | ❌ FAIL |
+
+**Root cause**: Mean optical flow magnitude at 80×60 resolution is < 5 px/frame at 0.5× playback speed for indoor navigation. The robot moves slowly (~0.15 m/step at 0.5×), and indoor environments have limited foreground/background parallax. All thresholds ≥5px go unfired — the detector requires a threshold below the noise floor to trigger.
+
+**Why V=0.0 throughout**: Zero flow bypasses → behavior is identical to baseline Gate 3n stack. The output distribution is undisturbed, so V=0 exactly. This is a null-result, not a pass.
+
+**Key insight**: The 32×32 grayscale MAD similarity in the temporal EMA already captures all relevant scene changes at indoor navigation speeds (0.5× rate). The visual fingerprint mechanism is sufficient. Dense optical flow adds computation (cv2.calcOpticalFlowFarneback: ~15ms per frame) with zero benefit at this speed regime.
+
+**Threshold to fire at real robot speed**: At rate=1.0×, robot motion doubles (0.3 m/step). Estimated mean flow ~10–15px/frame at 80×60. Threshold ~5–8px might fire. Gate 7 should be retested at rate=1.0× if real-robot experiments become available.
+
+**Code status**: `/set_flow_bypass` endpoint remains in server for future testing. Flow bypasses are tracked in `async_metrics["flow_bypasses"]`. No production stack change — optical flow NOT added to Gate 3n production config.
 
