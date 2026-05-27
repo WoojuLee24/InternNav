@@ -869,23 +869,39 @@ curl "http://localhost:5802/set_action_aware?enabled=false"
 
 **Date**: 2026-05-27 · **Script**: `scripts/realworld/gate11_traj_recovery.sh`  
 **Hypothesis**: When K consecutive fresh S2 outputs are action-type (no trajectories), reduce max_hold to R=3 to force frequent S2 refreshes until a trajectory output is received. This maximizes fresh_traj_ratio — the primary quality metric for obstacle avoidance.  
-**Result**: **FAIL** — all K values degrade traj_ratio significantly. Recovery mode stays active indefinitely (never exits) because action phases are genuine navigation events, not stochastic noise.
+**Result**: **FAIL (0/3 bags)** — recovery mode is stuck active (in_rec=True) at end of all 3 bags. Every K and every bag type degrades traj_ratio. V=0.2034 on 073623 (far above V≤0.10 threshold).
 
-**K sweep (bag 073623, R=3, prod_base=67.2% traj):**
+**Phase 1: K sweep (bag 073623, R=3, prod_base=67.2%):**
 
-| K   | n   | traj%  | Δtraj   | skip%  | acts | in_rec at end | verdict |
-|-----|-----|--------|---------|--------|------|---------------|---------|
-| base | 125 | 67.2% | —      | 91.5%  | —    | —             | BASELINE |
-| 3   | 180 | 46.7%  | −20.5pp | 87.1% | 1    | True          | ❌ FAIL |
-| 5   | 175 | 48.0%  | −19.2pp | 87.4% | 2    | True          | ❌ FAIL |
-| 7   | 163 | 51.5%  | −15.7pp | 88.4% | 1    | True          | ❌ FAIL |
+| K    | n_fresh | A  | T  | traj%  | Δtraj   | skip%  | acts | in_rec | verdict |
+|------|---------|----|----|--------|---------|--------|------|--------|---------|
+| base | 125     | 41 | 84 | 67.2%  | —       | 91.5%  | —    | False  | BASELINE |
+| 3    | 180     | 96 | 84 | 46.7%  | −20.5pp | 87.1%  | 1    | True   | ❌ FAIL |
+| 5    | 175     | 91 | 84 | 48.0%  | −19.2pp | 87.4%  | 2    | True   | ❌ FAIL |
+| 7    | 163     | 79 | 84 | 51.5%  | −15.7pp | 88.4%  | 1    | True   | ❌ FAIL |
+
+**Note**: T=84 is IDENTICAL to baseline across all K. Recovery only adds action outputs (A grows from 41 to 79–96). No new trajectories result from any forced S2 refresh.
+
+**Phase 4: 3-bag cross-validation (K=5, R=3):**
+
+| Bag    | ref%  | n_fresh | A   | T   | traj%  | Δtraj   | V      | acts | in_rec | verdict |
+|--------|-------|---------|-----|-----|--------|---------|--------|------|--------|---------|
+| 073623 | 67.2% | 183     | 99  | 84  | 45.9%  | −21.3pp | 0.2034 | 1    | True   | ❌ FAIL |
+| 061841 | 44.2% | 1057    | 777 | 280 | 26.5%  | −17.7pp | 0.000  | 6    | True   | ❌ FAIL |
+| 063047 | 57.8% | 853     | 545 | 308 | 36.1%  | −21.7pp | 0.000  | 6    | True   | ❌ FAIL |
+
+*ref% = Gate 11 Phase 1 baseline for 073623; Gate 3n reference for 061841/063047*  
+*V=0.000 for 061841/063047: no separate baseline run; conservative estimate.*  
+**V=0.2034 for 073623 is independently confirmed FAIL** (far above V≤0.10 criterion).
 
 **Root cause**: Action streaks in these navigation bags represent genuine navigation-phase events (approaching turns, intersections, decision points), not stochastic noise from temperature=0.75 sampling. When recovery mode reduces max_hold to 3 and forces frequent S2 refreshes, the model receives the SAME navigation context (still in the turn/intersection) and produces more action-type outputs. The traj_ratio DECREASES because:
-1. Recovery mode never exits (`in_traj_recovery=True` at end of bag for all K)
-2. Every extra S2 run during the action phase produces another action output
+1. Recovery mode never exits (`in_traj_recovery=True` at end of bag for all 3 bags)
+2. Every extra S2 run during the action phase produces another action output (A grows, T unchanged)
 3. More action outputs in denominator + same traj outputs in numerator = lower traj_ratio
 
-**Quantitative effect**: K=3 adds ~55 S2 runs (n=180 vs baseline n=125), K=5 adds ~50 runs, K=7 adds ~38 runs. All extra runs are action-type. Recovery mode degrades traj_ratio by 15–21 percentage points.
+**Quantitative effect on 073623**: T=84 in baseline AND all K values. Recovery adds 38–55 extra action runs (A: 41→79-96). All extra runs are action-type. 
+
+**Multi-bag progression**: 061841 fires recovery 6 times (+736 excess actions), 063047 fires 6 times (+~325 excess actions). Every episode deepens the degradation.
 
 **K=7 shows less degradation** (−15.7pp vs K=3's −20.5pp) because higher K triggers later in the action segment, leaving less time for extra action runs before the bag ends. This monotone relationship confirms the mechanism: more recovery time = worse traj_ratio.
 
