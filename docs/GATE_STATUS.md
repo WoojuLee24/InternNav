@@ -1,14 +1,14 @@
 # Research Gate Status
 
-_Last updated: 2026-05-27 (Gate 10 PARTIAL (2/3) · Gate 11 FAIL (recovery mode degrades traj_ratio)) · Branch: research/async-foundation_
+_Last updated: 2026-05-27 (Gate 11 FAIL (0/3) · Gate 12 🔬 running — real-speed cache quality verify) · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
  Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 3n ── Gate 3o ── Gate 3p ── Gate 3q ── Gate 3X ── Gate 4
   ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    ✅ PASS     ⚠️ MARG.   ⚠️ MARG.    ✅ PASS    ✅ PASS    🔧 BUILDING
 
- Gate 3X-Ext(I-111/I-112) ── Gate 6a  ── Gate 6b  ── Gate 7  ── Gate 8  ── Gate 9  ── Gate 10         ── Gate 11
-  ✅ PASS (3/3 bags)        ❌ FAIL     ❌ FAIL     ❌ FAIL     ❌ FAIL     ⚠️ MARG.    ⚠️ PARTIAL(2/3)  ❌ FAIL
+ Gate 3X-Ext(I-111/I-112) ── Gate 6a  ── Gate 6b  ── Gate 7  ── Gate 8  ── Gate 9  ── Gate 10         ── Gate 11   ── Gate 12
+  ✅ PASS (3/3 bags)        ❌ FAIL     ❌ FAIL     ❌ FAIL     ❌ FAIL     ⚠️ MARG.    ⚠️ PARTIAL(2/3)  ❌ FAIL     🔬 RUNNING
 ```
 
 ---
@@ -912,4 +912,17 @@ curl "http://localhost:5802/set_action_aware?enabled=false"
 **Implication for traj_ratio improvement**: The cache invalidation strategy cannot improve traj_ratio beyond what I-046 already provides. traj_ratio is determined by the navigation content of each bag and the model's response to those frames. Improvement requires model-level changes (prompt engineering, fine-tuning), not cache tuning.
 
 **Code status**: I-206 `/set_traj_recovery` endpoint remains in server for reference. Not added to production stack. No stack change.
+
+---
+
+## 🔬 Gate 12 — Real-Speed Cache Quality Verification (I-207)
+
+**Date**: 2026-05-27 · **Script**: `scripts/realworld/gate12_realspeed_verify.sh`  
+**Hypothesis**: Gate 10 found PROD traj=84.8% vs NOCACHE traj=67.2% on bag 073623 at rate=1.0× (n_prod=66). This +17.6pp gain is either:  
+  (a) **Genuine**: cache triggers preferentially on action frames → forced S2 runs fall on trajectory-phase frames → higher fresh_traj_ratio at real speed  
+  (b) **Small-n artifact**: n=66 at σ≈5.8pp → one lucky draw consistent with Gate 3q calibration  
+**Design**: Pool 5× PROD runs on bag 073623 at rate=1.0× (n≈330) vs Gate 10 NOCACHE reference (n=229, traj=67.2%).  
+**Pass criterion**: fresh_traj_PROD > fresh_traj_NOCACHE + 5pp (genuine improvement confirmed) AND V ≤ 0.20  
+**Fail criterion**: fresh_traj_PROD converges to NOCACHE ± 5pp (artifact)  
+**Status**: 🔬 Running (2026-05-27)
 
