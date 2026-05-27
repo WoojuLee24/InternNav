@@ -1,14 +1,14 @@
 # Research Gate Status
 
-_Last updated: 2026-05-26 (Gate 3X-Ext PASS (3/3 bags) · Gate 6a FAIL · Gate 6b FAIL · Gate 7 FAIL (flow never fires at 0.5×)) · Branch: research/async-foundation_
+_Last updated: 2026-05-27 (Gate 10 PARTIAL (2/3) · Gate 11 FAIL (recovery mode degrades traj_ratio)) · Branch: research/async-foundation_
 _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
 
 ```
  Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 3n ── Gate 3o ── Gate 3p ── Gate 3q ── Gate 3X ── Gate 4
   ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    ✅ PASS     ⚠️ MARG.   ⚠️ MARG.    ✅ PASS    ✅ PASS    🔧 BUILDING
 
- Gate 3X-Ext(I-111/I-112) ── Gate 6a  ── Gate 6b  ── Gate 7  ── Gate 8  ── Gate 9  ── Gate 10       ── Gate 11
-  ✅ PASS (3/3 bags)        ❌ FAIL     ❌ FAIL     ❌ FAIL     ❌ FAIL     ⚠️ MARG.    ⚠️ PARTIAL(2/3) 🔬 RUNNING
+ Gate 3X-Ext(I-111/I-112) ── Gate 6a  ── Gate 6b  ── Gate 7  ── Gate 8  ── Gate 9  ── Gate 10         ── Gate 11
+  ✅ PASS (3/3 bags)        ❌ FAIL     ❌ FAIL     ❌ FAIL     ❌ FAIL     ⚠️ MARG.    ⚠️ PARTIAL(2/3)  ❌ FAIL
 ```
 
 ---
@@ -865,9 +865,35 @@ curl "http://localhost:5802/set_action_aware?enabled=false"
 
 ---
 
-## 🔬 Gate 11 — Action-Streak Trajectory Recovery (I-206)
+## ❌ Gate 11 — Action-Streak Trajectory Recovery (I-206)
 
 **Date**: 2026-05-27 · **Script**: `scripts/realworld/gate11_traj_recovery.sh`  
 **Hypothesis**: When K consecutive fresh S2 outputs are action-type (no trajectories), reduce max_hold to R=3 to force frequent S2 refreshes until a trajectory output is received. This maximizes fresh_traj_ratio — the primary quality metric for obstacle avoidance.  
-**Status**: 🔬 RUNNING
+**Result**: **FAIL** — all K values degrade traj_ratio significantly. Recovery mode stays active indefinitely (never exits) because action phases are genuine navigation events, not stochastic noise.
+
+**K sweep (bag 073623, R=3, prod_base=67.2% traj):**
+
+| K   | n   | traj%  | Δtraj   | skip%  | acts | in_rec at end | verdict |
+|-----|-----|--------|---------|--------|------|---------------|---------|
+| base | 125 | 67.2% | —      | 91.5%  | —    | —             | BASELINE |
+| 3   | 180 | 46.7%  | −20.5pp | 87.1% | 1    | True          | ❌ FAIL |
+| 5   | 175 | 48.0%  | −19.2pp | 87.4% | 2    | True          | ❌ FAIL |
+| 7   | 163 | 51.5%  | −15.7pp | 88.4% | 1    | True          | ❌ FAIL |
+
+**Root cause**: Action streaks in these navigation bags represent genuine navigation-phase events (approaching turns, intersections, decision points), not stochastic noise from temperature=0.75 sampling. When recovery mode reduces max_hold to 3 and forces frequent S2 refreshes, the model receives the SAME navigation context (still in the turn/intersection) and produces more action-type outputs. The traj_ratio DECREASES because:
+1. Recovery mode never exits (`in_traj_recovery=True` at end of bag for all K)
+2. Every extra S2 run during the action phase produces another action output
+3. More action outputs in denominator + same traj outputs in numerator = lower traj_ratio
+
+**Quantitative effect**: K=3 adds ~55 S2 runs (n=180 vs baseline n=125), K=5 adds ~50 runs, K=7 adds ~38 runs. All extra runs are action-type. Recovery mode degrades traj_ratio by 15–21 percentage points.
+
+**K=7 shows less degradation** (−15.7pp vs K=3's −20.5pp) because higher K triggers later in the action segment, leaving less time for extra action runs before the bag ends. This monotone relationship confirms the mechanism: more recovery time = worse traj_ratio.
+
+**Key finding**: Action-type S2 outputs are a NAVIGATION SIGNAL, not cache staleness artifacts. The production stack's I-046 one-shot mechanism (one recovery refresh per action epoch) is already optimal — adding more shots (Gate 11) adds action outputs during action phases, which is counterproductive.
+
+**Comparison to Gate 3h (FAIL)**: Gate 3h assumed trajectory length was variable (it's always 33 waypoints). Gate 11 assumed action streaks were stochastic noise (they're structural navigation phases). Both fail because the assumed dynamic doesn't exist.
+
+**Implication for traj_ratio improvement**: The cache invalidation strategy cannot improve traj_ratio beyond what I-046 already provides. traj_ratio is determined by the navigation content of each bag and the model's response to those frames. Improvement requires model-level changes (prompt engineering, fine-tuning), not cache tuning.
+
+**Code status**: I-206 `/set_traj_recovery` endpoint remains in server for reference. Not added to production stack. No stack change.
 
