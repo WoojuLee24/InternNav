@@ -8,7 +8,7 @@ _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
   ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    ✅ PASS     ⚠️ MARG.   ⚠️ MARG.    ✅ PASS    ✅ PASS    🔧 BUILDING
 
  Gate 3X-Ext(I-111/I-112) ── Gate 6a  ── Gate 6b  ── Gate 7  ── Gate 8  ── Gate 9
-  ✅ PASS (3/3 bags)        ❌ FAIL     ❌ FAIL     ❌ FAIL     ❌ FAIL     🔬 RUNNING
+  ✅ PASS (3/3 bags)        ❌ FAIL     ❌ FAIL     ❌ FAIL     ❌ FAIL     ⚠️ MARGINAL
 ```
 
 ---
@@ -797,4 +797,37 @@ curl "http://localhost:5802/set_action_aware?enabled=false"
 **Key insight**: The EMA warm-up acceleration doesn't distinguish between "stable identical scene" (safe to skip) and "stable but decision-critical moment" (should not skip). At indoor navigation speeds (0.5×), the existing TR-EMA+max_hold stack already handles convergence adequately — the cold-start 75% skip rises to 91% within one bag run anyway.
 
 **Code status**: `/set_ema_warmup` endpoint remains in server. No production stack change.
+
+---
+
+## ⚠️ Gate 9 — Cosine Similarity Variance Gating (I-204)
+
+**Date**: 2026-05-26 · **Script**: `scripts/realworld/gate9_var_gate.sh`  
+**Hypothesis**: std(sim_history[-W:]) > σ detects oscillatory scenes (doorways, left/right panning) where slope predict misses. Force S2 refresh at high-variance moments to improve cache validity at decision boundaries.  
+**Result**: **MARGINAL** — σ=0.01 fires and preserves quality (V=0.0000) but is a noise-threshold, not a genuine oscillation detector. Not added to production.
+
+| σ     | skip%  | Δskip   | traj%  | V      | var_byp | verdict |
+|-------|--------|---------|--------|--------|---------|---------|
+| off   | 91.5%  | —       | 66.7%  | 0.0000 | 0       | BASELINE |
+| 0.05  | 91.3%  | −0.2pp  | 65.6%  | 0.0027 | 0       | ❌ FAIL (never fires) |
+| 0.03  | 91.5%  | +0.0pp  | 66.7%  | 0.0000 | 0       | ❌ FAIL (never fires) |
+| **0.01** | 89.5% | −2.0pp | 65.8% | 0.0017 | 24    | ⚠️ PASS (fires but noise-threshold) |
+
+**3-bag xval (σ=0.01):**
+
+| Bag    | skip%  | Δskip   | V      | var_byp | verdict |
+|--------|--------|---------|--------|---------|---------|
+| 073623 | 89.7%  | −1.8pp  | 0.0000 | 25      | ✅ PASS |
+| 061841 | 90.3%  | ~0pp    | 0.0000 | 50      | ✅ PASS |
+| 063047 | 90.0%  | ~0pp    | 0.0000 | 76      | ✅ PASS |
+
+*061841 and 063047 show Δskip≈0pp because longer bags have more natural S2 resets that overlap with variance-gate triggers.*
+
+**Root cause**: σ=0.01 is a noise-floor threshold — std(sim[-5:]) > 0.01 fires on any 5-frame window with minimal similarity variation. This is not genuine oscillatory scene behavior; it catches random per-frame fingerprint noise. σ=0.05 and σ=0.03 never fire on any bag at 0.5× speed, confirming there are no true oscillatory scenes in this dataset at this speed.
+
+**Key finding**: V=0.0000 on all bags means the forced S2 runs at variance-gate triggers return outputs from the same distribution as natural runs. The gate is adding unnecessary S2 computation at moments that don't require fresh planning. This is mechanistically equivalent to randomly lowering max_hold — skip decreases but quality doesn't improve.
+
+**Pattern**: Third speed-regime failure (after Gate 7 optical flow, Gate 3p spatial trigger). All reactive invalidation mechanisms based on motion signals fail at 0.5× because indoor navigation at this speed is visually stable. Genuine oscillatory scenes (doorways, turns) are already handled by the existing MAD+EMA+slope stack.
+
+**Code status**: `/set_var_gate` endpoint remains in server for future rate=1.0× testing. No production stack change.
 
