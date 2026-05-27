@@ -7,8 +7,8 @@ _Bags: 073623, 061841, 063047 · Rate: 0.5× · temp=0.75, kv-cache=on_
  Gate 0  ── Gate 1  ── Gate 2  ── Gate 3a ── Gate 3b ── Gate 3c ── Gate 3d ── Gate 3e ── Gate 3f ── Gate 3g ── Gate 3h ── Gate 3i ── Gate 3j ── Gate 3k ── Gate 3m ── Gate 3l ── Gate 3n ── Gate 3o ── Gate 3p ── Gate 3q ── Gate 3X ── Gate 4
   ✅ PASS   ✅ PASS   ⚠️ FAIL   📋 SKIP   ✅ PASS   ✅ PASS   ⚠️ COND.  ❌ FAIL   ✅ PASS   ✅ PASS   ❌ FAIL   ❌ FAIL    ✅ PASS    ❌ FAIL    ✅ PASS    ✅ PASS    ✅ PASS     ⚠️ MARG.   ⚠️ MARG.    ✅ PASS    ✅ PASS    🔧 BUILDING
 
- Gate 3X-Ext(I-111/I-112) ── Gate 6a  ── Gate 6b  ── Gate 7  ── Gate 8  ── Gate 9
-  ✅ PASS (3/3 bags)        ❌ FAIL     ❌ FAIL     ❌ FAIL     ❌ FAIL     ⚠️ MARGINAL
+ Gate 3X-Ext(I-111/I-112) ── Gate 6a  ── Gate 6b  ── Gate 7  ── Gate 8  ── Gate 9  ── Gate 10
+  ✅ PASS (3/3 bags)        ❌ FAIL     ❌ FAIL     ❌ FAIL     ❌ FAIL     ⚠️ MARG.    🔬 RUNNING
 ```
 
 ---
