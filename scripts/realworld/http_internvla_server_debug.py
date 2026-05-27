@@ -186,6 +186,23 @@ _var_gate_sigma = 0.03       # std(sim) threshold; tuned by Gate 9 sweep
 _var_gate_window = 5         # frames of sim history to compute std over
 _var_gate_lock = threading.Lock()
 
+# I-206: Action-Streak Trajectory Recovery (Gate 11)
+# Hypothesis: when S2 produces K consecutive action-type outputs (no trajectories),
+# the robot is in an action-only regime and obstacle-avoidance quality degrades.
+# Fix: enter "trajectory recovery mode" — reduce effective max_hold to _traj_recovery_hold
+# (default 3) to force frequent S2 refreshes, increasing the probability of receiving
+# a trajectory output. Exit recovery immediately upon any trajectory output.
+# This is orthogonal to I-046 (next-frame action reflex) and I-047 (max-hold bound):
+# I-206 provides a sustained pressure for trajectory outputs over multiple S2 calls,
+# while I-046 fires once per action and I-047 has a fixed-period cadence.
+# Unlike Gate 3h (fixed decoder length → always 33) this uses the ACTUAL output type.
+_traj_recovery_enabled = False
+_traj_recovery_k = 5            # action streak length that triggers recovery
+_traj_recovery_hold = 3         # max_hold override during recovery (force refresh every 3 frames)
+_in_traj_recovery = False       # True = currently in recovery mode
+_fresh_output_history = []      # rolling list of recent fresh output types: 'T' or 'A'
+_traj_recovery_lock = threading.Lock()
+
 # I-058 (Gate 3p): Odometry-Progress Hold
 # Force S2 when robot has traveled > threshold meters since last S2 run.
 # Provides a SPATIAL invalidation signal orthogonal to I-047 (temporal) and I-052 (count).
@@ -331,7 +348,7 @@ async_metrics_lock = threading.Lock()
 
 def reset_dual_metrics():
     global _last_fresh_was_action, _consecutive_skip_count, _last_fingerprint, _similarity_window
-    global _ema_fingerprint
+    global _ema_fingerprint, _in_traj_recovery, _fresh_output_history
     with temporal_cache_lock:
         _last_fresh_was_action = False
         _consecutive_skip_count = 0
@@ -372,8 +389,12 @@ def reset_dual_metrics():
         async_metrics["odom_progress_bypasses"] = 0
         async_metrics["flow_bypasses"] = 0      # I-202: optical flow triggers
         async_metrics["var_gate_bypasses"] = 0  # I-204: cosine variance gating
+        async_metrics["traj_recovery_activations"] = 0  # I-206: action-streak recovery triggers
         async_metrics["response_sequence"] = []  # Phase 3X: reset per-run sequence log
         # pre_warm_frames_queued is NOT reset here — it's a server-lifetime counter
+    with _traj_recovery_lock:
+        _fresh_output_history.clear()
+        _in_traj_recovery = False
 
 def async_continuous_loop():
     """Background thread: continuously runs step() and caches output
@@ -392,6 +413,7 @@ def async_continuous_loop():
     global _ema_fingerprint, _traj_serve_count, _similarity_history, _ema_transition_reset
     global _current_odom, _last_s2_odom
     global _ema_frames_since_reset, _var_gate_enabled, _var_gate_sigma, _var_gate_window
+    global _in_traj_recovery, _fresh_output_history
     while async_thread_running:
         try:
             # Wait for new frame data from queue (non-blocking with timeout)
@@ -448,6 +470,13 @@ def async_continuous_loop():
                 var_on = _var_gate_enabled
                 var_sigma = _var_gate_sigma
                 var_win = _var_gate_window
+            # I-206: read recovery state; override max_hold if in trajectory recovery
+            with _traj_recovery_lock:
+                traj_rec_on = _traj_recovery_enabled
+                in_traj_recovery = _in_traj_recovery
+                traj_rec_hold = _traj_recovery_hold
+            if traj_rec_on and in_traj_recovery:
+                max_hold = traj_rec_hold
             was_forced_bypass = False
             was_i046_bypass = False  # I-050: track bypass type for flag propagation
             was_i047_bypass = False
@@ -677,7 +706,28 @@ def async_continuous_loop():
                     _last_fresh_was_action = False   # I-046 one-shot: reset after firing
                 else:
                     _last_fresh_was_action = fresh_was_action  # I-047 or natural crossing
-            
+
+            # I-206: action-streak tracking → trajectory recovery mode
+            # Append fresh output type, check if streak threshold crossed.
+            # Recovery mode reduces effective max_hold → forces frequent S2 refresh
+            # → increases probability of getting a trajectory output for obstacle avoidance.
+            traj_recovery_activated = False
+            with _traj_recovery_lock:
+                if _traj_recovery_enabled:
+                    _fresh_output_history.append('T' if fresh_was_traj else 'A')
+                    if len(_fresh_output_history) > _traj_recovery_k:
+                        _fresh_output_history.pop(0)
+                    action_count = _fresh_output_history.count('A')
+                    if action_count >= _traj_recovery_k and not _in_traj_recovery:
+                        _in_traj_recovery = True
+                        traj_recovery_activated = True
+                    elif fresh_was_traj and _in_traj_recovery:
+                        _in_traj_recovery = False
+            if traj_recovery_activated:
+                with async_metrics_lock:
+                    async_metrics["traj_recovery_activations"] = (
+                        async_metrics.get("traj_recovery_activations", 0) + 1)
+
             s2_request_queue.task_done()
             
         except Exception as e:
@@ -1195,6 +1245,13 @@ def get_async_metrics():
         "var_gate_window": _var_gate_window,
         "var_gate_bypasses": m.get("var_gate_bypasses", 0),
 
+        # I-206 (Gate 11): action-streak trajectory recovery
+        "traj_recovery_enabled": _traj_recovery_enabled,
+        "traj_recovery_k": _traj_recovery_k,
+        "traj_recovery_hold": _traj_recovery_hold,
+        "in_traj_recovery": _in_traj_recovery,
+        "traj_recovery_activations": m.get("traj_recovery_activations", 0),
+
         # Phase 3X (I-111/I-112): per-request response-type sequence
         "response_sequence": m.get("response_sequence", []),
 
@@ -1486,6 +1543,34 @@ def set_var_gate_endpoint():
         'var_gate_enabled': enabled,
         'var_gate_sigma': sigma,
         'var_gate_window': window,
+    })
+
+
+@app.route("/set_traj_recovery", methods=['POST', 'GET'])
+def set_traj_recovery_endpoint():
+    """I-206 (Gate 11): Action-streak trajectory recovery mode.
+    When K consecutive fresh S2 outputs are action-type, enter recovery mode:
+    max_hold is reduced to recovery_hold (default 3) to force frequent refreshes
+    until a trajectory output is received. Maximizes fresh_traj_ratio for obstacle avoidance.
+    GET ?enabled=true|false&k=5&hold=3"""
+    global _traj_recovery_enabled, _traj_recovery_k, _traj_recovery_hold
+    enabled_str = request.args.get('enabled', 'true').lower()
+    enabled = enabled_str in ('1', 'true', 'yes', 'on')
+    k = int(request.args.get('k', _traj_recovery_k))
+    k = max(1, min(50, k))
+    hold = int(request.args.get('hold', _traj_recovery_hold))
+    hold = max(1, min(15, hold))
+    with _traj_recovery_lock:
+        _traj_recovery_enabled = enabled
+        _traj_recovery_k = k
+        _traj_recovery_hold = hold
+        _fresh_output_history.clear()
+        _in_traj_recovery = False
+    return jsonify({
+        'status': 'ok',
+        'traj_recovery_enabled': enabled,
+        'traj_recovery_k': k,
+        'traj_recovery_hold': hold,
     })
 
 
