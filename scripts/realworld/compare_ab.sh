@@ -6,7 +6,8 @@ set -euo pipefail
 #   ./compare_ab.sh [bag_path] [run_count]
 
 SESSION_NAME_PREFIX="compare_ab"
-REPO_DIR="${REPO_DIR:-/workspace/InternNav}"
+# REPO_DIR="${REPO_DIR:-/workspace/InternNav}"  # old path from original Docker setup
+REPO_DIR="${REPO_DIR:-/home/gdr/gd_vln/workspace/src/InternNav}"
 CALIB_PATH="${CALIB_PATH:-$REPO_DIR/scripts/realworld/calib/calib_scout.txt}"
 MODEL_PATH="${MODEL_PATH:-$REPO_DIR/checkpoints/InternVLA-N1-w-NavDP}"
 DEVICE="${DEVICE:-cuda:0}"
@@ -17,7 +18,8 @@ ROS_SETUP="${ROS_SETUP:-/opt/ros/jazzy/setup.bash}"
 SERVER_WARMUP_SEC="${SERVER_WARMUP_SEC:-70}"
 BAG_START_DELAY_SEC="${BAG_START_DELAY_SEC:-85}"
 
-BAG_PATH="${1:-rosbag/my_camera_bag_20260317_073623}"
+# BAG_PATH: rosbag played manually from gds container via FastDDS
+BAG_PATH="${1:-}"
 RUN_COUNT="${2:-3}"
 MODE="${3:-both}"  # both, sync, async
 
@@ -44,7 +46,7 @@ run_sync() {
     tmux send-keys -t "$SESSION_NAME":0.0 "$COMMON_PREFIX $SERVER_PYTHON scripts/realworld/http_internvla_server_debug.py --mode sync --device $DEVICE --model_path $MODEL_PATH --calib $CALIB_PATH 2>&1 | tee $run_dir/server.log" C-m
     tmux send-keys -t "$SESSION_NAME":0.1 "$COMMON_PREFIX $ROS_PYTHON scripts/realworld/scout_bridge.py 2>&1 | tee $run_dir/bridge.log" C-m
     tmux send-keys -t "$SESSION_NAME":0.2 "$COMMON_PREFIX sleep $SERVER_WARMUP_SEC; $ROS_PYTHON scripts/realworld/http_internvla_client_debug.py --mode sync --calib $CALIB_PATH 2>&1 | tee $run_dir/client.log" C-m
-    tmux send-keys -t "$SESSION_NAME":0.3 "$COMMON_PREFIX sleep $BAG_START_DELAY_SEC; ros2 bag play $BAG_PATH --rate $RATE 2>&1 | tee $run_dir/bag.log" C-m
+    tmux send-keys -t "$SESSION_NAME":0.3 "$COMMON_PREFIX sleep $BAG_START_DELAY_SEC; echo "[gds] play bag manually"" C-m
     
     echo "[SYNC] Started: $SESSION_NAME"
     sleep 2
@@ -71,7 +73,7 @@ run_async() {
     tmux send-keys -t "$SESSION_NAME":0.0 "$COMMON_PREFIX $SERVER_PYTHON scripts/realworld/http_internvla_server_debug.py --mode async --device $DEVICE --model_path $MODEL_PATH --calib $CALIB_PATH 2>&1 | tee $run_dir/server.log" C-m
     tmux send-keys -t "$SESSION_NAME":0.1 "$COMMON_PREFIX $ROS_PYTHON scripts/realworld/scout_bridge.py 2>&1 | tee $run_dir/bridge.log" C-m
     tmux send-keys -t "$SESSION_NAME":0.2 "$COMMON_PREFIX sleep $SERVER_WARMUP_SEC; $ROS_PYTHON scripts/realworld/http_internvla_client_debug.py --mode async --calib $CALIB_PATH 2>&1 | tee $run_dir/client.log" C-m
-    tmux send-keys -t "$SESSION_NAME":0.3 "$COMMON_PREFIX sleep $BAG_START_DELAY_SEC; ros2 bag play $BAG_PATH --rate $RATE 2>&1 | tee $run_dir/bag.log" C-m
+    tmux send-keys -t "$SESSION_NAME":0.3 "$COMMON_PREFIX sleep $BAG_START_DELAY_SEC; echo "[gds] play bag manually"" C-m
     
     echo "[ASYNC] Started: $SESSION_NAME"
     sleep 2

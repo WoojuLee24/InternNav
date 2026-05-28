@@ -17,9 +17,9 @@
 #   * waiting_responses(baseline) >= 1  (confirms problem was real)
 #   * joint_req_hz(pre-warm) >= baseline_hz - 0.5  (no throughput regression)
 set -e
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/jazzy/setup.bash 2>/dev/null || true
 
-CALIB="/workspace/InternNav/scripts/realworld/calib/calib_scout.txt"
+CALIB="$REPO_DIR/scripts/realworld/calib/calib_scout.txt"
 SERVER="scripts/realworld/http_internvla_server_debug.py"
 CLIENT="scripts/realworld/http_internvla_client_debug.py"
 LOG_BASE="/tmp/gate3c_prewarm"
@@ -42,7 +42,7 @@ start_server() {
     pkill -f "$SERVER" 2>/dev/null || true
     sleep 3
 
-    (cd /workspace/InternNav && python3 $SERVER \
+    (cd "$REPO_DIR" && python3 $SERVER \
         --mode async --temperature 0.75 --kv-cache \
         --calib "$CALIB" \
         --pre-warm-frames "$prewarm") \
@@ -56,7 +56,7 @@ start_server() {
 run_bag() {
     local bag="$1"
     local name="$2"
-    local short="${bag##*_}"
+    local short="${bag#*_}"
     local tag="${short}_${name}"
     local log_dir="$LOG_BASE/$tag"
     mkdir -p "$log_dir"
@@ -70,15 +70,15 @@ run_bag() {
     curl -sf "http://localhost:5802/set_temporal_threshold?threshold=0.92" > "$log_dir/set_thr.json"
     curl -sf "http://localhost:5802/set_max_hold_frames?frames=10" > "$log_dir/set_mh.json"
 
-    python3.12 /workspace/InternNav/$CLIENT \
+    cd "$REPO_DIR" && python3.12 $CLIENT \
         --mode async --kv-cache --temperature 0.75 \
         --jpeg-quality 95 --depth-png-compress 6 --calib "$CALIB" \
         > "$log_dir/client.log" 2>&1 &
     local client_pid=$!
     sleep 3
 
-    echo "  playing /workspace/rosbag/$bag at rate=0.5..."
-    ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$log_dir/bag.log" 2>&1
+    # echo "  playing /workspace/rosbag/$bag at rate=0.5..."  # gds container
+#     ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$log_dir/bag.log" 2>&1  # played manually from gds container
     sleep 2
 
     curl -sf http://localhost:5802/async_metrics > "$log_dir/metrics.json"
@@ -126,12 +126,12 @@ echo "=================================================="
 echo " GATE 3c — PASS/FAIL ANALYSIS PER BAG"
 echo "=================================================="
 for bag in "${BAGS[@]}"; do
-    short="${bag##*_}"
+    short="${bag#*_}"
     baseline="$LOG_BASE/${short}_baseline/metrics.json"
     test_="$LOG_BASE/${short}_prewarm/metrics.json"
     echo ""
     echo "--- bag $short ---"
-    python3 /workspace/InternNav/scripts/viz/chi_squared_action_test.py "$baseline" "$test_" || true
+    cd "$REPO_DIR" && python3 scripts/viz/chi_squared_action_test.py "$baseline" "$test_" || true
     python3 - <<PYEOF
 import json
 with open("$baseline") as f: b = json.load(f)

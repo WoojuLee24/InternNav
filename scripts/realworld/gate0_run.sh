@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Gate 0 — single-bag verification inside container
-# Usage: docker exec vlnav_internvla_server bash /workspace/InternNav/scripts/realworld/gate0_run.sh <bag_name> <run_id>
+# Usage: docker exec vlnav_internvla_server bash scripts/realworld/gate0_run.sh <bag_name> <run_id>
 set -e
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/jazzy/setup.bash 2>/dev/null || true
 
 BAG_NAME="${1:-my_camera_bag_20260317_073623}"
 RUN_ID="${2:-run1}"
-BAG_PATH="/workspace/rosbag/${BAG_NAME}"
-CALIB="/workspace/InternNav/scripts/realworld/calib/calib_scout.txt"
+# BAG_PATH: rosbag played manually from gds container via FastDDS
+CALIB="$REPO_DIR/scripts/realworld/calib/calib_scout.txt"
 LOG_DIR="/tmp/gate0_${RUN_ID}"
 mkdir -p "$LOG_DIR"
 
@@ -22,7 +22,7 @@ echo "[Gate0] Metrics reset: $(cat $LOG_DIR/reset.json)"
 sleep 1
 
 # 2. Start client in background
-python3.12 /workspace/InternNav/scripts/realworld/http_internvla_client_debug.py \
+cd "$REPO_DIR" && python3.12 scripts/realworld/http_internvla_client_debug.py \
   --mode async \
   --kv-cache \
   --temperature 0.8 \
@@ -36,7 +36,7 @@ sleep 3
 
 # 3. Play bag at rate=0.5 (gate protocol requires this)
 echo "[Gate0] Playing bag at rate=0.5 ..."
-ros2 bag play "$BAG_PATH" --rate 0.5 > "$LOG_DIR/bag.log" 2>&1
+# ros2 bag play "$BAG_PATH" --rate 0.5 > "$LOG_DIR/bag.log" 2>&1  # played manually from gds container
 echo "[Gate0] Bag done. Collecting metrics..."
 
 # 4. Final metrics

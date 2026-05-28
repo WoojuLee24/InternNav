@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Phase 1 Task #3 — Temperature sweep on bag 073623
-# Usage: docker exec vlnav_internvla_server bash /workspace/InternNav/scripts/realworld/temp_sweep.sh
+# Usage: docker exec vlnav_internvla_server bash scripts/realworld/temp_sweep.sh
 # Runs temps {0.70, 0.75, 0.80, 0.85} and prints a summary table.
 set -e
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/jazzy/setup.bash 2>/dev/null || true
 
 BAG="my_camera_bag_20260317_073623"
-BAG_PATH="/workspace/rosbag/${BAG}"
-CALIB="/workspace/InternNav/scripts/realworld/calib/calib_scout.txt"
+# BAG_PATH: rosbag played manually from gds container via FastDDS
+CALIB="$REPO_DIR/scripts/realworld/calib/calib_scout.txt"
 LOG_BASE="/tmp/temp_sweep"
 mkdir -p "$LOG_BASE"
 
@@ -31,7 +31,7 @@ for TEMP in "${TEMPS[@]}"; do
     sleep 2
 
     # Start client
-    python3.12 /workspace/InternNav/scripts/realworld/http_internvla_client_debug.py \
+    cd "$REPO_DIR" && python3.12 scripts/realworld/http_internvla_client_debug.py \
         --mode async \
         --kv-cache \
         --temperature "$TEMP" \
@@ -45,7 +45,7 @@ for TEMP in "${TEMPS[@]}"; do
 
     # Play bag at rate=0.5
     echo "  Playing bag at rate=0.5..."
-    ros2 bag play "$BAG_PATH" --rate 0.5 > "$LOG_DIR/bag.log" 2>&1
+#     ros2 bag play "$BAG_PATH" --rate 0.5 > "$LOG_DIR/bag.log" 2>&1  # played manually from gds container
     echo "  Bag done. Collecting metrics..."
     sleep 2
 

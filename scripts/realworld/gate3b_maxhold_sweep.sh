@@ -9,9 +9,9 @@
 #
 # Run on GPU 1, port 5803 (so Gate 3c can run concurrently on port 5802).
 set -e
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/jazzy/setup.bash 2>/dev/null || true
 
-CALIB="/workspace/InternNav/scripts/realworld/calib/calib_scout.txt"
+CALIB="$REPO_DIR/scripts/realworld/calib/calib_scout.txt"
 SERVER="scripts/realworld/http_internvla_server_debug.py"
 CLIENT="scripts/realworld/http_internvla_client_debug.py"
 LOG_BASE="/tmp/gate3b_mh_sweep"
@@ -42,7 +42,7 @@ start_server() {
     fuser -k 5803/tcp 2>/dev/null || true
     sleep 2
 
-    python3 /workspace/InternNav/$SERVER \
+    cd "$REPO_DIR" && python3 $SERVER \
         --mode async --temperature 0.75 --kv-cache \
         --calib "$CALIB" \
         --device cuda:1 \
@@ -61,29 +61,29 @@ start_server() {
 run_one() {
     local bag="$1"
     local mh="$2"
-    local tag="${bag##*_}_mh${mh}"
+    local tag="${bag#*_}_mh${mh}"
     local log_dir="$LOG_BASE/$tag"
     mkdir -p "$log_dir"
 
     echo ""
-    echo "--- bag=${bag##*_}  max_hold=$mh ---"
+    echo "--- bag=${bag#*_}  max_hold=$mh ---"
 
     start_server "$mh" "$tag"
 
     # Baseline control for this bag
-    local ctrl_dir="$LOG_BASE/${bag##*_}_ctrl"
+    local ctrl_dir="$LOG_BASE/${bag#*_}_ctrl"
     if [ ! -f "$ctrl_dir/metrics.json" ]; then
         mkdir -p "$ctrl_dir"
         curl -sf "http://localhost:${PORT}/set_temporal_threshold?threshold=0.0" > /dev/null
         curl -sf http://localhost:${PORT}/reset_metrics > /dev/null
         sleep 1
 
-        python3.12 /workspace/InternNav/$CLIENT \
+        cd "$REPO_DIR" && python3.12 $CLIENT \
             --mode async --kv-cache --temperature 0.75 \
             --jpeg-quality 95 --depth-png-compress 6 --calib "$CALIB" \
             > "$ctrl_dir/client.log" 2>&1 &
         local cpid=$!; sleep 3
-        ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$ctrl_dir/bag.log" 2>&1
+#         ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$ctrl_dir/bag.log" 2>&1  # played manually from gds container
         sleep 2
         curl -sf http://localhost:${PORT}/async_metrics > "$ctrl_dir/metrics.json"
         kill $cpid 2>/dev/null || true
@@ -98,13 +98,13 @@ run_one() {
     curl -sf http://localhost:${PORT}/reset_metrics > "$log_dir/reset.json"
     sleep 1
 
-    python3.12 /workspace/InternNav/$CLIENT \
+    cd "$REPO_DIR" && python3.12 $CLIENT \
         --mode async --kv-cache --temperature 0.75 \
         --jpeg-quality 95 --depth-png-compress 6 --calib "$CALIB" \
         > "$log_dir/client.log" 2>&1 &
     local client_pid=$!; sleep 3
-
-    ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$log_dir/bag.log" 2>&1
+# 
+#     ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$log_dir/bag.log" 2>&1  # played manually from gds container
     sleep 2
     curl -sf http://localhost:${PORT}/async_metrics > "$log_dir/metrics.json"
     kill $client_pid 2>/dev/null || true
@@ -213,7 +213,7 @@ done
 
 echo ""
 echo "=== Gate 3b Extension — Final Summary ==="
-python3 /workspace/InternNav/scripts/viz/chi_squared_action_test.py \
+cd "$REPO_DIR" && python3 scripts/viz/chi_squared_action_test.py \
     /tmp/gate3b_mh_sweep/073623_ctrl/metrics.json \
     /tmp/gate3b_mh_sweep/073623_mh${WINNER}/metrics.json || true
 echo "DONE"

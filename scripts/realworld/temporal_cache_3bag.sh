@@ -4,9 +4,9 @@
 # Runs control + cached on bags 061841 and 063047
 # (bag 073623 already validated in main sweep)
 set -e
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/jazzy/setup.bash 2>/dev/null || true
 
-CALIB="/workspace/InternNav/scripts/realworld/calib/calib_scout.txt"
+CALIB="$REPO_DIR/scripts/realworld/calib/calib_scout.txt"
 LOG_BASE="/tmp/temporal_3bag"
 mkdir -p "$LOG_BASE"
 
@@ -20,7 +20,7 @@ echo "=================================================="
 run_one() {
     local bag="$1"
     local thr="$2"
-    local tag="${bag##*_}_thr$(echo $thr | tr '.' '_')"
+    local tag="${bag#*_}_thr$(echo $thr | tr '.' '_')"
     local log_dir="$LOG_BASE/$tag"
     mkdir -p "$log_dir"
 
@@ -31,15 +31,15 @@ run_one() {
     curl -sf http://localhost:5802/reset_metrics > "$log_dir/reset.json"
     sleep 2
 
-    python3.12 /workspace/InternNav/scripts/realworld/http_internvla_client_debug.py \
+    cd "$REPO_DIR" && python3.12 scripts/realworld/http_internvla_client_debug.py \
         --mode async --kv-cache --temperature 0.75 \
         --jpeg-quality 95 --depth-png-compress 6 --calib "$CALIB" \
         > "$log_dir/client.log" 2>&1 &
     local client_pid=$!
     sleep 3
 
-    echo "  playing /workspace/rosbag/$bag at rate=0.5..."
-    ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$log_dir/bag.log" 2>&1
+    # echo "  playing /workspace/rosbag/$bag at rate=0.5..."  # gds container
+#     ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$log_dir/bag.log" 2>&1  # played manually from gds container
     sleep 2
 
     curl -sf http://localhost:5802/async_metrics > "$log_dir/metrics.json"
@@ -70,7 +70,7 @@ printf "  %-10s  %-10s  %-12s  %-10s  %-12s  %-10s\n" \
 printf "  %-10s  %-10s  %-12s  %-10s  %-12s  %-10s\n" \
     "----------" "----------" "------------" "----------" "------------" "----------"
 for bag in "${BAGS[@]}"; do
-    short="${bag##*_}"
+    short="${bag#*_}"
     for thr in "${THRESHOLDS[@]}"; do
         tag="${short}_thr$(echo $thr | tr '.' '_')"
         log_dir="$LOG_BASE/$tag"

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Phase 1 Task #3 — Replicate trials at the peak temperature
 # Runs N trials at the given temp on bag 073623 to estimate variance.
-# Usage: docker exec vlnav_internvla_server bash /workspace/InternNav/scripts/realworld/temp_replicates.sh <temp> <n_trials>
+# Usage: docker exec vlnav_internvla_server bash scripts/realworld/temp_replicates.sh <temp> <n_trials>
 set -e
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/jazzy/setup.bash 2>/dev/null || true
 
 TEMP="${1:-0.75}"
 N="${2:-3}"
 BAG="my_camera_bag_20260317_073623"
-BAG_PATH="/workspace/rosbag/${BAG}"
-CALIB="/workspace/InternNav/scripts/realworld/calib/calib_scout.txt"
+# BAG_PATH: rosbag played manually from gds container via FastDDS
+CALIB="$REPO_DIR/scripts/realworld/calib/calib_scout.txt"
 TAG=$(echo "$TEMP" | tr '.' '_')
 LOG_BASE="/tmp/temp_repl_${TAG}"
 mkdir -p "$LOG_BASE"
@@ -27,7 +27,7 @@ for i in $(seq 1 $N); do
     curl -sf http://localhost:5802/reset_metrics > "$LOG_DIR/reset.json"
     sleep 2
 
-    python3.12 /workspace/InternNav/scripts/realworld/http_internvla_client_debug.py \
+    cd "$REPO_DIR" && python3.12 scripts/realworld/http_internvla_client_debug.py \
         --mode async --kv-cache --temperature "$TEMP" \
         --jpeg-quality 95 --depth-png-compress 6 --calib "$CALIB" \
         > "$LOG_DIR/client.log" 2>&1 &
@@ -35,7 +35,7 @@ for i in $(seq 1 $N); do
     sleep 3
 
     echo "  Playing bag at rate=0.5..."
-    ros2 bag play "$BAG_PATH" --rate 0.5 > "$LOG_DIR/bag.log" 2>&1
+#     ros2 bag play "$BAG_PATH" --rate 0.5 > "$LOG_DIR/bag.log" 2>&1  # played manually from gds container
     sleep 2
 
     curl -sf http://localhost:5802/async_metrics > "$LOG_DIR/metrics.json"

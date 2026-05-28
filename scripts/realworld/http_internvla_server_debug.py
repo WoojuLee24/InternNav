@@ -344,6 +344,7 @@ async_metrics = {
     "response_sequence": [],      # list of 'T', 'W', or action-index per HTTP request
 }
 async_metrics_lock = threading.Lock()
+NAV_INSTRUCTION = ""  # set from --instruction CLI arg at startup
 
 
 def reset_dual_metrics():
@@ -406,8 +407,8 @@ def async_continuous_loop():
     """
     global async_cached_trajectory, async_cached_action, async_thread_running
 
-    instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
     camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+    instruction = NAV_INSTRUCTION
 
     global _last_fingerprint, _last_fresh_was_action, _consecutive_skip_count, _max_hold_frames
     global _ema_fingerprint, _traj_serve_count, _similarity_history, _ema_transition_reset
@@ -819,7 +820,7 @@ def eval_dual():
         # instruction = "Stop. Just stop. Move forward one step. Move forward two step. Turn right and stop."
         # instruction = "Go straight along the walkway and turn right at the crosswalk. Go straight to the end of the crosswalk and stop."
         # instruction = "Go straight along the walkway until you see a crosswalk. Go straight again until you see a second crosswalk. Turn right at the second crosswalk and go straight to the end of the crosswalk. Stop at the end of the crosswalk."
-        instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
+        instruction = NAV_INSTRUCTION
         policy_init = data['reset']
         req_mode = data.get('mode', SERVER_MODE)
         if req_mode != 'sync':
@@ -952,7 +953,7 @@ def eval_dual_async():
             return jsonify({'status': 'waiting'})
 
         camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
-        instruction = "Exit door. Turn left and go straight until you find fire extinguisher. Then stop."
+        instruction = NAV_INSTRUCTION
         
         # I-058: store current odometry for odom-progress-hold check
         odom_val = data.get('odom', None)
@@ -1743,10 +1744,15 @@ if __name__ == '__main__':
     parser.add_argument("--port", type=int, default=5802,
                         help="HTTP server port (default 5802). Use a different port for parallel experiments.")
     parser.add_argument("--pre-warm-frames", type=int, default=0,
-                        help="Gate 3c (I-010): queue N synthetic S2 frames at startup to pre-populate "
-                             "the async cache before first real request. Eliminates cold-start 'waiting' "
-                             "responses. Default 0 (off). Recommend 3 for rosbag experiments.")
+                         help="Gate 3c (I-010): queue N synthetic S2 frames at startup to pre-populate "
+                              "the async cache before first real request. Eliminates cold-start 'waiting' "
+                              "responses. Default 0 (off). Recommend 3 for rosbag experiments.")
+    parser.add_argument("--instruction", type=str, default="Exit door. Turn left and go straight until you find fire extinguisher. Then stop.",
+                         help="Navigation instruction for the robot. Replaces the hardcoded default.")
     args = parser.parse_args()
+
+    NAV_INSTRUCTION = args.instruction
+    print(f"[Server] Instruction: {NAV_INSTRUCTION[:60]}...")
 
     SERVER_MODE = args.mode
     if args.mode == 'async':

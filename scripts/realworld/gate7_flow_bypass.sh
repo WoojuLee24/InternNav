@@ -14,7 +14,7 @@ PORT=5804
 DEVICE=cuda:1
 CALIB="scripts/realworld/calib/calib_scout.txt"
 CLIENT="scripts/realworld/http_internvla_client_debug.py"
-BAG_DIR="/workspace/rosbag"
+# BAG_DIR: rosbag played manually from gds container via FastDDS
 LOG_BASE="/tmp/gate7_flow"
 mkdir -p "$LOG_BASE"
 
@@ -34,7 +34,7 @@ start_server() {
     pkill -f "http_internvla_server_debug.*$PORT" 2>/dev/null || true
     fuser -k ${PORT}/tcp 2>/dev/null || true
     sleep 3
-    python3 /workspace/InternNav/scripts/realworld/http_internvla_server_debug.py \
+    cd "$REPO_DIR" && python3 scripts/realworld/http_internvla_server_debug.py \
         --mode async --temperature 0.75 --kv-cache \
         --calib "$CALIB" --device "$DEVICE" --port "$PORT" \
         --pre-warm-frames 3 \
@@ -75,17 +75,17 @@ run_one() {
     curl -sf "http://localhost:${PORT}/reset_metrics" > "$log_dir/reset.json"
     sleep 1
 
-    python3.12 /workspace/InternNav/$CLIENT \
+    cd "$REPO_DIR" && python3.12 $CLIENT \
         --mode async --kv-cache --temperature 0.75 \
         --jpeg-quality 95 --depth-png-compress 6 --calib "$CALIB" \
         --server-port "${PORT}" \
         > "$log_dir/client.log" 2>&1 &
     local cpid=$!; sleep 3
-
-    ros2 bag play "$BAG_DIR/my_camera_bag_20260317_$bag" --rate 0.5 \
-        --topics /camera/camera/color/image_raw \
-                 /camera/camera/aligned_depth_to_color/image_raw \
-                 /gdq/msg/gdq_odom > "$log_dir/bag.log" 2>&1 || true
+# 
+#     ros2 bag play "$BAG_DIR/my_camera_bag_20260317_$bag" --rate 0.5 \  # played manually from gds container
+#         --topics /camera/camera/color/image_raw \
+#                  /camera/camera/aligned_depth_to_color/image_raw \
+#                  /gdq/msg/gdq_odom > "$log_dir/bag.log" 2>&1 || true
     sleep 3
     curl -sf "http://localhost:${PORT}/async_metrics" > "$log_dir/metrics.json"
     kill $cpid 2>/dev/null || true

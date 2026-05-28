@@ -17,7 +17,7 @@ LOG_BASE="/tmp/gate3x_sequence"
 mkdir -p "$LOG_BASE"
 
 BAGS=(073623 061841 063047)
-BAG_DIR="/workspace/rosbag"
+# BAG_DIR: rosbag played manually from gds container via FastDDS
 SERVER_LOG="$LOG_BASE/server.log"
 CLIENT="scripts/realworld/http_internvla_client_debug.py"
 CALIB="scripts/realworld/calib/calib_scout.txt"
@@ -54,17 +54,17 @@ run_bag() {
     echo "[gate3x] Playing bag $bag ($tag)..."
 
     # Start HTTP client (ROS2 → server bridge)
-    python3.12 /workspace/InternNav/$CLIENT \
+    cd "$REPO_DIR" && python3.12 $CLIENT \
         --mode async --kv-cache --temperature 0.75 \
         --jpeg-quality 95 --depth-png-compress 6 --calib "$CALIB" \
         > "$log_dir/client.log" 2>&1 &
     local CLIENT_PID=$!
     sleep 3
-
-    ros2 bag play "$BAG_DIR/my_camera_bag_20260317_$bag" --rate 0.5 \
-        --topics /camera/camera/color/image_raw \
-                 /camera/camera/aligned_depth_to_color/image_raw \
-                 /gdq/msg/gdq_odom 2>&1 | tee "$log_dir/bag.log" || true
+# 
+#     ros2 bag play "$BAG_DIR/my_camera_bag_20260317_$bag" --rate 0.5 \  # played manually from gds container
+#         --topics /camera/camera/color/image_raw \
+#                  /camera/camera/aligned_depth_to_color/image_raw \
+#                  /gdq/msg/gdq_odom 2>&1 | tee "$log_dir/bag.log" || true
     sleep 3
     curl -sf "http://localhost:5802/async_metrics" > "$log_dir/metrics.json"
     kill $CLIENT_PID 2>/dev/null || true

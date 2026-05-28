@@ -3,11 +3,11 @@
 # Single bag (073623), thr in {0.0, 0.92}. Compares served traj_ratio vs
 # fresh_trajectory_ratio to confirm/reject the measurement-artifact hypothesis.
 set -e
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/jazzy/setup.bash 2>/dev/null || true
 
 BAG="my_camera_bag_20260317_073623"
-BAG_PATH="/workspace/rosbag/${BAG}"
-CALIB="/workspace/InternNav/scripts/realworld/calib/calib_scout.txt"
+# BAG_PATH: rosbag played manually from gds container via FastDDS
+CALIB="$REPO_DIR/scripts/realworld/calib/calib_scout.txt"
 LOG_BASE="/tmp/temporal_freshcheck"
 mkdir -p "$LOG_BASE"
 
@@ -30,7 +30,7 @@ for T in "${THRESHOLDS[@]}"; do
     curl -sf http://localhost:5802/reset_metrics > "$LOG_DIR/reset.json"
     sleep 2
 
-    python3.12 /workspace/InternNav/scripts/realworld/http_internvla_client_debug.py \
+    cd "$REPO_DIR" && python3.12 scripts/realworld/http_internvla_client_debug.py \
         --mode async --kv-cache --temperature 0.75 \
         --jpeg-quality 95 --depth-png-compress 6 --calib "$CALIB" \
         > "$LOG_DIR/client.log" 2>&1 &
@@ -38,7 +38,7 @@ for T in "${THRESHOLDS[@]}"; do
     sleep 3
 
     echo "  playing bag at rate=0.5..."
-    ros2 bag play "$BAG_PATH" --rate 0.5 > "$LOG_DIR/bag.log" 2>&1
+#     ros2 bag play "$BAG_PATH" --rate 0.5 > "$LOG_DIR/bag.log" 2>&1  # played manually from gds container
     sleep 2
 
     curl -sf http://localhost:5802/async_metrics > "$LOG_DIR/metrics.json"

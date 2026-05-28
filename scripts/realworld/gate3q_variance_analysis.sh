@@ -18,9 +18,9 @@
 # Pass criterion: V_intra_nocache < 0.05 (noise floor is below half the threshold)
 # Key: If V_intra_nocache ≥ 0.05, the V ≤ 0.10 pass criterion is unreliable.
 set -e
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/jazzy/setup.bash 2>/dev/null || true
 
-CALIB="/workspace/InternNav/scripts/realworld/calib/calib_scout.txt"
+CALIB="$REPO_DIR/scripts/realworld/calib/calib_scout.txt"
 SERVER="scripts/realworld/http_internvla_server_debug.py"
 CLIENT="scripts/realworld/http_internvla_client_debug.py"
 LOG_BASE="/tmp/gate3q_variance"
@@ -40,7 +40,7 @@ start_server() {
     local logfile="$1"
     pkill -f "$SERVER" 2>/dev/null || true
     sleep 3
-    (cd /workspace/InternNav && python3 $SERVER \
+    (cd "$REPO_DIR" && python3 $SERVER \
         --mode async --temperature 0.75 --kv-cache \
         --calib "$CALIB" \
         --pre-warm-frames 3) \
@@ -86,15 +86,15 @@ run_bag_rep() {
     curl -sf http://localhost:5802/reset_metrics > "$log_dir/reset.json"
     sleep 1
 
-    (cd /workspace/InternNav && python3.12 $CLIENT \
+    (cd "$REPO_DIR" && python3.12 $CLIENT \
         --mode async --kv-cache --temperature 0.75 \
         --jpeg-quality 95 --depth-png-compress 6 --calib "$CALIB") \
         > "$log_dir/client.log" 2>&1 &
     local client_pid=$!
     sleep 3
 
-    echo "  playing /workspace/rosbag/$BAG at rate=0.5..."
-    ros2 bag play "/workspace/rosbag/$BAG" --rate 0.5 > "$log_dir/bag.log" 2>&1
+    # echo "  playing /workspace/rosbag/$BAG at rate=0.5..."  # gds container
+#     ros2 bag play "/workspace/rosbag/$BAG" --rate 0.5 > "$log_dir/bag.log" 2>&1  # played manually from gds container
     sleep 2
 
     curl -sf http://localhost:5802/async_metrics > "$log_dir/metrics.json"

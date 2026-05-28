@@ -20,9 +20,9 @@
 # Run inside container: docker exec -it vlnav_internvla_server bash
 # Usage:  bash scripts/realworld/gate3i_serve_count.sh
 set -e
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/jazzy/setup.bash 2>/dev/null || true
 
-CALIB="/workspace/InternNav/scripts/realworld/calib/calib_scout.txt"
+CALIB="$REPO_DIR/scripts/realworld/calib/calib_scout.txt"
 SERVER="scripts/realworld/http_internvla_server_debug.py"
 CLIENT="scripts/realworld/http_internvla_client_debug.py"
 LOG_BASE="/tmp/gate3i_serve"
@@ -45,7 +45,7 @@ start_server() {
     pkill -f "$SERVER" 2>/dev/null || true
     sleep 3
 
-    (cd /workspace/InternNav && python3 $SERVER \
+    (cd "$REPO_DIR" && python3 $SERVER \
         --mode async --temperature 0.75 --kv-cache \
         --calib "$CALIB" \
         --pre-warm-frames 3) \
@@ -70,7 +70,7 @@ configure_threshold() {
 run_bag() {
     local bag="$1"
     local threshold="$2"
-    local short="${bag##*_}"
+    local short="${bag#*_}"
     local tag="${short}_SC${threshold}"
     local log_dir="$LOG_BASE/$tag"
     mkdir -p "$log_dir"
@@ -82,15 +82,15 @@ run_bag() {
     sleep 1
     configure_threshold "$threshold"
 
-    (cd /workspace/InternNav && python3.12 $CLIENT \
+    (cd "$REPO_DIR" && python3.12 $CLIENT \
         --mode async --kv-cache --temperature 0.75 \
         --jpeg-quality 95 --depth-png-compress 6 --calib "$CALIB") \
         > "$log_dir/client.log" 2>&1 &
     local client_pid=$!
     sleep 3
 
-    echo "  playing /workspace/rosbag/$bag at rate=0.5..."
-    ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$log_dir/bag.log" 2>&1
+    # echo "  playing /workspace/rosbag/$bag at rate=0.5..."  # gds container
+#     ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$log_dir/bag.log" 2>&1  # played manually from gds container
     sleep 2
 
     curl -sf http://localhost:5802/async_metrics > "$log_dir/metrics.json"
@@ -119,7 +119,7 @@ PYEOF
 # Run Gate 3g baseline (MH=15, no I-052) for V comparison reference
 run_baseline() {
     local bag="$1"
-    local short="${bag##*_}"
+    local short="${bag#*_}"
     local log_dir="$LOG_BASE/${short}_BASELINE"
     mkdir -p "$log_dir"
 
@@ -134,14 +134,14 @@ run_baseline() {
     curl -sf "http://localhost:5802/set_serve_count_hold?enabled=false" > /dev/null
     curl -sf "http://localhost:5802/set_trajectory_adaptive_hold?enabled=false" > /dev/null
 
-    (cd /workspace/InternNav && python3.12 $CLIENT \
+    (cd "$REPO_DIR" && python3.12 $CLIENT \
         --mode async --kv-cache --temperature 0.75 \
         --jpeg-quality 95 --depth-png-compress 6 --calib "$CALIB") \
         > "$log_dir/client.log" 2>&1 &
     local client_pid=$!
     sleep 3
-
-    ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$log_dir/bag.log" 2>&1
+# 
+#     ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$log_dir/bag.log" 2>&1  # played manually from gds container
     sleep 2
 
     curl -sf http://localhost:5802/async_metrics > "$log_dir/metrics.json"

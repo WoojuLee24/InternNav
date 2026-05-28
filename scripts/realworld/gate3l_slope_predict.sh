@@ -25,9 +25,9 @@
 # Run inside container: docker exec -it vlnav_internvla_server bash
 # Usage:  bash scripts/realworld/gate3l_slope_predict.sh
 set -e
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/jazzy/setup.bash 2>/dev/null || true
 
-CALIB="/workspace/InternNav/scripts/realworld/calib/calib_scout.txt"
+CALIB="$REPO_DIR/scripts/realworld/calib/calib_scout.txt"
 SERVER="scripts/realworld/http_internvla_server_debug.py"
 CLIENT="scripts/realworld/http_internvla_client_debug.py"
 LOG_BASE="/tmp/gate3l_slope"
@@ -50,7 +50,7 @@ start_server() {
     pkill -f "$SERVER" 2>/dev/null || true
     sleep 3
 
-    (cd /workspace/InternNav && python3 $SERVER \
+    (cd "$REPO_DIR" && python3 $SERVER \
         --mode async --temperature 0.75 --kv-cache \
         --calib "$CALIB" \
         --pre-warm-frames 3) \
@@ -77,7 +77,7 @@ configure_slope() {
 run_bag() {
     local bag="$1"
     local slope="$2"
-    local short="${bag##*_}"
+    local short="${bag#*_}"
     local slope_tag="${slope/./_}"
     local tag="${short}_SL${slope_tag}"
     local log_dir="$LOG_BASE/$tag"
@@ -90,15 +90,15 @@ run_bag() {
     sleep 1
     configure_slope "$slope"
 
-    (cd /workspace/InternNav && python3.12 $CLIENT \
+    (cd "$REPO_DIR" && python3.12 $CLIENT \
         --mode async --kv-cache --temperature 0.75 \
         --jpeg-quality 95 --depth-png-compress 6 --calib "$CALIB") \
         > "$log_dir/client.log" 2>&1 &
     local client_pid=$!
     sleep 3
 
-    echo "  playing /workspace/rosbag/$bag at rate=0.5..."
-    ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$log_dir/bag.log" 2>&1
+    # echo "  playing /workspace/rosbag/$bag at rate=0.5..."  # gds container
+#     ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$log_dir/bag.log" 2>&1  # played manually from gds container
     sleep 2
 
     curl -sf http://localhost:5802/async_metrics > "$log_dir/metrics.json"
@@ -126,7 +126,7 @@ PYEOF
 
 run_baseline() {
     local bag="$1"
-    local short="${bag##*_}"
+    local short="${bag#*_}"
     local log_dir="$LOG_BASE/${short}_BASELINE"
     mkdir -p "$log_dir"
 
@@ -140,14 +140,14 @@ run_baseline() {
     curl -sf "http://localhost:5802/set_action_aware?enabled=true" > /dev/null
     curl -sf "http://localhost:5802/set_slope_predict?enabled=false" > /dev/null
 
-    (cd /workspace/InternNav && python3.12 $CLIENT \
+    (cd "$REPO_DIR" && python3.12 $CLIENT \
         --mode async --kv-cache --temperature 0.75 \
         --jpeg-quality 95 --depth-png-compress 6 --calib "$CALIB") \
         > "$log_dir/client.log" 2>&1 &
     local client_pid=$!
     sleep 3
-
-    ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$log_dir/bag.log" 2>&1
+# 
+#     ros2 bag play "/workspace/rosbag/$bag" --rate 0.5 > "$log_dir/bag.log" 2>&1  # played manually from gds container
     sleep 2
 
     curl -sf http://localhost:5802/async_metrics > "$log_dir/metrics.json"
