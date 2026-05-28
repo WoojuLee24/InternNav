@@ -1,0 +1,89 @@
+# 1. Base Image (Isaac Lab + ROS2)
+FROM isaac-lab-ros2:latest
+USER root
+
+# Isaac Sim Python/pip 경로 변수
+ENV ISAAC_PYTHON=/workspace/isaaclab/_isaac_sim/python.sh \
+    ISAAC_PIP="/workspace/isaaclab/_isaac_sim/python.sh -m pip"
+
+# 2. 시스템 패키지 설치
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    vim git build-essential sudo \
+    python3-dev \
+    curl \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 3. GPU 및 빌드 환경 설정
+# H200(sm_90) 및 RTX 5090(sm_100) 등 멀티 아키텍처 지원 설정
+ENV TRITON_OVERRIDE_ARCH="sm100" \
+    TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas \
+    MAX_JOBS=8
+
+# 3-1. CUDA 12.8 Toolkit 설치 (nvcc 등 빌드 도구)
+RUN wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends cuda-toolkit-12-8 && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    rm cuda-keyring_1.1-1_all.deb
+
+ENV PATH=/usr/local/cuda-12.8/bin:$PATH \
+    LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH
+
+# 4. Constraints 파일 및 패키지 설치
+# Isaac ROS의 기본 torch/numpy를 보호하면서 추가 패키지 설치
+COPY constraints-isaac-sim5.txt /tmp/constraints.txt
+
+RUN $ISAAC_PIP install --no-cache-dir --ignore-installed blinker pyzmq
+
+# 공통 라이브러리
+RUN $ISAAC_PIP install --no-cache-dir -c /tmp/constraints.txt \
+    "transformers==4.51.0" \
+    "huggingface-hub>=0.34.0" \
+    "huggingface_hub[cli]<1.0" \
+    "diffusers>=0.34.0" \
+    "accelerate>=1.11.0" \
+    setuptools_scm opencv-python "imageio[ffmpeg]" \
+    fastapi gym uvicorn ftfy "simpy>1.13.3" debugpy \
+    wandb  \
+    decord \
+    torchcodec \
+    open3d-cpu \
+    lmdb \
+    jsonlines typro msgpack-numpy
+
+RUN $ISAAC_PIP install -c /tmp/constraints.txt flask casadi deepspeed jupyterlab jupyterlab-server
+
+## 5. 사용자 이름을 'irteam'으로 설정 (UID 1000 충돌 해결)
+#ARG NB_USER=irteam
+## 기존 1000번 유저를 찾아 이름을 irteam으로 개명하고 홈 디렉토리 정리
+## isaac-sim 그룹 추가: /isaac-sim은 750(rwxr-x---)으로 isaac-sim 그룹만 접근 가능
+#RUN EXISTING_USER=$(getent passwd 1000 | cut -d: -f1) && \
+#    usermod -l $NB_USER $EXISTING_USER && \
+#    usermod -d /home/$NB_USER -m $NB_USER && \
+#    usermod -aG isaac-sim $NB_USER && \
+#    echo "$NB_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+
+## 환경 변수 업데이트
+#ENV NB_USER=$NB_USER \
+#    HOME=/home/$NB_USER \
+#    NB_PREFIX=/
+
+#USER $NB_USER
+#WORKDIR /home/$NB_USER
+
+# 6. Flash Attention (CUDA 12.8, python 3.11 전용 Prebuilt 사용)
+# 빌드 시간을 줄이기 위해 사용자님이 제공하신 전용 wheel 설치
+RUN $ISAAC_PIP install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.8.3+cu128torch2.7-cp311-cp311-linux_x86_64.whl  --break-system-packages
+
+## 7. InternNav 클론 및 패키지 설치
+#RUN mkdir -p /home/irteam/git && \
+#    cd /home/irteam/git && \
+#    git clone https://github.com/WoojuLee24/InternNav.git --recursive && \
+#    cd InternNav && \
+#    pip install -e .[model] --no-build-isolation --break-system-packages
+
+## 8. 실행 설정 (Jupyter Lab)
+#EXPOSE 8888
+#CMD ["sh", "-c", "jupyter lab --notebook-dir=/home/irteam --ip=0.0.0.0 --no-browser --allow-root --port=8888 --LabApp.token='' --LabApp.password='' --LabApp.allow_origin='*' --LabApp.base_url=${NB_PREFIX}"]

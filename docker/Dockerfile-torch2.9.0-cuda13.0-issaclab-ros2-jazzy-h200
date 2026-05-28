@@ -1,0 +1,106 @@
+# 1. Base Image (Isaac Lab + ROS2)
+FROM dnwn24/isaac-lab-ros2:latest
+USER root
+
+# Isaac Sim Python/pip 경로 변수
+ENV ISAAC_PYTHON=/workspace/isaaclab/_isaac_sim/python.sh \
+    ISAAC_PIP="/workspace/isaaclab/_isaac_sim/python.sh -m pip"
+ENV ACCEPT_EULA=Y
+ENV PRIVACY_CONSENT=Y
+ENV OMNI_KIT_ACCEPT_EULA=YES
+RUN echo 'export ACCEPT_EULA=Y' >> /root/.bashrc
+RUN echo 'export PRIVACY_CONSENT=Y' >> /root/.bashrc
+RUN echo 'export OMNI_KIT_ACCEPT_EULA=YES' >> /root/.bashrc
+
+
+# 2. 시스템 패키지 설치
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    vim git build-essential sudo \
+    python3-dev \
+    curl \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 3. GPU 및 빌드 환경 설정
+# H200(sm_90) 및 RTX 5090(sm_100) 등 멀티 아키텍처 지원 설정
+ENV TRITON_OVERRIDE_ARCH="sm90" \
+    TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas \
+    MAX_JOBS=8
+
+# 3-1. CUDA 12.8 Toolkit 설치 (nvcc 등 빌드 도구)
+RUN wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends cuda-toolkit-12-8 && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    rm cuda-keyring_1.1-1_all.deb
+
+ENV PATH=/usr/local/cuda-12.8/bin:$PATH \
+    LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH
+
+# 4. Constraints 파일 및 패키지 설치
+# Isaac ROS의 기본 torch/numpy를 보호하면서 추가 패키지 설치
+COPY constraints-isaac-sim5.txt /tmp/constraints.txt
+
+RUN $ISAAC_PIP install --no-cache-dir --ignore-installed blinker pyzmq
+
+# 공통 라이브러리
+RUN $ISAAC_PIP install --no-cache-dir -c /tmp/constraints.txt \
+    "transformers==4.51.0" \
+    "huggingface-hub>=0.34.0" \
+    "huggingface_hub[cli]<1.0" \
+    "diffusers>=0.34.0" \
+    "accelerate>=1.11.0" \
+    setuptools_scm opencv-python "imageio[ffmpeg]" \
+    fastapi gym uvicorn ftfy "simpy>1.13.3" debugpy \
+    wandb  \
+    decord \
+    torchcodec \
+    open3d-cpu \
+    lmdb \
+    jsonlines typro msgpack-numpy
+
+RUN $ISAAC_PIP install -c /tmp/constraints.txt flask casadi deepspeed jupyterlab jupyterlab-server
+
+
+# 6. Flash Attention (CUDA 12.8, python 3.11 전용 Prebuilt 사용)
+# 빌드 시간을 줄이기 위해 사용자님이 제공하신 전용 wheel 설치
+RUN $ISAAC_PIP install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.8.3+cu128torch2.7-cp311-cp311-linux_x86_64.whl  --break-system-packages
+
+# 7. InternUtopia packages
+RUN $ISAAC_PIP install \   
+    addict==2.4.0 \                                                                      
+    aiohttp_cors==0.7.0 \
+    httpcore==1.0.8 \                                                                    
+    httpx==0.25.2 \
+    inputs==0.5 \                                                                        
+    ipython==8.20.0 \
+    lcm==1.5.0 \
+    onnxruntime==1.19.2 \                                                                
+    "openai==1.29.0" \
+    pyyaml==6.0.1 \                                                                      
+    rsl-rl-lib==2.2.1 \
+    "vuer==0.0.32rc7"
+
+# InternNav & InternUtopia 클론 및 패키지 설치
+#RUN mkdir -p /home/irteam/git && \
+#    cd /home/irteam/git && \
+#    git clone https://github.com/WoojuLee24/InternNav.git --recursive && \
+#    cd InternNav && \
+#    $ISAAC_PIP install -e .[model] --no-build-isolation
+
+#RUN cd /home/irteam/git && \
+#    git clone https://github.com/WoojuLee24/InternUtopia --recursive && \
+#    cd InternUtopia && \
+#    $ISAAC_PIP install -e . --no-deps && \
+
+# 8. 환경 변수 업데이트
+ENV NB_USER=$NB_USER \
+    HOME=/home/$NB_USER \
+    NB_PREFIX=/
+
+USER $NB_USER
+WORKDIR /home/$NB_USER
+
+# 9. 실행 설정 (Jupyter Lab)
+EXPOSE 8888
+CMD ["sh", "-c", "jupyter lab --notebook-dir=/home/irteam --ip=0.0.0.0 --no-browser --allow-root --port=8888 --LabApp.token='' --LabApp.password='' --LabApp.allow_origin='*' --LabApp.base_url=${NB_PREFIX}"]
