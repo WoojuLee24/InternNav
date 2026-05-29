@@ -14,8 +14,8 @@ deepspeed=scripts/train/qwenvl_train/zero2.json
 
 # Training hyperparameters
 lr=1e-4
-batch_size=4
-grad_accum_steps=4
+batch_size=16
+grad_accum_steps=1
 max_pixels=313600
 min_pixels=3136
 
@@ -37,6 +37,13 @@ num_history=4
 while true; do
     run_name=debug/repeat_train
     output_dir=checkpoints/${run_name}
+
+    # 기존 checkpoint 삭제 후 시작
+    if ls ${output_dir}/checkpoint-* 2>/dev/null | grep -q .; then
+        echo "[repeat_train] Removing existing checkpoints in ${output_dir}"
+        rm -rf ${output_dir}/checkpoint-*
+    fi
+
     mkdir -p ${output_dir}
 
     torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
