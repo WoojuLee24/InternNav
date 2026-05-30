@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from internnav.model.utils.depth_rgb_to_bev2 import (
+from internnav.model.utils.depth_rgb_to_bev_torch import (
     depth_rgb_to_bev as depth_rgb_to_bev_torch,
     depth_to_bev_occ,
 )
@@ -205,7 +205,7 @@ def save_comparison_pair(save_dir, frame_idx, fpv_rgb, depth_norm, topdown_rgb,
                                 fx=fx, fy=fy, cx=cx, cy=cy,
                                 cam_height=cam_height, cam_x_offset=cam_x_offset,
                                 cam_z_offset=cam_z_offset,
-                                bev_range=gt_range, z_min=-0.15, z_max=0.3)
+                                bev_range=gt_range, z_min=-0.15, z_max=2.0)
     img_c = cv2.resize(cv2.cvtColor(bev_rgb, cv2.COLOR_RGB2BGR), (SIZE, SIZE))
     # Step 2: annotate in robot frame — FWD arrow always points straight up
     for r_m in [1, 3, 5]:
@@ -253,7 +253,7 @@ def save_comparison_pair_v2(save_dir, frame_idx, fpv_rgb, depth_norm, topdown_rg
                            robot_yaw_rad=0.0, bev_rot_offset_deg=0.0,
                            fx=585.0, fy=585.0, cx=320.0, cy=240.0,
                            cam_height=1.25, cam_x_offset=0.0, cam_z_offset=0.0):
-    """depth_rgb_to_bev2 torch 버전으로 생성한 BEV 이미지 저장.
+    """depth_rgb_to_bev_torch 버전으로 생성한 BEV 이미지 저장.
 
     A: FPV RGB
     B: Depth (jet)
@@ -522,7 +522,7 @@ def run_validation(args):
 
     env.close()
     print(f'Saved {frame_idx} pairs to {save_dir}  (v1: numpy)')
-    print(f'Saved {frame_idx} pairs to {save_dir2}  (v2: torch depth_rgb_to_bev2)')
+    print(f'Saved {frame_idx} pairs to {save_dir2}  (v2: torch depth_rgb_to_bev_torch)')
 
 
 def main():

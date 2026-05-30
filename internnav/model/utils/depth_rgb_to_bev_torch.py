@@ -13,6 +13,7 @@ Coordinate conventions:
 """
 
 import math
+import os
 
 import torch
 
@@ -254,3 +255,41 @@ def depth_to_bev_occ(
 
     bev = bev / bev.amax(dim=(1, 2), keepdim=True).clamp(min=1.0)
     return bev  # [B, bev_size, bev_size]
+
+
+def save_train_debug(
+    step: int,
+    fpv: torch.Tensor,
+    depth: torch.Tensor,
+    bev: torch.Tensor,
+    save_dir: str,
+) -> None:
+    """Save 3-panel debug image: FPV RGB | Depth (jet colourmap) | BEV.
+
+    Args:
+        fpv  : [H, W, 3] float [0, 1]
+        depth: [H, W]    float [0, 1]
+        bev  : [H, W]    float [0, 1]
+    """
+    import cv2
+    import numpy as np
+
+    os.makedirs(save_dir, exist_ok=True)
+
+    def _to_u8(t: torch.Tensor) -> np.ndarray:
+        return (t.detach().float().cpu().clamp(0.0, 1.0).numpy() * 255).astype(np.uint8)
+
+    fpv_np   = _to_u8(fpv)
+    depth_np = _to_u8(depth)
+    bev_np   = _to_u8(bev)
+
+    depth_jet = cv2.applyColorMap(depth_np, cv2.COLORMAP_JET)
+    bev_bgr   = cv2.cvtColor(bev_np, cv2.COLOR_GRAY2BGR)
+    fpv_bgr   = cv2.cvtColor(fpv_np, cv2.COLOR_RGB2BGR)
+
+    H, W = fpv_bgr.shape[:2]
+    panel = np.concatenate(
+        [fpv_bgr, cv2.resize(depth_jet, (W, H)), cv2.resize(bev_bgr, (W, H))],
+        axis=1,
+    )
+    cv2.imwrite(os.path.join(save_dir, f"bev_debug_{step:06d}.jpg"), panel)
