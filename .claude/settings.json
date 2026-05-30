@@ -5,7 +5,20 @@
       "Bash(nvidia-smi)",
       "Bash(ros2 topic *)",
       "Bash(dpkg -l *)",
-      "Bash(source /opt/ros/jazzy/setup.bash)"
+      "Bash(source /opt/ros/jazzy/setup.bash)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(ls *)",
+      "Bash(wc *)",
+      "Bash(echo *)",
+      "Bash(which *)",
+      "Bash(pwd)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git status *)"
     ],
     "deny": [
       "Bash(git push --force*)",
