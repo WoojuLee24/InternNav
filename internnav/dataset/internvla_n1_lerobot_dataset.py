@@ -1179,6 +1179,22 @@ class NavPixelGoalDataset(Dataset):
             data_dict["traj_images"] = traj_images[:goal_len][::interval]
             data_dict["traj_depths"] = torch.stack(traj_depths[:goal_len][::interval])
             data_dict["traj_poses"] = torch.stack(traj_poses_gt)
+            data_dict["traj_cam_heights"] = torch.tensor(height / 100.0)   # cm → metres
+            data_dict["traj_cam_pitch_1"] = torch.tensor(float(pitch_1))   # degrees
+            data_dict["traj_cam_pitch_2"] = torch.tensor(float(pitch_2))   # degrees (used for S1 BEV)
+
+            debug_modes = getattr(self.data_args, 'debug_modes', '')
+            if 'bev' in debug_modes:
+                sampled_ids = [start_frame_id + i for i in range(0, goal_len, interval)]
+                tdmaps = []
+                for fid in sampled_ids:
+                    td_path = os.path.join(video, 'observation.images.rgb.topdown', f'episode_{ep_id:06d}_{fid}.jpg')
+                    if os.path.exists(td_path):
+                        td_arr = np.asarray(Image.open(td_path).convert('RGB').resize((224, 224)))
+                    else:
+                        td_arr = np.zeros((224, 224, 3), dtype=np.uint8)
+                    tdmaps.append(td_arr)
+                data_dict["traj_tdmaps"] = torch.from_numpy(np.stack(tdmaps).astype(np.float32) / 255.0)
         return data_dict
 
 
@@ -1328,6 +1344,20 @@ class DataCollatorForSupervisedDataset(object):
             batch['traj_depths'] = torch.stack(traj_depth_batch)
             batch['traj_poses'] = torch.stack(traj_pose_batch)
             batch['video_frame_num'] = torch.tensor(video_frame_num)
+            if "traj_cam_heights" in instances[0]:
+                batch['traj_cam_heights'] = torch.stack([inst["traj_cam_heights"] for inst in instances])
+                batch['traj_cam_pitch_1']  = torch.stack([inst["traj_cam_pitch_1"]  for inst in instances])
+                batch['traj_cam_pitch_2']  = torch.stack([inst["traj_cam_pitch_2"]  for inst in instances])
+            if "traj_tdmaps" in instances[0]:
+                tdmap_list = [inst["traj_tdmaps"] for inst in instances]
+                max_t = max(t.shape[0] for t in tdmap_list)
+                padded = []
+                for t in tdmap_list:
+                    if t.shape[0] < max_t:
+                        pad = t[-1:].expand(max_t - t.shape[0], -1, -1, -1)
+                        t = torch.cat([t, pad], dim=0)
+                    padded.append(t)
+                batch['traj_tdmaps'] = torch.stack(padded)
 
         return batch
 

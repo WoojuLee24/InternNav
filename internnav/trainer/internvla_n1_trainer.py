@@ -127,6 +127,7 @@ def train(attn_implementation="flash_attention_2"):
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    data_args.debug_modes = model_args.debug_modes
 
     local_rank = training_args.local_rank
     os.makedirs(training_args.output_dir, exist_ok=True)
@@ -147,12 +148,21 @@ def train(attn_implementation="flash_attention_2"):
         data_args.transform_train = v2.Resize((data_args.resize_h, data_args.resize_w))
 
     if 'internvla-n1-system2' in model_args.model_name_or_path.lower():
-        model = InternVLAN1ForCausalLM.from_pretrained(
+        if model_args.bev_mode != 'none':
+            from internnav.model.basemodel.internvla_n1.internvla_n1_bev import InternVLAN1BEVForCausalLM
+            ModelClass = InternVLAN1BEVForCausalLM
+        else:
+            ModelClass = InternVLAN1ForCausalLM
+        model = ModelClass.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
             attn_implementation=attn_implementation,
             torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
         )
+        model.config.bev_mode = model_args.bev_mode
+        model.config.dav2_max_depth = model_args.dav2_max_depth
+        model.config.debug_modes = model_args.debug_modes
+        model.config.debug_dir = model_args.debug_dir
         data_args.image_processor = AutoProcessor.from_pretrained(
             model_args.model_name_or_path,
         ).image_processor

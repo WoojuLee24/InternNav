@@ -257,6 +257,52 @@ def depth_to_bev_occ(
     return bev  # [B, bev_size, bev_size]
 
 
+def save_image(img, path: str) -> None:
+    """Save a single image to disk with cv2.imwrite.
+
+    Accepts torch.Tensor, numpy.ndarray, or PIL.Image in any of:
+      - float [0, 1]  or  uint8 [0, 255]
+      - shape [H, W], [H, W, C], or [C, H, W]
+    RGB inputs are converted to BGR automatically.
+    """
+    import cv2
+    import numpy as np
+
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+
+    # --- convert to float32 numpy ---
+    if isinstance(img, torch.Tensor):
+        arr = img.detach().float().cpu().numpy()
+    else:
+        try:
+            from PIL import Image as _PILImage
+            if isinstance(img, _PILImage.Image):
+                arr = np.array(img).astype(np.float32)
+                if arr.max() > 1.5:
+                    arr = arr / 255.0
+            else:
+                arr = np.asarray(img, dtype=np.float32)
+        except ImportError:
+            arr = np.asarray(img, dtype=np.float32)
+        if arr.max() > 1.5:
+            arr = arr / 255.0
+
+    arr = arr.clip(0.0, 1.0)
+
+    # [C, H, W] → [H, W, C]  (heuristic: first dim ≤ 4 and smaller than spatial dims)
+    if arr.ndim == 3 and arr.shape[0] <= 4 and arr.shape[0] < arr.shape[1] and arr.shape[0] < arr.shape[2]:
+        arr = arr.transpose(1, 2, 0)
+
+    u8 = (arr * 255).astype(np.uint8)
+
+    if u8.ndim == 3 and u8.shape[2] == 3:
+        u8 = cv2.cvtColor(u8, cv2.COLOR_RGB2BGR)
+    elif u8.ndim == 3 and u8.shape[2] == 1:
+        u8 = u8[:, :, 0]
+
+    cv2.imwrite(path, u8)
+
+
 def save_train_debug(
     step: int,
     fpv: torch.Tensor,
