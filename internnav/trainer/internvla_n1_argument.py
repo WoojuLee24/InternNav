@@ -14,6 +14,11 @@ class ModelArguments:
     system1: Optional[str] = field(default='nextdit')
     n_query: int = field(default=4)
 
+    bev_mode: str = field(default="none", metadata={"help": "none|occ_gt|rgb_gt|fpv_concat_gt|occ_depthanythingv2|rgb_depthanythingv2"})
+    dav2_max_depth: float = field(default=10.0)
+    debug_modes: str = field(default="")
+    debug_dir: Optional[str] = field(default=None)
+
 
 @dataclass
 class DataArguments:

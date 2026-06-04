@@ -241,7 +241,7 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
 
                     images_dp_feat = (
                         self.get_model()
-                        .rgb_model.get_intermediate_layers(images_dp_norm.flatten(0, 1))[0]
+                        .rgb_model.get_intermediate_layers(images_dp_norm.flatten(0, 1).to(next(self.get_model().rgb_model.parameters()).dtype))[0]
                         .unflatten(dim=0, sizes=(bsz, -1))
                     )
 

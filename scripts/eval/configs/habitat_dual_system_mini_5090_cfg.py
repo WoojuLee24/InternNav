@@ -7,10 +7,10 @@ eval_cfg = EvalCfg(
         model_settings={
             "mode": "dual_system",  # inference mode: dual_system or system2
             'model_path': "/ws/src/InternNav/checkpoints/InternVLA-N1-w-NavDP", # "/home/irteam/git/InternNav/checkpoints/InternVLA-N1-w-NavDP", # 
-            "num_history": 8,
-            "resize_w": 384,  # image resize width
-            "resize_h": 384,  # image resize height
-            "max_new_tokens": 1024,  # maximum number of tokens for generation
+            "num_history": 4,
+            "resize_w": 256,  # image resize width
+            "resize_h": 256,  # image resize height
+            "max_new_tokens": 256,  # maximum number of tokens for generation
             "vis_debug": False,  # If vis_debug=True, save debug videos per episode
             "vis_debug_path": "./logs/habitat/vis_debug",
         },
@@ -19,7 +19,7 @@ eval_cfg = EvalCfg(
         env_type='habitat',
         env_settings={
             # habitat sim specifications - agent, sensors, tasks, measures etc. are defined in the habitat config file
-            'config_path': 'scripts/eval/configs/vln_r2r_mini.yaml',
+            'config_path': 'scripts/eval/configs/vln_r2r_mini_5090.yaml',
         },
     ),
     eval_type='habitat_vln',
@@ -33,7 +33,7 @@ eval_cfg = EvalCfg(
         "port": "2333",  # communication port
         "dist_url": "env://",  # url for distributed setup
         # wandb settings
-        "use_wandb": True,
+        "use_wandb": False,
         "wandb_project": "internnav",
         "wandb_run_name": "habitat_dual_system_mini_single",
     },
