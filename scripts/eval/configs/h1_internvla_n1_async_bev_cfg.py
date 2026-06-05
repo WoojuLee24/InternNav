@@ -51,8 +51,10 @@ eval_cfg = EvalCfg(
             'vis_debug_path': './logs/test_n1_bev/vis_debug',
             # ---------------- BEV visual input ----------------
             'visual_provider': 'bev_image',  # 'fpv' | 'bev_image' | 'bev_feature'
-            'bev_s1': True,   # replace NavDP images_dp with BEV frames
-            'bev_s2': True,   # append BEV image to the LLM look-down turn
+            # per-system mode: 'fpv' (original behaviour) | 'bev' (BEV replaces FPV)
+            #                  | 'fpv_bev' (both; S1 concat along T, S2 appended image)
+            'bev_s1_mode': 'bev',
+            'bev_s2_mode': 'fpv_bev',
             'bev_cam_height': 1.25,
             'bev_cam_pitch_deg': 30.0,  # h1_1_25_down_30
             'bev_fx': 585.0,

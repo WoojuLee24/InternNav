@@ -30,8 +30,10 @@ eval_cfg = EvalCfg(
             "vis_debug_path": "./logs/habitat/vis_debug",
             # ---------------- BEV visual input ----------------
             "visual_provider": "bev_image",  # 'fpv' | 'bev_image' | 'bev_feature'
-            "bev_s1": True,   # replace NavDP images_dp with BEV frames
-            "bev_s2": True,   # append BEV image to the LLM look-down turn
+            # per-system mode: 'fpv' (original behaviour) | 'bev' (BEV replaces FPV)
+            #                  | 'fpv_bev' (both; S1 concat along T, S2 appended image)
+            "bev_s1_mode": "bev",
+            "bev_s2_mode": "fpv_bev",
             "bev_cam_pitch_deg": 0.0,  # Habitat base camera is horizontal
             "bev_depth_scale": 1.0,    # evaluator hands metric depth to the provider
         },
