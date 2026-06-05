@@ -245,7 +245,15 @@ class BEVProcessor:
 # ---------------------------------------------------------------------------
 
 class VisualInputProvider(ABC):
-    """Strategy object deciding what S1/S2 actually see (FPV, BEV, ...)."""
+    """Strategy object deciding what S1/S2 actually see (FPV, BEV, ...).
+
+    ``s1_mode`` / ``s2_mode`` ('fpv' | 'bev' | 'fpv_bev') tell call sites how
+    to combine the provider output with the original input; the FPV default
+    means "no change".
+    """
+
+    s1_mode: str = 'fpv'
+    s2_mode: str = 'fpv'
 
     def reset(self):
         """Called at episode start."""
@@ -272,8 +280,20 @@ class FPVProvider(VisualInputProvider):
         return []
 
 
+_VALID_MODES = ('fpv', 'bev', 'fpv_bev')
+
+
 class BEVImageProvider(VisualInputProvider):
-    """Image-level BEV injection for S1 and/or S2.
+    """Image-level BEV injection for S1 and/or S2, with per-system modes.
+
+    Modes (independent for S1 and S2):
+        'fpv'     : original input only — identical to the existing code path.
+        'bev'     : BEV replaces the FPV frame(s).
+        'fpv_bev' : FPV and BEV are both fed.
+                    S1: BEV frames concatenated along T → [B, 2T, H, W, 3]
+                        (same convention as the fpv_concat_gt training mode of
+                        internvla_n1_bev.py; depths are duplicated to match).
+                    S2: BEV image appended after the look-down FPV image.
 
     Stateless w.r.t. the goal frame: S1 call sites already pass both the
     pixel-goal frame and the current frame stacked along T, so both are
@@ -281,8 +301,10 @@ class BEVImageProvider(VisualInputProvider):
 
     Args:
         processor   : shared BEVProcessor.
-        use_s1      : replace NavDP images_dp with BEV frames.
-        use_s2      : append a BEV image to the LLM look-down turn.
+        s1_mode     : 'fpv' | 'bev' | 'fpv_bev' for NavDP images_dp.
+        s2_mode     : 'fpv' | 'bev' | 'fpv_bev' for the LLM look-down turn
+                      (S2 history frames always stay FPV — only the look-down
+                      pixel-goal turn is affected).
         s1_pitch_deg: camera pitch of the frames S1 consumes
                       (Habitat: look-down frames → base + 60°).
         s2_pitch_deg: camera pitch of the look-down frame S2 consumes.
@@ -293,32 +315,41 @@ class BEVImageProvider(VisualInputProvider):
     def __init__(
         self,
         processor: BEVProcessor,
-        use_s1: bool = True,
-        use_s2: bool = True,
+        s1_mode: str = 'bev',
+        s2_mode: str = 'fpv_bev',
         s1_pitch_deg: Optional[float] = None,
         s2_pitch_deg: Optional[float] = None,
         s2_depth_in_meters: bool = False,
     ):
+        if s1_mode not in _VALID_MODES or s2_mode not in _VALID_MODES:
+            raise ValueError(f"s1_mode/s2_mode must be one of {_VALID_MODES}, got {s1_mode!r}/{s2_mode!r}")
         self.processor = processor
-        self.use_s1 = use_s1
-        self.use_s2 = use_s2
+        self.s1_mode = s1_mode
+        self.s2_mode = s2_mode
         self.s1_pitch_deg = s1_pitch_deg
         self.s2_pitch_deg = s2_pitch_deg
         self.s2_depth_in_meters = s2_depth_in_meters
 
     def get_s1_input(self, rgb, depth) -> S1VisualInput:
-        if not self.use_s1:
+        if self.s1_mode == 'fpv':
             return S1VisualInput()
         if not (isinstance(rgb, torch.Tensor) and isinstance(depth, torch.Tensor)):
             # Legacy 'sync' path hands raw numpy frames straight to generate_traj;
             # BEV substitution is only defined for the stacked-tensor layout.
             print('[BEVImageProvider] non-tensor S1 input — falling back to FPV for this call')
             return S1VisualInput()
-        images = self.processor.for_s1(rgb, depth, cam_pitch_deg=self.s1_pitch_deg)
-        return S1VisualInput(images=images)
+        bev = self.processor.for_s1(rgb, depth, cam_pitch_deg=self.s1_pitch_deg)
+        if self.s1_mode == 'bev':
+            return S1VisualInput(images=bev)
+        # 'fpv_bev': [fpv_goal, fpv_cur, bev_goal, bev_cur] along T (fpv_concat_gt
+        # convention). NOTE: T doubles — requires a checkpoint trained with the
+        # matching fpv_concat mode.
+        images = torch.cat([rgb, bev], dim=1)
+        depths = torch.cat([depth, depth], dim=1)  # BEV frames reuse the FPV depth
+        return S1VisualInput(images=images, depths=depths)
 
     def get_s2_extra(self, rgb, depth, is_lookdown: bool = False) -> List[Image.Image]:
-        if not (self.use_s2 and is_lookdown):
+        if self.s2_mode == 'fpv' or not is_lookdown:
             return []
         bev = self.processor.for_s2(
             rgb, depth,
@@ -358,7 +389,11 @@ def create_visual_provider(config, device: str = 'cuda:0') -> VisualInputProvide
         bev_ref_width, bev_ref_height  : reference resolution (default 640×480)
         bev_cam_height, bev_cam_pitch_deg, bev_cam_x_offset, bev_cam_z_offset
         bev_size, bev_range, bev_depth_scale, bev_z_min, bev_z_max
-        bev_s1, bev_s2                 : enable injection per system (default True)
+        bev_s1_mode, bev_s2_mode       : 'fpv' | 'bev' | 'fpv_bev' per system
+                                         (defaults: s1='bev', s2='fpv_bev')
+        bev_s1, bev_s2                 : legacy booleans, used only when the
+                                         mode key is absent (True → default
+                                         mode, False → 'fpv')
         bev_s1_pitch_deg, bev_s2_pitch_deg : per-system pitch overrides
         bev_s2_depth_in_meters         : depth unit handed to get_s2_extra
     """
@@ -388,10 +423,14 @@ def create_visual_provider(config, device: str = 'cuda:0') -> VisualInputProvide
     )
     if ptype == 'bev_feature':
         return BEVFeatureProvider(processor)
+
+    # mode keys win; legacy booleans (bev_s1/bev_s2) map to default-mode/'fpv'
+    s1_mode = _cfg_get(config, 'bev_s1_mode', 'bev' if _cfg_get(config, 'bev_s1', True) else 'fpv')
+    s2_mode = _cfg_get(config, 'bev_s2_mode', 'fpv_bev' if _cfg_get(config, 'bev_s2', True) else 'fpv')
     return BEVImageProvider(
         processor,
-        use_s1=_cfg_get(config, 'bev_s1', True),
-        use_s2=_cfg_get(config, 'bev_s2', True),
+        s1_mode=s1_mode,
+        s2_mode=s2_mode,
         s1_pitch_deg=_cfg_get(config, 'bev_s1_pitch_deg', None),
         s2_pitch_deg=_cfg_get(config, 'bev_s2_pitch_deg', None),
         s2_depth_in_meters=_cfg_get(config, 'bev_s2_depth_in_meters', False),

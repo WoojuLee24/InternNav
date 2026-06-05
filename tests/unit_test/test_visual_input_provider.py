@@ -141,6 +141,7 @@ def test_for_s1_layout_and_dtype():
 
 def test_fpv_provider_is_noop():
     p = FPVProvider()
+    assert p.s1_mode == 'fpv' and p.s2_mode == 'fpv'
     s1 = p.get_s1_input(torch.rand(1, 2, 8, 8, 3), torch.rand(1, 2, 8, 8, 1))
     assert s1.images is None and s1.features is None and s1.depths is None
     assert p.get_s2_extra(None, None, is_lookdown=True) == []
@@ -148,14 +149,34 @@ def test_fpv_provider_is_noop():
     p.set_goal(None, None)  # hooks must not raise
 
 
-def test_bev_image_provider_s1():
-    p = BEVImageProvider(make_processor())
+def test_bev_image_provider_s1_bev_mode():
+    p = BEVImageProvider(make_processor(), s1_mode='bev')
     rgb = torch.rand(1, 2, 224, 224, 3)
     depth = torch.rand(1, 2, 224, 224, 1) * 4.0 + 0.5
     s1 = p.get_s1_input(rgb, depth)
     assert s1.images is not None and s1.images.shape == rgb.shape
     assert s1.depths is None  # depths stay FPV (rgb_gt training convention)
     assert not torch.equal(s1.images, rgb)  # actually replaced
+
+
+def test_bev_image_provider_s1_fpv_bev_mode():
+    """fpv_bev: BEV concat along T (fpv_concat_gt convention), depths duplicated."""
+    p = BEVImageProvider(make_processor(), s1_mode='fpv_bev')
+    rgb = torch.rand(1, 2, 224, 224, 3)
+    depth = torch.rand(1, 2, 224, 224, 1) * 4.0 + 0.5
+    s1 = p.get_s1_input(rgb, depth)
+    assert s1.images.shape == (1, 4, 224, 224, 3)
+    assert s1.depths.shape == (1, 4, 224, 224, 1)
+    assert torch.equal(s1.images[:, :2], rgb)            # FPV frames first, untouched
+    assert torch.equal(s1.depths[:, :2], s1.depths[:, 2:])  # BEV frames reuse FPV depth
+    bev_only = BEVImageProvider(make_processor(), s1_mode='bev').get_s1_input(rgb, depth)
+    assert torch.equal(s1.images[:, 2:], bev_only.images)  # tail frames are the BEV stack
+
+
+def test_bev_image_provider_s1_fpv_mode():
+    p = BEVImageProvider(make_processor(), s1_mode='fpv')
+    s1 = p.get_s1_input(torch.rand(1, 2, 16, 16, 3), torch.rand(1, 2, 16, 16, 1))
+    assert s1.images is None and s1.depths is None  # identical to original path
 
 
 def test_bev_image_provider_s1_non_tensor_fallback():
@@ -171,14 +192,17 @@ def test_bev_image_provider_s2_gating():
     assert p.get_s2_extra(rgb, depth, is_lookdown=False) == []
     extra = p.get_s2_extra(rgb, depth, is_lookdown=True)
     assert len(extra) == 1
-    p2 = BEVImageProvider(make_processor(), use_s2=False)
-    assert p2.get_s2_extra(rgb, depth, is_lookdown=True) == []
+    # 'fpv' mode → no extra images; 'bev' mode → BEV returned (replaces FPV at call site)
+    assert BEVImageProvider(make_processor(), s2_mode='fpv').get_s2_extra(rgb, depth, is_lookdown=True) == []
+    p_bev = BEVImageProvider(make_processor(), s2_mode='bev', s2_depth_in_meters=True)
+    assert len(p_bev.get_s2_extra(rgb, depth, is_lookdown=True)) == 1
 
 
-def test_bev_image_provider_s1_disabled():
-    p = BEVImageProvider(make_processor(), use_s1=False)
-    s1 = p.get_s1_input(torch.rand(1, 2, 16, 16, 3), torch.rand(1, 2, 16, 16, 1))
-    assert s1.images is None
+def test_bev_image_provider_rejects_bad_mode():
+    with pytest.raises(ValueError):
+        BEVImageProvider(make_processor(), s1_mode='nope')
+    with pytest.raises(ValueError):
+        BEVImageProvider(make_processor(), s2_mode='bev_only')
 
 
 def test_bev_feature_provider_is_stub():
@@ -201,15 +225,29 @@ def test_factory_bev_image_with_config():
         'bev_ref_width': W, 'bev_ref_height': H,
         'bev_cam_height': 1.25, 'bev_cam_pitch_deg': 30.0,
         'bev_depth_scale': 10.0,
-        'bev_s1': True, 'bev_s2': False,
+        'bev_s1_mode': 'fpv_bev', 'bev_s2_mode': 'fpv',
         'bev_s1_pitch_deg': 60.0,
     }
     p = create_visual_provider(cfg, device='cpu')
     assert isinstance(p, BEVImageProvider)
-    assert p.use_s1 and not p.use_s2
+    assert p.s1_mode == 'fpv_bev' and p.s2_mode == 'fpv'
     assert p.s1_pitch_deg == 60.0
     assert p.processor.cam_pitch_deg == 30.0
     assert p.processor.depth_scale == 10.0
+
+
+def test_factory_mode_defaults_and_legacy_bools():
+    # defaults: s1='bev', s2='fpv_bev'
+    p = create_visual_provider({'visual_provider': 'bev_image'}, device='cpu')
+    assert p.s1_mode == 'bev' and p.s2_mode == 'fpv_bev'
+    # legacy booleans map to default-mode / 'fpv'
+    p = create_visual_provider({'visual_provider': 'bev_image', 'bev_s1': False, 'bev_s2': False}, device='cpu')
+    assert p.s1_mode == 'fpv' and p.s2_mode == 'fpv'
+    # mode keys win over legacy booleans
+    p = create_visual_provider(
+        {'visual_provider': 'bev_image', 'bev_s1': False, 'bev_s1_mode': 'fpv_bev'}, device='cpu'
+    )
+    assert p.s1_mode == 'fpv_bev'
 
 
 def test_factory_accepts_namespace():

@@ -7,10 +7,13 @@ Selected via config ``eval_type='habitat_vln_bev'``; with
 ``_run_eval_dual_system`` is a copy of the parent method with BEV injection
 points marked ``# === BEV ===``:
   - episode start  : provider.reset()
-  - S2 look-down   : provider.get_s2_extra() images appended to the prompt
-                     (one extra <image> token per BEV image)
+  - S2 look-down   : provider.get_s2_extra() BEV image(s) replace
+                     (bev_s2_mode='bev') or follow (bev_s2_mode='fpv_bev') the
+                     look-down FPV frame; <image> tokens stay aligned
   - S1 NavDP       : provider.get_s1_input() may replace images_dp
-                     (depths_dp stays FPV — matches the rgb_gt training mode)
+                     (bev_s1_mode='bev', depths stay FPV — rgb_gt training
+                     convention) or concat BEV along T (bev_s1_mode='fpv_bev',
+                     fpv_concat_gt convention; depths duplicated)
 
 Habitat-specific geometry: the frames S1/S2 consume here are look-down frames
 (2 × LOOKDOWN = 2 × 30° tilt), so the per-system pitch defaults to
@@ -228,19 +231,24 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
 
                 if len(action_seq) == 0 and pixel_goal is None:
                     s2_extra = []  # === BEV ===
+                    s2_mode = getattr(self.provider, 's2_mode', 'fpv_bev')  # === BEV ===
                     if action == action_code.LOOKDOWN:
                         # last action is look down
                         sources = [{"from": "human", "value": ""}, {"from": "gpt", "value": ""}]
-                        input_images += [look_down_image]
-                        # === BEV: append BEV image(s) of the look-down frame ===
+                        # === BEV: BEV image(s) of the look-down frame either
+                        # replace ('bev') or follow ('fpv_bev') the FPV frame ===
                         s2_extra = self.provider.get_s2_extra(
                             look_down_rgb_np, look_down_depth_m, is_lookdown=True
                         )
-                        input_images += s2_extra
+                        if s2_extra and s2_mode == 'bev':
+                            input_images += s2_extra
+                            input_img_id = -len(s2_extra)
+                        else:
+                            input_images += [look_down_image] + s2_extra
+                            input_img_id = -(1 + len(s2_extra))
                         messages.append(
                             {'role': 'assistant', 'content': [{'type': 'text', 'text': llm_outputs}]}  # noqa: F405
                         )
-                        input_img_id = -(1 + len(s2_extra))
                     else:
                         sources = copy.deepcopy(self.conversation)
                         sources[0]["value"] = sources[0]["value"].replace(
@@ -260,11 +268,15 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                         input_images = [rgb_list[i] for i in history_id] + cur_images
                         input_img_id = 0
 
-                    prompt = random.choice(self.conjunctions) + DEFAULT_IMAGE_TOKEN
-                    # === BEV: one extra <image> token per BEV image ===
-                    if s2_extra:
-                        prompt += " This is the bird's-eye view of your surroundings: "
+                    # === BEV: one <image> token per image of this turn ===
+                    if s2_extra and s2_mode == 'bev':
+                        prompt = random.choice(self.conjunctions) + "the bird's-eye view of your surroundings:"
                         prompt += ('\n' + DEFAULT_IMAGE_TOKEN) * len(s2_extra)
+                    else:
+                        prompt = random.choice(self.conjunctions) + DEFAULT_IMAGE_TOKEN
+                        if s2_extra:
+                            prompt += " This is the bird's-eye view of your surroundings: "
+                            prompt += ('\n' + DEFAULT_IMAGE_TOKEN) * len(s2_extra)
                     sources[0]["value"] += f" {prompt}."
                     prompt_instruction = copy.deepcopy(sources[0]["value"])
                     parts = split_and_clean(prompt_instruction)

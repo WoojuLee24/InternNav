@@ -4,12 +4,16 @@ Subclass of ``InternVLAN1Net`` — internvla_n1_policy.py is NOT modified.
 A ``VisualInputProvider`` (created from model_settings) decides what S1/S2 see:
 
   - S1: ``s1_step_latent`` asks the provider for replacement images_dp/depths_dp.
-        With ``visual_provider='bev_image'`` the [goal, current] FPV stack is
-        converted into a [goal_bev, current_bev] stack (depths stay FPV — same
-        convention as the rgb_gt training mode of internvla_n1_bev.py).
-  - S2: on a look-down turn the provider may return extra BEV images; they are
-        appended to the prompt as additional <image> tokens so the image list
-        and the placeholder count stay aligned.
+        bev_s1_mode='fpv'     → original [goal, current] FPV stack (unchanged)
+        bev_s1_mode='bev'     → [goal_bev, current_bev] (depths stay FPV — same
+                                convention as the rgb_gt training mode)
+        bev_s1_mode='fpv_bev' → [goal, current, goal_bev, current_bev] along T
+                                (fpv_concat_gt training convention, T doubles)
+  - S2: on a look-down turn the provider may return BEV images:
+        bev_s2_mode='fpv'     → look-down FPV only (unchanged)
+        bev_s2_mode='bev'     → BEV replaces the look-down FPV frame
+        bev_s2_mode='fpv_bev' → BEV appended after the look-down FPV frame
+        <image> tokens are kept aligned with the image list in every mode.
 
 Selected via config: ``model_name='internvla_n1_bev'`` (see
 ``internnav/agent/internvla_n1_agent_bev.py``). With
@@ -49,13 +53,17 @@ class InternVLAN1NetBEV(InternVLAN1Net):
             return super().s2_step(rgb, depth, pose, instruction, intrinsic, look_down)
 
         # --- look-down turn with BEV injection ----------------------------
-        # Mirrors the look_down branch of InternVLAN1Net.s2_step, plus the BEV
-        # image(s) appended to both the prompt and the image list.
+        # Mirrors the look_down branch of InternVLAN1Net.s2_step, with the BEV
+        # image(s) either appended after ('fpv_bev') or replacing ('bev') the
+        # look-down FPV frame; <image> tokens stay aligned with the image list.
+        s2_mode = getattr(self.provider, 's2_mode', 'fpv_bev')
         image = Image.fromarray(rgb).convert('RGB')
-        self.input_images.append(image)          # look-down frame
-        self.input_images.extend(extra_images)   # BEV frame(s)
-        n_turn_images = 1 + len(extra_images)
-        input_img_id = -n_turn_images            # this turn's images sit at the tail
+        if s2_mode == 'bev':
+            turn_images = list(extra_images)                  # BEV only
+        else:  # 'fpv_bev'
+            turn_images = [image] + list(extra_images)        # look-down FPV + BEV
+        self.input_images.extend(turn_images)
+        input_img_id = -len(turn_images)          # this turn's images sit at the tail
 
         assert self.llm_output != "", "Last llm_output should not be empty when look down"
         sources = [{"from": "human", "value": ""}, {"from": "gpt", "value": ""}]
@@ -63,10 +71,14 @@ class InternVLAN1NetBEV(InternVLAN1Net):
             {'role': 'assistant', 'content': [{'type': 'text', 'text': self.llm_output}]}
         )
 
-        prompt = self.conjunctions[0] + self.DEFAULT_IMAGE_TOKEN
-        # === BEV INJECTION: one extra <image> token per BEV image ===
-        prompt += " This is the bird's-eye view of your surroundings: "
-        prompt += ('\n' + self.DEFAULT_IMAGE_TOKEN) * len(extra_images)
+        # === BEV INJECTION: one <image> token per image of this turn ===
+        if s2_mode == 'bev':
+            prompt = self.conjunctions[0] + "the bird's-eye view of your surroundings:"
+            prompt += ('\n' + self.DEFAULT_IMAGE_TOKEN) * len(extra_images)
+        else:  # 'fpv_bev'
+            prompt = self.conjunctions[0] + self.DEFAULT_IMAGE_TOKEN
+            prompt += " This is the bird's-eye view of your surroundings: "
+            prompt += ('\n' + self.DEFAULT_IMAGE_TOKEN) * len(extra_images)
         sources[0]["value"] += f" {prompt}."
 
         # --- remainder mirrors the parent tail (prompt build → generate) ---
