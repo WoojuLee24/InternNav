@@ -4,6 +4,8 @@ import os
 import sys
 from enum import IntEnum
 
+import debugpy
+
 sys.path.append('./src/diffusion-policy')
 import copy
 import itertools
@@ -46,8 +48,15 @@ from internnav.model.utils.vln_utils import split_and_clean, traj_to_actions
 # Import for Habitat registry side effects — do not remove
 import internnav.habitat_extensions.vln.measures  # noqa: F401 # isort: skip
 
+# Diagnostics are enabled only when HABITAT_DIAG=1 is set
+# (e.g. HABITAT_DIAG=1 python scripts/eval/eval.py --config ...)
+_DIAG_ENABLED = os.environ.get('HABITAT_DIAG', '0') == '1'
+
+
 def _install_step_monitor(env_obj):
     """Monkey-patch env.step to check GL state before/after EVERY call."""
+    if not _DIAG_ENABLED:
+        return
     original_step = env_obj.step
     _call = [0]
 
@@ -94,6 +103,8 @@ def _get_gl_lib():
 
 def _diag_gl_errors(ctx=""):
     """Drain and print all pending GL errors. Returns True if any found."""
+    if not _DIAG_ENABLED:
+        return False
     lib = _get_gl_lib()
     if lib is None:
         return False
@@ -145,6 +156,8 @@ def _get_gl_reset_fn():
 
 def _diag_gl_reset(ctx=""):
     """Check GL context reset status. Returns reset status code (0 = ok)."""
+    if not _DIAG_ENABLED:
+        return 0
     fn = _get_gl_reset_fn()
     if not fn:
         print(f"[DIAG][GL_RESET] {ctx}: glGetGraphicsResetStatus not available", flush=True)
@@ -162,6 +175,8 @@ def _diag_gl_reset(ctx=""):
 
 def _diag_vram(ctx=""):
     """Print PyTorch CUDA memory allocated/reserved."""
+    if not _DIAG_ENABLED:
+        return
     try:
         alloc = torch.cuda.memory_allocated() / 1024**3
         reserved = torch.cuda.memory_reserved() / 1024**3
@@ -172,6 +187,8 @@ def _diag_vram(ctx=""):
 
 def _diag_cam_rotation(sim, step_id):
     """Log sensor rotation quaternion to detect camera drift accumulation."""
+    if not _DIAG_ENABLED:
+        return
     try:
         agent = sim.agents[0]
         for name in ('rgb', 'depth'):
@@ -191,6 +208,8 @@ def _diag_cam_rotation(sim, step_id):
 
 def _diag_total_vram(step_id):
     """Log total GPU VRAM (includes EGL/driver allocations outside PyTorch)."""
+    if not _DIAG_ENABLED:
+        return
     import subprocess
     try:
         result = subprocess.run(
@@ -211,7 +230,7 @@ _diag_env_printed = False
 def _diag_env_once():
     """Print NVIDIA env diagnostics once at eval startup."""
     global _diag_env_printed
-    if _diag_env_printed:
+    if not _DIAG_ENABLED or _diag_env_printed:
         return
     _diag_env_printed = True
     caps = os.environ.get('NVIDIA_DRIVER_CAPABILITIES', 'NOT SET')
@@ -312,6 +331,11 @@ class HabitatVLNEvaluator(DistributedEvaluator):
         else:
             raise ValueError(f"Invalid mode: {self.model_args.mode}")
 
+        import debugpy
+        debugpy.listen(("0.0.0.0", 5679))
+        print("Waiting for debugger attach on port 5679...")            
+        debugpy.wait_for_client()
+        
         model.eval()
         self.device = device
 
@@ -646,7 +670,7 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                         with torch.no_grad():
                             traj_latents = self.model.generate_latents(output_ids, pixel_values, image_grid_thw)
 
-                        # prepocess align with navdp
+                        # prepocess align with navdp # why images_dp and depths_dp have two same frames? 
                         image_dp = torch.tensor(np.array(look_down_image.resize((224, 224)))).to(torch.bfloat16) / 255
                         pix_goal_image = copy.copy(image_dp)
                         images_dp = torch.stack([pix_goal_image, image_dp]).unsqueeze(0).to(self.device)
