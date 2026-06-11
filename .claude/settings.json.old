@@ -1,0 +1,33 @@
+// Old commented-out permissions config, moved out of settings.json on 2026-06-05
+// (it made the JSON invalid). Restore entries into settings.json as needed.
+// {
+//   "permissions": {
+//     "allow": [
+//       "Bash(pytest tests/*)",
+//       "Bash(nvidia-smi)",
+//       "Bash(ros2 topic *)",
+//       "Bash(dpkg -l *)",
+//       "Bash(source /opt/ros/jazzy/setup.bash)",
+//       "Bash(grep *)",
+//       "Bash(find *)",
+//       "Bash(cat *)",
+//       "Bash(head *)",
+//       "Bash(tail *)",
+//       "Bash(ls *)",
+//       "Bash(wc *)",
+//       "Bash(echo *)",
+//       "Bash(which *)",
+//       "Bash(pwd)",
+//       "Bash(git log *)",
+//       "Bash(git diff *)",
+//       "Bash(git status *)"
+//     ],
+//     "deny": [
+//       "Bash(git push --force*)",
+//       "Bash(git reset --hard*)",
+//       "Bash(rm -rf*)",
+//       "Bash(rm:*)",
+//       "Bash(sudo:*)"
+//     ]
+//   }
+// }
