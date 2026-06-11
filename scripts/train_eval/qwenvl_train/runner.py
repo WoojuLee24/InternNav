@@ -52,19 +52,32 @@ from default_config import Params  # noqa: E402
 # --------------------------------------------------------------------------- #
 def _run_and_tee(cmd: List[str], log_path: Optional[str], env=None) -> int:
     """Run cmd, streaming combined stdout+stderr to console and optionally a log file
-    (the Python equivalent of ``... 2>&1 | tee log``)."""
+    (the Python equivalent of ``... 2>&1 | tee log``).
+
+    Bytes are forwarded to the console RAW (no newline translation) so tqdm's ``\\r``
+    progress updates overwrite the same line in place — the bar stays one line instead
+    of one line per step. The log file gets the same stream with ``\\r`` normalized to
+    ``\\n`` so it is greppable / tail-able.
+    """
+    import codecs
+
     print("[run] " + " ".join(cmd), flush=True)
     fp = open(log_path, "w") if log_path else None
     try:
         proc = subprocess.Popen(
             cmd, cwd=REPO_ROOT, env=env, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, text=True, bufsize=1,
+            stderr=subprocess.STDOUT,  # bytes mode (no text=): keep '\r' intact for tqdm
         )
-        for line in proc.stdout:
-            sys.stdout.write(line)
-            sys.stdout.flush()
+        out = sys.stdout.buffer
+        dec = codecs.getincrementaldecoder("utf-8")("replace")  # log only; tolerate split chars
+        while True:
+            chunk = proc.stdout.read(1024)
+            if not chunk:
+                break
+            out.write(chunk)            # raw -> '\r' refreshes the progress bar in place
+            out.flush()
             if fp:
-                fp.write(line)
+                fp.write(dec.decode(chunk).replace("\r\n", "\n").replace("\r", "\n"))
                 fp.flush()
         return proc.wait()
     finally:
