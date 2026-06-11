@@ -4,8 +4,6 @@ import os
 import sys
 from enum import IntEnum
 
-import debugpy
-
 sys.path.append('./src/diffusion-policy')
 import copy
 import itertools
@@ -331,11 +329,15 @@ class HabitatVLNEvaluator(DistributedEvaluator):
         else:
             raise ValueError(f"Invalid mode: {self.model_args.mode}")
 
-        import debugpy
-        debugpy.listen(("0.0.0.0", 5679))
-        print("Waiting for debugger attach on port 5679...")            
-        debugpy.wait_for_client()
-        
+        # Optional post-load debugger attach (after model load to avoid debugger-tracing
+        # OOM during checkpoint loading). Gated so normal/multi-GPU eval never hangs:
+        # only when DEBUGPY_ENABLE=1, and only rank 0 binds the port.
+        if os.environ.get('DEBUGPY_ENABLE') == '1' and int(os.environ.get('RANK', '0')) == 0:
+            import debugpy
+            debugpy.listen(("0.0.0.0", 5679))
+            print("Waiting for debugger attach on port 5679...", flush=True)
+            debugpy.wait_for_client()
+
         model.eval()
         self.device = device
 
@@ -368,6 +370,16 @@ class HabitatVLNEvaluator(DistributedEvaluator):
         )
 
         self.num_history = self.model_args.num_history
+        # S1 trajectory latent length; synced with the training-time predict_step_num
+        # via model_settings. Defaults to 32 so existing configs are unaffected.
+        self.predict_step_num = getattr(self.model_args, 'predict_step_num', 32)
+        # Log the resolved ablation params so each eval run self-documents which
+        # train-time settings actually reached the evaluator (verifies env-var sync).
+        print(
+            f"[ablation] resize={self.model_args.resize_w}x{self.model_args.resize_h} "
+            f"num_history={self.num_history} predict_step_num={self.predict_step_num}",
+            flush=True,
+        )
 
         self._camera_height = self.sim_sensors_config.rgb_sensor.position[1]
         self._min_depth = self.sim_sensors_config.depth_sensor.min_depth
@@ -679,7 +691,9 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                         depths_dp = torch.stack([pix_goal_depth, depth_dp]).unsqueeze(0).to(self.device)
 
                         with torch.no_grad():
-                            dp_actions = self.model.generate_traj(traj_latents, images_dp, depths_dp)
+                            dp_actions = self.model.generate_traj(
+                                traj_latents, images_dp, depths_dp, predict_step_nums=self.predict_step_num
+                            )
 
                         action_list = traj_to_actions(dp_actions)
                         if len(action_list) < MAX_STEPS:
@@ -718,7 +732,9 @@ class HabitatVLNEvaluator(DistributedEvaluator):
 
                         depths_dp = torch.stack([pix_goal_depth, depth_dp]).unsqueeze(0).to(self.device)
                         with torch.no_grad():
-                            dp_actions = self.model.generate_traj(traj_latents, images_dp, depths_dp)
+                            dp_actions = self.model.generate_traj(
+                                traj_latents, images_dp, depths_dp, predict_step_nums=self.predict_step_num
+                            )
 
                         action_list = traj_to_actions(dp_actions)
                         if len(action_list) < MAX_STEPS:

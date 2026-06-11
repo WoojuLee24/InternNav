@@ -4,11 +4,11 @@ import sys
 sys.path.append('.')
 sys.path.append('./third_party/diffusion-policy')
 
-if os.environ.get('DEBUGPY_ENABLE'):
-    import debugpy
-    debugpy.listen(('0.0.0.0', 5679))
-    print('[debugpy] Waiting for debugger on port 5679...')
-    debugpy.wait_for_client()
+# if os.environ.get('DEBUGPY_ENABLE'):
+#     import debugpy
+#     debugpy.listen(('0.0.0.0', 5679))
+#     print('[debugpy] Waiting for debugger on port 5679...')
+#     debugpy.wait_for_client()
 
 import argparse
 import importlib.util
@@ -44,10 +44,24 @@ def parse_args():
         default=None,
         help="override wandb run name in eval_settings",
     )
+    parser.add_argument(
+        "--bev_s1_mode",
+        type=str,
+        default=None,
+        choices=["fpv", "bev", "fpv_bev"],
+        help="override agent.model_settings.bev_s1_mode (BEV config only)",
+    )
+    parser.add_argument(
+        "--bev_s2_mode",
+        type=str,
+        default=None,
+        choices=["fpv", "bev", "fpv_bev"],
+        help="override agent.model_settings.bev_s2_mode (BEV config only)",
+    )
     return parser.parse_args()
 
 
-def apply_quiet_mode():
+def apply_quiet_mode(log_dir=None):
     import os
     from datetime import datetime
 
@@ -58,7 +72,10 @@ def apply_quiet_mode():
     if not hasattr(apply_quiet_mode, '_file_handler'):
         import builtins
 
-        log_dir = os.path.join(PROJECT_ROOT_PATH, 'logs', 'eval')
+        # When a checkpoint folder is given (eval of a training run), save the
+        # detailed quiet log there too; otherwise fall back to logs/eval.
+        if log_dir is None:
+            log_dir = os.path.join(PROJECT_ROOT_PATH, 'logs', 'eval')
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f"eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
         log_fp = open(log_file, 'a')  # noqa: WPS515
@@ -122,7 +139,7 @@ def load_eval_cfg(config_path, attr_name='eval_cfg'):
 def main():
     args = parse_args()
     if args.quiet:
-        apply_quiet_mode()
+        apply_quiet_mode(args.model_path)
     evaluator_cfg = load_eval_cfg(args.config, attr_name='eval_cfg')
 
     if args.model_path is not None:
@@ -132,6 +149,11 @@ def main():
         evaluator_cfg.eval_settings.setdefault('wandb_run_name', ckpt_name)
         evaluator_cfg.eval_settings.setdefault('output_path', f"./logs/eval/{ckpt_name}")
         evaluator_cfg.eval_settings['best_checkpoint'] = ckpt_name
+
+    if args.bev_s1_mode is not None:
+        evaluator_cfg.agent.model_settings['bev_s1_mode'] = args.bev_s1_mode
+    if args.bev_s2_mode is not None:
+        evaluator_cfg.agent.model_settings['bev_s2_mode'] = args.bev_s2_mode
 
     if args.wandb_run_name is not None:
         evaluator_cfg.eval_settings['wandb_run_name'] = args.wandb_run_name
@@ -145,7 +167,7 @@ def main():
     # create evaluator based on sim backend and run eval
     evaluator = Evaluator.init(evaluator_cfg)
     if args.quiet:
-        apply_quiet_mode()  # re-apply after Isaac Sim init (it adds new console handlers)
+        apply_quiet_mode(args.model_path)  # re-apply after Isaac Sim init (it adds new console handlers)
     evaluator.eval()
 
 
