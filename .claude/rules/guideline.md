@@ -18,6 +18,11 @@
 ## 명령어 출력 규칙
 - 멀티라인 `\` 이음 명령어는 copy-paste 시 `\` 뒤 공백으로 실패하므로 **항상 한 줄**로 제공
 
+## md 파일 작성/업데이트 위치
+- memory·계획·정리 등 md 파일을 작성하거나 update할 때는 **`InternNav/.claude/` 하위에 작성** (repo에 체크인되도록)
+  - 예: memory → `.claude/memory/`, 태스크 → `.claude/tasks/`, 이해 문서 → `.claude/understanding/`
+- auto-memory(`/root/.claude/projects/...`)에만 쓰지 말고 항상 repo `.claude/` 쪽도 동기화
+
 ## r2r_h1_replay 데이터 수집 (eval_r2r_h1_replay.py)
 ```bash
 /workspace/isaaclab/_isaac_sim/python.sh scripts/eval/eval_r2r_h1_replay.py --config scripts/eval/configs/h1_internvla_n1_async_cfg_orig.py --r2r_dir data/InternData-N1-v0.5-mini/vln_pe/traj_data/r2r --save_dir data/InternData-N1-v0.5-mini/vln_pe/traj_data/r2r_h1_replay --scenes <SCENE> --max_eps <N>

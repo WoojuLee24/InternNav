@@ -1,31 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pytest tests/*)",
-      "Bash(nvidia-smi)",
-      "Bash(ros2 topic *)",
-      "Bash(dpkg -l *)",
-      "Bash(source /opt/ros/jazzy/setup.bash)",
-      "Bash(grep *)",
-      "Bash(find *)",
-      "Bash(cat *)",
-      "Bash(head *)",
-      "Bash(tail *)",
-      "Bash(ls *)",
-      "Bash(wc *)",
-      "Bash(echo *)",
-      "Bash(which *)",
-      "Bash(pwd)",
-      "Bash(git log *)",
-      "Bash(git diff *)",
-      "Bash(git status *)"
+      "Bash(*)",
+      "Write(*)",
+      "Read(*)"
     ],
     "deny": [
       "Bash(git push --force*)",
       "Bash(git reset --hard*)",
       "Bash(rm -rf*)",
-      "Bash(rm:*)",
-      "Bash(sudo:*)"
+      "Bash(sudo *)"
     ]
   }
 }
