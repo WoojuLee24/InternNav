@@ -1,0 +1,4 @@
+#!/bin/bash
+
+docker run --rm --gpus all -p 8888:8888 dnwn24/internnav:test-h200sim
+
