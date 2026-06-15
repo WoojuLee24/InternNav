@@ -1,0 +1,144 @@
+# 1. Base Image (Isaac Lab + ROS2)
+FROM dnwn24/isaac-lab-ros2:latest
+USER root
+
+# Isaac Sim Python/pip 경로 변수
+ENV ISAAC_PYTHON=/workspace/isaaclab/_isaac_sim/python.sh \
+    ISAAC_PIP="/workspace/isaaclab/_isaac_sim/python.sh -m pip"
+ENV ACCEPT_EULA=Y
+ENV PRIVACY_CONSENT=Y
+ENV OMNI_KIT_ACCEPT_EULA=YES
+RUN echo 'export ACCEPT_EULA=Y' >> /root/.bashrc
+RUN echo 'export PRIVACY_CONSENT=Y' >> /root/.bashrc
+RUN echo 'export OMNI_KIT_ACCEPT_EULA=YES' >> /root/.bashrc
+RUN echo 'source /etc/bash_completion' >> /root/.bashrc
+
+# 2. 시스템 패키지 설치
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    vim git build-essential sudo \
+    python3-dev \
+    curl \
+    bash-completion \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 3. GPU 및 빌드 환경 설정 (H200 = sm_90)
+ENV TRITON_OVERRIDE_ARCH="sm100" \
+    TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas \
+    MAX_JOBS=8
+
+# 3-1. CUDA 12.8 Toolkit 설치
+RUN wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends cuda-toolkit-12-8 && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    rm cuda-keyring_1.1-1_all.deb
+ENV PATH=/usr/local/cuda-12.8/bin:$PATH \
+    LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH
+
+# 4. Constraints 파일 및 패키지 설치
+COPY constraints-isaac-sim5.txt /tmp/constraints.txt
+# packaging==23.0 고정: pip이 core_archive/pip_prebundle/packaging/을 삭제하지 않도록
+RUN echo "packaging==23.0" >> /tmp/constraints.txt
+RUN $ISAAC_PIP install --no-cache-dir --ignore-installed blinker pyzmq
+
+RUN $ISAAC_PIP install --no-cache-dir -c /tmp/constraints.txt \
+    "transformers==4.51.0" \
+    "huggingface-hub>=0.34.0" \
+    "huggingface_hub[cli]<1.0" \
+    "diffusers>=0.34.0" \
+    "accelerate>=1.11.0" \
+    setuptools_scm opencv-python "imageio[ffmpeg]" \
+    fastapi gym uvicorn ftfy "simpy>1.13.3" debugpy \
+    wandb \
+    decord \
+    torchcodec \
+    open3d-cpu \
+    lmdb \
+    jsonlines typro msgpack-numpy
+
+# 6. Flash Attention (CUDA 12.8, python 3.11 prebuilt) - pip 깨지기 전에 먼저 설치
+RUN $ISAAC_PIP install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.8.3+cu128torch2.7-cp311-cp311-linux_x86_64.whl --break-system-packages
+
+RUN $ISAAC_PIP install -c /tmp/constraints.txt flask casadi deepspeed jupyterlab jupyterlab-server tornado
+
+# pip vendor 디렉토리 손상 복구: pip 완전 제거 후 재설치
+RUN find /workspace/isaaclab/_isaac_sim/kit/python/lib/python3.11/site-packages/ -maxdepth 1 -name "pip*" -exec rm -rf {} + && curl -sS https://bootstrap.pypa.io/get-pip.py | $ISAAC_PYTHON
+# get-pip.py가 packaging 26.2를 설치하며 core_archive/packaging 23.0을 삭제 → 복원
+RUN $ISAAC_PIP install packaging==23.0 --target /workspace/isaaclab/_isaac_sim/exts/omni.isaac.core_archive/pip_prebundle --no-deps
+
+# numpy-quaternion (internnav dependency, not in setup files)
+RUN $ISAAC_PIP install numpy-quaternion
+
+# 7. InternUtopia packages
+RUN $ISAAC_PIP install \
+    addict==2.4.0 \
+    aiohttp_cors==0.7.0 \
+    httpcore==1.0.8 \
+    httpx==0.25.2 \
+    inputs==0.5 \
+    ipython==8.20.0 \
+    lcm==1.5.0 \
+    onnxruntime==1.19.2 \
+    "openai==1.29.0" \
+    pyyaml==6.0.1 \
+    rsl-rl-lib==2.2.1 \
+    "vuer==0.0.32rc7"
+
+# 8. InternNav 클론 및 설치
+RUN mkdir -p /root/git && \
+    git clone https://github.com/WoojuLee24/InternNav.git --recursive /root/git/InternNav && \
+    cd /root/git/InternNav && \
+    git checkout -t origin/dev && \
+    $ISAAC_PIP install -e ".[model]" --no-build-isolation
+
+# InternUtopia 클론 및 설치
+RUN git clone https://github.com/WoojuLee24/InternUtopia.git /root/git/InternUtopia && \
+    $ISAAC_PIP install -e /root/git/InternUtopia --no-deps
+
+# ============================================================
+# 9. K8s(NKS) headless 환경 대응: 캐시 경로를 $HOME 하위로 리다이렉트
+#    -> manifest의 emptyDir 마운트 경로(/home/irteam/.cache, /home/irteam/.nvidia-omniverse)와 일치시킴
+# ============================================================
+ENV NB_USER=$NB_USER \
+    HOME=/home/$NB_USER \
+    NB_PREFIX=/
+
+# Isaac Sim / Omniverse 가 참조하는 캐시 경로를 모두 $HOME 아래로 강제
+ENV OV_CACHE=$HOME/.cache/ov \
+    KIT_CACHE=$HOME/isaac-sim/kit/cache \
+    PIP_CACHE_DIR=$HOME/.cache/pip \
+    __GL_SHADER_DISK_CACHE_PATH=$HOME/.cache/nvidia/GLCache \
+    COMPUTE_CACHE_PATH=$HOME/.nv/ComputeCache \
+    XDG_CACHE_HOME=$HOME/.cache \
+    XDG_DATA_HOME=$HOME/.local/share
+
+# 빌드 시점에 필요한 디렉토리를 모두 미리 생성 + 권한 개방 (defense-in-depth)
+RUN mkdir -p \
+      $HOME/.cache/ov \
+      $HOME/.cache/pip \
+      $HOME/.cache/nvidia/GLCache \
+      $HOME/.nv/ComputeCache \
+      $HOME/isaac-sim/kit/cache \
+      $HOME/.nvidia-omniverse/logs \
+      $HOME/.local/share/ov/data \
+    && chmod -R 1777 \
+      $HOME/.cache \
+      $HOME/.nv \
+      $HOME/isaac-sim \
+      $HOME/.nvidia-omniverse \
+      $HOME/.local
+
+WORKDIR /root
+
+# Isaac Sim Python wrapper: Jupyter terminal에서 python.sh 직접 호출 시 LD_LIBRARY_PATH 중복 → segfault 방지
+# Jupyter terminal에서 eval 실행 시 python.sh 대신 이 wrapper 사용
+RUN printf '#!/bin/bash\nexec env -i HOME=/root USER=root PATH=/usr/local/cuda-12.8/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64 ACCEPT_EULA=Y PRIVACY_CONSENT=Y OMNI_KIT_ACCEPT_EULA=YES TRITON_OVERRIDE_ARCH=sm100 /workspace/isaaclab/_isaac_sim/python.sh "$@"\n' > /isaac_python_clean.sh && chmod +x /isaac_python_clean.sh
+
+# Jupyter 시작 스크립트: PYTHONPATH만 설정하고 LD_PRELOAD(libcarb.so) 없이 Python 직접 호출
+# python.sh 경유 시 Kit 프레임워크가 Isaac Sim 앱으로 초기화되므로 우회
+RUN printf '#!/bin/bash\nsource /workspace/isaaclab/_isaac_sim/setup_python_env.sh\nunset ISAACSIM_ROOT_PATH CARB_APP_PATH ISAAC_PATH EXP_PATH\nexec /workspace/isaaclab/_isaac_sim/kit/python/bin/python3 -m jupyterlab --notebook-dir=/root --ip=0.0.0.0 --no-browser --allow-root --port=8888 --LabApp.token="" --LabApp.password="" --LabApp.allow_origin="*"\n' > /start_jupyter.sh && chmod +x /start_jupyter.sh
+
+EXPOSE 8888
+ENTRYPOINT []
+CMD ["/start_jupyter.sh"]
