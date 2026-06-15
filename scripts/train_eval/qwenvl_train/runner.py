@@ -85,9 +85,40 @@ def _run_and_tee(cmd: List[str], log_path: Optional[str], env=None) -> int:
             fp.close()
 
 
-def run_train(p: Params, output_dir: str, run_name: str) -> int:
+def _run_in_process(script: str, argv: List[str], env_extra: Optional[dict] = None) -> int:
+    """Run ``script`` (a ``__main__`` entry script) inside THIS Python process — no
+    torchrun subprocess — so a VSCode debugger attached to runner.py hits breakpoints
+    in the trainer / eval / model / dataset code directly. Single process only.
+    """
+    import runpy
+
+    if env_extra:
+        os.environ.update(env_extra)
+    abs_script = os.path.join(REPO_ROOT, script)
+    old_argv = sys.argv
+    sys.argv = [abs_script] + argv
+    print(f"[run:in-process] {script} " + " ".join(argv), flush=True)
+    try:
+        runpy.run_path(abs_script, run_name="__main__")
+        return 0
+    except SystemExit as e:  # scripts may call sys.exit(0) on success
+        return int(e.code) if isinstance(e.code, int) else (0 if not e.code else 1)
+    finally:
+        sys.argv = old_argv
+
+
+def run_train(p: Params, output_dir: str, run_name: str, in_process: bool = False, debugpy: str = None) -> int:
     os.makedirs(output_dir, exist_ok=True)
     master_port = p.master_port or _pick_port()
+    argv = p.train_argv(output_dir, run_name)
+    if debugpy:
+        argv = ["--debugpy", debugpy] + argv
+    if in_process:
+        # single-process distributed env (mirrors torchrun --nproc_per_node=1 so
+        # DeepSpeed / HF Trainer initialize the process group correctly)
+        env = {"RANK": "0", "WORLD_SIZE": "1", "LOCAL_RANK": "0",
+               "MASTER_ADDR": p.master_addr, "MASTER_PORT": str(master_port)}
+        return _run_in_process(p.trainer, argv, env_extra=env)
     launcher = [
         "torchrun",
         f"--nnodes={p.nnodes}",
@@ -95,9 +126,9 @@ def run_train(p: Params, output_dir: str, run_name: str) -> int:
         f"--node_rank={p.node_rank}",
         f"--master_addr={p.master_addr}",
         f"--master_port={master_port}",
-        "internnav/trainer/internvla_n1_trainer.py",
+        p.trainer,  # base trainer, or the BEV provider trainer when p.bev
     ]
-    cmd = launcher + p.train_argv(output_dir, run_name)
+    cmd = launcher + argv
     return _run_and_tee(cmd, os.path.join(output_dir, "train.log"))
 
 
@@ -145,27 +176,46 @@ def _wandb_resume_env(base_env=None) -> dict:
 
 
 def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
-             eval_target: str = "habitat", nproc: int = 8, master_port: int = 2333) -> int:
+             machine: str = "h200", nproc: int = 8, master_port: int = 2333,
+             in_process: bool = False, debugpy: str = None,
+             debug_dir: Optional[str] = None) -> int:
     env = _wandb_resume_env()
-    env["TRAIN_EVAL_TARGET"] = eval_target  # read by the experiment config.py
-    cmd = [
-        "torchrun", f"--nproc_per_node={nproc}", f"--master_port={master_port}",
-        "scripts/eval/eval.py", "--config", config_path, "--quiet",
+    env["TRAIN_EVAL_TARGET"] = machine  # read by the experiment config.py
+    if debugpy:
+        env["DEBUGPY"] = debugpy  # habitat_vln_evaluator.py checks DEBUGPY=='eval' after model load
+    if debug_dir:
+        env["BEV_DEBUG_DIR"] = debug_dir  # read by default_config.make_eval_cfg at import time
+    eval_argv = [
+        "--config", config_path, "--quiet",
         "--model_path", model_path, "--wandb_run_name", run_name,
     ]
+    if in_process:
+        # eval.py runs fine as a single process on one GPU (no torchrun); --quiet
+        # dropped so console logs are visible while stepping in the debugger.
+        argv = [a for a in eval_argv if a != "--quiet"]
+        return _run_in_process("scripts/eval/eval.py", argv, env_extra=env)
+    cmd = ["torchrun", f"--nproc_per_node={nproc}", f"--master_port={master_port}",
+           "scripts/eval/eval.py"] + eval_argv
     return _run_and_tee(cmd, os.path.join(output_dir, "test.log"), env=env)
 
 
 def train_and_eval(p: Params, exp_name: str, config_path: str, *,
-                   eval_target: str = "habitat", do_train: bool = True, do_eval: bool = True,
+                   machine: str = "h200", do_train: bool = True, do_eval: bool = True,
                    checkpoints_root: str = "/home/irteam/data-vol2/checkpoints",
-                   model_path: Optional[str] = None) -> None:
-    """End-to-end driver. ``exp_name`` e.g. 'batch_size/b4_eff128_base'."""
+                   model_path: Optional[str] = None, in_process: bool = False,
+                   debugpy: str = None) -> None:
+    """End-to-end driver. ``exp_name`` e.g. 'batch_size/b4_eff128_base'.
+
+    ``in_process=True`` runs train/eval in THIS process (no torchrun) for VSCode
+    attach debugging; debug one phase at a time (--no-eval / --no-train), since
+    running both in one process re-uses an already-initialized dist/CUDA state.
+    """
     run_name = f"{exp_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     output_dir = os.path.join(checkpoints_root, run_name)
 
     if do_train:
-        rc = run_train(p, output_dir, run_name)
+        rc = run_train(p, output_dir, run_name, in_process=in_process,
+                       debugpy=debugpy if debugpy == "trainer" else None)
         if rc != 0:
             print(f"[train] FAILED (exit {rc}); skipping eval.", file=sys.stderr)
             return
@@ -177,15 +227,19 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
     if p.node_rank != 0:
         return
 
-    best = model_path or find_best_checkpoint(output_dir)
+    habitat_machine = getattr(sys.modules.get("default_config"), "HABITAT_MACHINE", {})
+    default_model_path = habitat_machine.get(machine, {}).get("model_path")
+    best = model_path or find_best_checkpoint(output_dir) or default_model_path
     if not best:
         print("[eval] No best checkpoint found, skipping eval.")
         return
-    print(f"[eval] target={eval_target}  checkpoint={best}")
+    print(f"[eval] machine={machine}  checkpoint={best}")
     if do_train:
         _prep_ckpt_aux_files(output_dir, best, p.system2_ckpt)
     os.makedirs(output_dir, exist_ok=True)
-    run_eval(config_path, best, run_name, output_dir, eval_target=eval_target, nproc=p.nproc_per_node)
+    run_eval(config_path, best, run_name, output_dir, machine=machine,
+             nproc=p.nproc_per_node, in_process=in_process, debugpy=debugpy,
+             debug_dir=p.debug_dir)
 
 
 # --------------------------------------------------------------------------- #
@@ -225,22 +279,69 @@ def main_cli() -> None:
     ap.add_argument("--config", default=DEFAULT_CONFIG,
                     help="experiment config .py exposing PARAMS (+ optional EXP_NAME). "
                          "Defaults to batch_size/default_config.py (the b4 baseline).")
-    ap.add_argument("--eval-target", choices=["h200", "5090", "h1"], default="h200",
-                    help="h200/5090 = Habitat machine config; h1 = Isaac Sim (manual)")
+    ap.add_argument("--machine", choices=["h200", "5090", "h1"], default="h200",
+                    help="target machine: h200/5090 selects train+eval infra presets; h1 = Isaac Sim (eval manual)")
     ap.add_argument("--no-train", action="store_true", help="skip training (eval an existing ckpt)")
     ap.add_argument("--no-eval", action="store_true", help="train only")
     ap.add_argument("--model-path", default=None, help="ckpt to eval when --no-train")
     ap.add_argument("--data-root", default=None, help="override dataset root")
+    ap.add_argument("--nproc", type=int, default=None,
+                    help="GPUs per node for train+eval torchrun (e.g. 1 for a single 5090)")
     ap.add_argument("--checkpoints-root", default="/home/irteam/data-vol2/checkpoints")
     ap.add_argument("--print-train-argv", action="store_true", help="print resolved train flags and exit")
+    # --- VSCode debugging ---
+    ap.add_argument("--in-process", action="store_true",
+                    help="run train/eval in THIS process (no torchrun); forces nproc=1.")
+    ap.add_argument("--debugpy", type=str, default=None, choices=["runner", "trainer", "eval"],
+                    help="debugpy attach target — fixed ports: runner=5680, trainer=5681, eval=5679. "
+                         "runner: pauses at start; trainer/eval: pauses after model load.")
+    ap.add_argument("--debug-dir", default=None,
+                    help="BEV debug image output dir (auto-set to output/bev_debug when --debugpy is given)")
     args = ap.parse_args()
+
+    in_process = args.in_process
+    if args.debugpy == "runner":
+        import debugpy
+        debugpy.listen(("0.0.0.0", 5680))
+        print("[debug] Waiting for VSCode attach on port 5680 ...", flush=True)
+        debugpy.wait_for_client()
 
     mod, config_path = _load_config(args.config)
     params: Params = mod.PARAMS
     exp_name = getattr(mod, "EXP_NAME", None) or _derive_exp_name(config_path)
 
+    # Apply machine-specific train defaults from TRAIN_MACHINE (if defined in config module).
+    # CLI overrides (--data-root, --nproc, --checkpoints-root) take precedence.
+    checkpoints_root = args.checkpoints_root
+    train_machine = getattr(mod, "TRAIN_MACHINE", None) or getattr(
+        sys.modules.get("default_config"), "TRAIN_MACHINE", None
+    )
+    if train_machine and args.machine in train_machine:
+        m = train_machine[args.machine]
+        overrides = dict(data_root=m["data_root"], system2_ckpt=m["system2_ckpt"],
+                         nproc_per_node=m["nproc_per_node"])
+        for key in ("batch_size", "grad_accum_steps", "max_pixels"):
+            if key in m:
+                overrides[key] = m[key]
+        params = replace(params, **overrides)
+        if args.checkpoints_root == "/home/irteam/data-vol2/checkpoints":  # still at default
+            checkpoints_root = m["checkpoints_root"]
+
     if args.data_root:
         params = replace(params, data_root=args.data_root)
+    if args.nproc:
+        params = replace(params, nproc_per_node=args.nproc)
+    if in_process:
+        params = replace(params, nproc_per_node=1)  # single process
+    if args.debugpy:
+        base_dir = args.debug_dir or 'output/bev_debug'
+        if args.debugpy == 'trainer':
+            debug_dir = os.path.join(base_dir, 'train')
+        elif args.debugpy == 'eval':
+            debug_dir = os.path.join(base_dir, 'eval')
+        else:
+            debug_dir = base_dir
+        params = replace(params, debug_dir=debug_dir)
 
     if args.print_train_argv:
         print(" ".join(params.train_argv("<output_dir>", exp_name)))
@@ -248,11 +349,13 @@ def main_cli() -> None:
 
     train_and_eval(
         params, exp_name, config_path,
-        eval_target=args.eval_target,
+        machine=args.machine,
         do_train=not args.no_train,
         do_eval=not args.no_eval,
-        checkpoints_root=args.checkpoints_root,
+        checkpoints_root=checkpoints_root,
         model_path=args.model_path,
+        in_process=in_process,
+        debugpy=args.debugpy,
     )
 
 

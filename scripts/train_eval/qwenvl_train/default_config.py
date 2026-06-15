@@ -17,7 +17,7 @@ Eval target selection (matches the existing reference configs):
     TRAIN_EVAL_TARGET=5090   #          == habitat_dual_system_mini_5090_cfg.py
     TRAIN_EVAL_TARGET=h1     # Isaac Sim / VLN-PE (run manually)
 
-``runner.train_and_eval`` sets this automatically from ``--eval-target``.
+``runner.train_and_eval`` sets this automatically from ``--machine``.
 Baseline values mirror scripts/train/qwenvl_train/batch_size/b4_eff128_base.sh.
 """
 
@@ -73,6 +73,20 @@ class Params:
     gradient_checkpointing: bool = True
     system1: str = "nextdit_async"
 
+    # ---- BEV visual input (bev=False => plain trainer + fpv eval, unchanged) ----
+    bev: bool = False              # master toggle for the BEV pipeline (train + eval)
+    # -- train + eval (S1 mode is train-synced) --
+    bev_s1_mode: str = "bev"       # 'fpv' | 'bev' | 'fpv_bev'   (S1 train mode, used when bev=True)
+    bev_image_type: str = "rgb"    # 'rgb' | 'occ'              (train)
+    bev_depth_source: str = "gt"   # 'gt' | 'dav2'   (train + eval)
+    bev_dav2_max_depth: float = 10.0               # dav2 metric depth cap (metres)
+    # -- eval only --
+    bev_s2_mode_eval: str = "fpv"     # eval-time S2 mode (S2 BEV is not trained; train always fpv)
+    bev_visual_provider: str = "bev_image"  # 'fpv' | 'bev_image' | 'bev_feature'
+    bev_cam_pitch_deg: float = 0.0          # Habitat base camera is horizontal
+    bev_depth_scale: float = 1.0            # evaluator hands metric depth to the provider
+    debug_dir: str = None                   # BEV debug image output dir (None = disabled)
+
     # ---- data / model paths ----
     vln_datasets: str = "r2r_125cm_0_30%30,r2r_60cm_15_15%30"
     data_root: str = "/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce"
@@ -88,6 +102,13 @@ class Params:
 
     # ---- derived ----
     @property
+    def trainer(self) -> str:
+        """Trainer entry script. BEV swaps in the provider trainer (base file untouched)."""
+        if self.bev:
+            return "internnav/trainer/internvla_n1_bev_provider_trainer.py"
+        return "internnav/trainer/internvla_n1_trainer.py"
+
+    @property
     def per_device_eval_batch_size(self) -> int:
         return self.batch_size * 2
 
@@ -102,7 +123,18 @@ class Params:
         Order/values mirror the batch_size/*.sh scripts so the runs are identical.
         """
         b = lambda x: "True" if x else "False"  # noqa: E731  (shell passed True/False strings)
-        argv = [
+        # BEV flags are peeled off by internvla_n1_bev_provider_trainer.py before the
+        # base HfArgumentParser sees them; placed first, mirroring the bev/*.sh scripts.
+        bev_argv = []
+        if self.bev:
+            bev_argv = [
+                "--bev_s1_mode", self.bev_s1_mode,
+                "--bev_image_type", self.bev_image_type,
+                "--bev_depth_source", self.bev_depth_source,
+            ]
+            if self.debug_dir:
+                bev_argv += ["--debug_dir", self.debug_dir]
+        argv = bev_argv + [
             "--deepspeed", self.deepspeed,
             "--model_name_or_path", self.system2_ckpt,
             "--vln_dataset_use", self.vln_datasets,
@@ -166,6 +198,28 @@ def _fmt_num(x: float) -> str:
 # --------------------------------------------------------------------------- #
 # Eval config builders (consumed by scripts/eval/eval.py via --config)
 # --------------------------------------------------------------------------- #
+# Machine-specific train infra. Applied by runner.py from --machine.
+# Only paths / launcher knobs differ; all model hyperparams stay in Params.
+TRAIN_MACHINE = {
+    "h200": {
+        "data_root": "/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce",
+        "system2_ckpt": "/home/irteam/data-vol2/checkpoints/InternVLA-N1-System2",
+        "nproc_per_node": 8,
+        "checkpoints_root": "/home/irteam/data-vol2/checkpoints",
+    },
+    "5090": {
+        "data_root": "/ws/src/InternNav/data/InternData-N1-v0.5-mini/vln_ce",
+        "system2_ckpt": "/ws/src/InternNav/checkpoints/InternVLA-N1-System2",
+        "nproc_per_node": 1,
+        "checkpoints_root": "/ws/src/InternNav/checkpoints",
+        "batch_size": 2,
+        "grad_accum_steps": 4,
+        "max_pixels": 150528,  # 336*336*4/3 — fits 24 GB VRAM
+        "debug_dir": "./logs/5090_debug",  # visualization output dir for the BEV evaluator (also used by the BEV trainer when bev=True)
+    },
+}
+
+# --------------------------------------------------------------------------- #
 # Machine-specific Habitat infra (mirrors the two existing reference configs).
 # num_history / resize_* / predict_step_num are NOT here — they come from the
 # training Params so train and eval stay in lockstep. Only the host/runtime
@@ -190,6 +244,7 @@ HABITAT_MACHINE = {
         "use_wandb": False,
         "wandb_project": "internnav",
         "extra_eval": {"wandb_run_name": "habitat_dual_system_mini_single"},
+        "debug_dir": "./logs/5090_debug",  # visualization output dir for the BEV evaluator (also used by the BEV trainer when bev=True)
     },
 }
 
@@ -212,28 +267,50 @@ def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
     from internnav.configs.agent import AgentCfg
     from internnav.configs.evaluator import EnvCfg, EvalCfg
 
+    model_settings = {
+        "mode": "dual_system",
+        "model_path": m["model_path"],  # overridden by eval.py --model_path
+        "num_history": p.num_history,
+        "resize_w": p.resize_w,
+        "resize_h": p.resize_h,
+        "predict_step_num": p.predict_step_num,
+        "max_new_tokens": m["max_new_tokens"],
+        "vis_debug": False,
+        "vis_debug_path": "./logs/habitat/vis_debug",
+    }
+    eval_type = "habitat_vln"
+    output_path = m["output_path"]
+
+    if p.bev:
+        # Mirrors habitat_dual_system_mini_{machine}_bev_cfg.py. Importing the BEV
+        # evaluator module registers Evaluator 'habitat_vln_bev' (import side effect).
+        import internnav.habitat_extensions.vln.habitat_vln_evaluator_bev  # noqa: F401
+        eval_type = "habitat_vln_bev"
+        output_path = output_path + "_bev"
+        model_settings.update({
+            "visual_provider": p.bev_visual_provider,  # 'fpv' | 'bev_image' | 'bev_feature'
+            "bev_s1_mode": p.bev_s1_mode,        # train-synced
+            "bev_s2_mode": p.bev_s2_mode_eval,   # S2 BEV not trained -> fpv by default
+            "bev_cam_pitch_deg": p.bev_cam_pitch_deg,  # Habitat base camera is horizontal
+            "bev_depth_scale": p.bev_depth_scale,      # evaluator hands metric depth to the provider
+            "bev_image_type": p.bev_image_type,        # 'rgb' | 'occ' — train-synced
+            "bev_depth_source": p.bev_depth_source,    # 'gt' | 'dav2' — train-synced
+            "bev_dav2_max_depth": p.bev_dav2_max_depth,
+            "debug_dir": p.debug_dir or os.environ.get("BEV_DEBUG_DIR"),
+        })
+
     return EvalCfg(
         agent=AgentCfg(
             model_name="internvla_n1",
-            model_settings={
-                "mode": "dual_system",
-                "model_path": m["model_path"],  # overridden by eval.py --model_path
-                "num_history": p.num_history,
-                "resize_w": p.resize_w,
-                "resize_h": p.resize_h,
-                "predict_step_num": p.predict_step_num,
-                "max_new_tokens": m["max_new_tokens"],
-                "vis_debug": False,
-                "vis_debug_path": "./logs/habitat/vis_debug",
-            },
+            model_settings=model_settings,
         ),
         env=EnvCfg(
             env_type="habitat",
             env_settings={"config_path": m["config_path"]},
         ),
-        eval_type="habitat_vln",
+        eval_type=eval_type,
         eval_settings={
-            "output_path": m["output_path"],
+            "output_path": output_path,
             "save_video": False,
             "epoch": 0,
             "max_steps_per_episode": 500,

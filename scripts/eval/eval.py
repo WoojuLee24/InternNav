@@ -4,12 +4,6 @@ import sys
 sys.path.append('.')
 sys.path.append('./third_party/diffusion-policy')
 
-# if os.environ.get('DEBUGPY_ENABLE'):
-#     import debugpy
-#     debugpy.listen(('0.0.0.0', 5679))
-#     print('[debugpy] Waiting for debugger on port 5679...')
-#     debugpy.wait_for_client()
-
 import argparse
 import importlib.util
 import logging
@@ -57,6 +51,12 @@ def parse_args():
         default=None,
         choices=["fpv", "bev", "fpv_bev"],
         help="override agent.model_settings.bev_s2_mode (BEV config only)",
+    )
+    parser.add_argument(
+        "--debugpy-port",
+        type=int,
+        default=None,
+        help="attach debugpy on this port AFTER model load (so OOM-safe); e.g. 5679",
     )
     return parser.parse_args()
 
