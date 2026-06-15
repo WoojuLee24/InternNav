@@ -11,7 +11,7 @@ modified. This file gives training the inference-side abstraction:
         'fpv'     → no change (baseline training)
         'bev'     → BEV replaces traj_images   (≡ legacy rgb_gt / occ_gt)
         'fpv_bev' → FPV ++ BEV along T          (≡ legacy fpv_concat_gt)
-    ``bev_image_type`` ∈ {rgb, occ} and ``bev_depth_source`` ∈ {gt, depthanythingv2}
+    ``bev_image_type`` ∈ {rgb, occ} and ``bev_depth_source`` ∈ {gt, dav2}
     together cover all five legacy ``bev_mode`` values.
 
 Only the training path (``labels is not None``) substitutes; inference passes
@@ -25,11 +25,10 @@ import argparse
 from typing import List, Optional, Tuple, Union
 
 import torch
-import torch.nn.functional as F
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from internnav.model.basemodel.internvla_n1.internvla_n1 import InternVLAN1ForCausalLM
-from internnav.model.utils.visual_input_provider import BEVProcessor
+from internnav.model.utils.visual_input_provider import BEVImageProvider, BEVProcessor
 
 # Habitat base camera intrinsics at 640×480, hfov≈79° — identical to the
 # constants baked into internvla_n1_bev.py so parity holds.
@@ -52,18 +51,19 @@ _MODE_EQUIV = {
     ('bev', 'rgb', 'gt'): 'rgb_gt',
     ('bev', 'occ', 'gt'): 'occ_gt',
     ('fpv_bev', 'rgb', 'gt'): 'fpv_concat_gt',
-    ('bev', 'rgb', 'depthanythingv2'): 'rgb_depthanythingv2',
-    ('bev', 'occ', 'depthanythingv2'): 'occ_depthanythingv2',
+    ('bev', 'rgb', 'dav2'): 'rgb_depthanythingv2',
+    ('bev', 'occ', 'dav2'): 'occ_depthanythingv2',
 }
 
 
-def _cam_scalar(tensor: Optional[torch.Tensor], default: float) -> float:
-    if tensor is None:
-        return default
-    return float(tensor.float().mean().item())
 
-
-def make_train_bev_processor(cam_height: float, device, depth_scale: float = 1.0) -> BEVProcessor:
+def make_train_bev_processor(
+    cam_height: float,
+    device,
+    depth_scale: float = 1.0,
+    depth_source: str = 'gt',
+    dav2_max_depth: float = 10.0,
+) -> BEVProcessor:
     """BEVProcessor configured to match internvla_n1_bev.py exactly.
 
     Intrinsics are given at the 640×480 reference and auto-rescaled to the
@@ -76,45 +76,38 @@ def make_train_bev_processor(cam_height: float, device, depth_scale: float = 1.0
         bev_size=_BEV_SIZE, bev_range=_BEV_RANGE,
         depth_scale=depth_scale, z_min=_Z_MIN, z_max=_Z_MAX,
         device=device,
+        depth_source=depth_source,
+        dav2_max_depth=dav2_max_depth,
     )
 
 
-def _resize_to_hw3(bev_chw: torch.Tensor, H: int, W: int) -> torch.Tensor:
-    """[N, 3, bev, bev] → [N, H, W, 3] (bilinear, matching legacy helper)."""
-    if bev_chw.shape[-2:] != (H, W):
-        bev_chw = F.interpolate(bev_chw, size=(H, W), mode='bilinear', align_corners=False)
-    return bev_chw.permute(0, 2, 3, 1).contiguous()
-
 
 def apply_bev_to_traj(
-    traj_images: torch.Tensor,        # [B, T, H, W, 3] float [0, 1] HWC
-    traj_depths: torch.Tensor,        # [B, T, H, W] metric metres
+    traj_images: torch.Tensor,                   # [B, T, H, W, 3] float [0, 1] HWC
+    traj_depths: Optional[torch.Tensor],          # [B, T, H, W] metric metres, or None for dav2
     processor: BEVProcessor,
     s1_mode: str = 'bev',
     image_type: str = 'rgb',
     cam_pitch_deg: Optional[float] = None,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
     """Pure, test-friendly core of the BEV substitution.
 
+    Uses the same ``processor.for_s1()`` path as eval (BEVImageProvider.get_s1_input),
+    so train and eval BEV generation are identical.
+
     Returns (new_traj_images, new_traj_depths). For 'fpv_bev' the BEV frames are
-    concatenated AFTER the FPV frames along T (T → 2T, matching the legacy
-    fpv_concat_gt mode); traj_depths is left unchanged so the base model keeps
-    its original [B, T, H, W] depth tensor (legacy training semantics).
+    concatenated AFTER the FPV frames along T (T → 2T); traj_depths is left
+    unchanged (legacy training semantics: [B, T, H, W], not doubled).
+
+    traj_depths may be None when processor.depth_source=='dav2'.
     """
     if s1_mode == 'fpv':
         return traj_images, traj_depths
 
-    B, T, H, W = traj_images.shape[:4]
-    fpv_flat = traj_images.flatten(0, 1)        # [B*T, H, W, 3]
-    depth_flat = traj_depths.flatten(0, 1)      # [B*T, H, W]
-
-    if image_type == 'occ':
-        bev_hw = processor.occupancy(depth_flat, depth_in_meters=True, cam_pitch_deg=cam_pitch_deg)
-        bev_chw = bev_hw.unsqueeze(1).expand(-1, 3, -1, -1).contiguous()
-    else:  # 'rgb'
-        bev_chw = processor.bev_chw(fpv_flat, depth_flat, depth_in_meters=True, cam_pitch_deg=cam_pitch_deg)
-
-    bev_hw3 = _resize_to_hw3(bev_chw, H, W).reshape(B, T, H, W, 3).to(traj_images)
+    bev_hw3 = processor.for_s1(
+        traj_images, traj_depths,
+        cam_pitch_deg=cam_pitch_deg, image_type=image_type,
+    )  # [B, T, H, W, 3]
 
     if s1_mode == 'bev':
         return bev_hw3, traj_depths
@@ -132,8 +125,12 @@ def parse_bev_cli_args(argv: List[str]) -> Tuple[dict, List[str]]:
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument('--bev_s1_mode', choices=['fpv', 'bev', 'fpv_bev'], default='bev')
     p.add_argument('--bev_image_type', choices=['rgb', 'occ'], default='rgb')
-    p.add_argument('--bev_depth_source', choices=['gt', 'depthanythingv2'], default='gt')
+    p.add_argument('--bev_depth_source', choices=['gt', 'dav2'], default='gt')
     p.add_argument('--bev_dav2_max_depth', type=float, default=10.0)
+    # --debug_dir is NOT parsed here: it belongs to ModelArguments in the base
+    # trainer (internvla_n1_argument.py). Peeling it here would leave
+    # model_args.debug_dir==None, causing trainer.py line 165 to overwrite
+    # config.debug_dir with None after __init__ sets it via _PENDING_BEV_SETTINGS.
     known, remaining = p.parse_known_args(argv)
     return vars(known), remaining
 
@@ -158,26 +155,37 @@ class InternVLAN1BEVProviderForCausalLM(InternVLAN1ForCausalLM):
         for key, value in _PENDING_BEV_SETTINGS.items():
             if not hasattr(config, key) or getattr(config, key) is None:
                 setattr(config, key, value)
-        self._bev_processor = None
-        self._dav2_model = None
+        self._bev_provider = None
 
     # --------------------------------------------------------------- helpers
 
-    def _get_processor(self, cam_height: float, device) -> BEVProcessor:
-        if self._bev_processor is None or self._bev_processor.cam_height != cam_height:
-            self._bev_processor = make_train_bev_processor(cam_height, device)
-        return self._bev_processor
+    def _get_provider(self, device) -> BEVImageProvider:
+        """Lazy-build BEVImageProvider from config — same class as eval path.
 
-    def _estimate_depth(self, fpv_flat: torch.Tensor) -> torch.Tensor:
-        """Lazy DepthAnythingV2 path — reuses internvla_n1_bev.py helpers if present."""
-        from internnav.model.basemodel.internvla_n1.internvla_n1_bev import (
-            _estimate_depth_dav2_batch,
-            _load_dav2_full,
-        )
-        if self._dav2_model is None:
-            max_depth = getattr(self.config, 'bev_dav2_max_depth', 10.0)
-            self._dav2_model = _load_dav2_full(max_depth=max_depth).to(fpv_flat.device)
-        return _estimate_depth_dav2_batch(fpv_flat, self._dav2_model)
+        cam_height is NOT a cache key: it is passed per-call via get_s1_input()
+        so each sample in the batch uses its own camera height.
+        """
+        depth_source = getattr(self.config, 'bev_depth_source', 'gt')
+        dav2_max_depth = getattr(self.config, 'bev_dav2_max_depth', 10.0)
+        s1_mode = getattr(self.config, 'bev_s1_mode', 'bev')
+        image_type = getattr(self.config, 'bev_image_type', 'rgb')
+        debug_dir = getattr(self.config, 'debug_dir', None)
+        p = self._bev_provider
+        if (p is None
+                or p.processor.depth_source != depth_source
+                or p.s1_mode != s1_mode
+                or p.image_type != image_type):
+            processor = make_train_bev_processor(
+                _DEFAULT_CAM_HEIGHT, device,
+                depth_source=depth_source, dav2_max_depth=dav2_max_depth,
+            )
+            self._bev_provider = BEVImageProvider(
+                processor, s1_mode=s1_mode, image_type=image_type,
+                debug_dir=debug_dir,
+            )
+        else:
+            p.debug_dir = debug_dir  # sync in case config was updated after first build
+        return self._bev_provider
 
     # --------------------------------------------------------------- forward
 
@@ -209,29 +217,32 @@ class InternVLAN1BEVProviderForCausalLM(InternVLAN1ForCausalLM):
         video_frame_num: Optional[torch.Tensor] = None,
         traj_poses: Optional[torch.Tensor] = None,
         traj_tdmaps: Optional[torch.Tensor] = None,
+        traj_world_headings: Optional[torch.Tensor] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
 
         s1_mode = getattr(self.config, 'bev_s1_mode', 'fpv')
-        image_type = getattr(self.config, 'bev_image_type', 'rgb')
         depth_source = getattr(self.config, 'bev_depth_source', 'gt')
-        is_dav2 = depth_source == 'depthanythingv2'
 
-        if labels is not None and s1_mode != 'fpv' and (is_dav2 or traj_depths is not None):
-            cam_height = _cam_scalar(traj_cam_heights, _DEFAULT_CAM_HEIGHT)
-            cam_pitch = _cam_scalar(traj_cam_pitch_2, _DEFAULT_CAM_PITCH)
-            processor = self._get_processor(cam_height, traj_images.device)
-
-            if is_dav2:
-                B, T, H, W = traj_images.shape[:4]
-                depth_est = self._estimate_depth(traj_images.flatten(0, 1)).reshape(B, T, H, W)
-                traj_depths_used = depth_est
-            else:
-                traj_depths_used = traj_depths
-
-            traj_images, traj_depths = apply_bev_to_traj(
-                traj_images, traj_depths_used, processor,
-                s1_mode=s1_mode, image_type=image_type, cam_pitch_deg=cam_pitch,
-            )
+        # Same BEVImageProvider.get_s1_input() path as eval.
+        # depth shape: train [B,T,H,W] ↔ provider [B,T,H,W,1] — adapt around the call.
+        if labels is not None and s1_mode != 'fpv' and (depth_source == 'dav2' or traj_depths is not None):
+            # pass [B] tensors so each sample uses its own pitch and cam_height
+            # .float(): HF Trainer casts batch to bfloat16; bfloat16(0.6)=0.6016 (7-bit mantissa loss)
+            cam_pitch  = traj_cam_pitch_2.float()  if traj_cam_pitch_2  is not None else _DEFAULT_CAM_PITCH
+            cam_height = traj_cam_heights.float()  if traj_cam_heights  is not None else _DEFAULT_CAM_HEIGHT
+            provider = self._get_provider(traj_images.device)
+            depths_5d = traj_depths.unsqueeze(-1) if traj_depths is not None else None
+            s1v = provider.get_s1_input(traj_images, depths_5d,
+                                        cam_pitch_deg=cam_pitch, cam_height=cam_height)
+            traj_images = s1v.images if s1v.images is not None else traj_images
+            # depths_5d may be doubled for fpv_bev; squeeze last dim back to [B,T,H,W]
+            traj_depths = s1v.depths[..., 0] if s1v.depths is not None else traj_depths
+            # training tdmap + world-aligned BEV debug (mirrors _save_eval_tdmap_debug)
+            if traj_tdmaps is not None and provider.debug_dir:
+                B_td = traj_tdmaps.shape[0]
+                for b in range(B_td):
+                    wh_b = float(traj_world_headings[b, 0]) if traj_world_headings is not None else None
+                    provider.save_train_tdmap_debug(traj_tdmaps[b, 0], wh_b, batch_idx=b)
 
         return super().forward(
             input_ids=input_ids,

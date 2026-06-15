@@ -25,6 +25,7 @@ config files do this with ``import internnav.habitat_extensions.vln.habitat_vln_
 
 import copy
 import json
+import math
 import os
 import random
 import re
@@ -35,6 +36,7 @@ import numpy as np
 import torch
 import tqdm
 from depth_camera_filtering import filter_depth
+from habitat.utils.visualizations.maps import calculate_meters_per_pixel, colorize_topdown_map
 from habitat.utils.visualizations.utils import images_to_video, observations_to_image
 from PIL import Image
 
@@ -71,7 +73,42 @@ _LOOKDOWN_PITCH_OFFSET_DEG = 60.0
 
 class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
     def __init__(self, cfg: EvalCfg):
-        super().__init__(cfg)
+        # Inject a downward-looking topdown camera into the Habitat config BEFORE
+        # the parent creates the env, so obs['topdown_rgb'] is available for debug.
+        debug_dir = (cfg.agent.model_settings or {}).get('debug_dir')
+        bev_range  = (cfg.agent.model_settings or {}).get('bev_range', 5.0)
+        self._has_topdown_cam = False
+        if debug_dir:
+            import internnav.habitat_extensions.vln.habitat_vln_evaluator as _hve_mod
+            import habitat as _habitat
+            from habitat.config.default_structured_configs import HabitatSimRGBSensorConfig
+            from omegaconf import OmegaConf
+            _orig_get_cfg = _hve_mod.get_habitat_config
+            bev_cam_h   = bev_range * 2.0
+            bev_hfov    = math.degrees(2.0 * math.atan(bev_range / bev_cam_h))
+            def _patched(path):
+                config = _orig_get_cfg(path)
+                with _habitat.config.read_write(config):
+                    cam_cfg = HabitatSimRGBSensorConfig(
+                        height=500, width=500, hfov=int(round(bev_hfov)),
+                        position=[0.0, bev_cam_h, 0.0],
+                        orientation=[-math.pi / 2, 0.0, 0.0],
+                    )
+                    config.habitat.simulator.agents.main_agent.sim_sensors.update(
+                        {'topdown_rgb': cam_cfg}
+                    )
+                    node = config.habitat.simulator.agents.main_agent.sim_sensors.topdown_rgb
+                    OmegaConf.set_struct(node, False)
+                    node.uuid = 'topdown_rgb'
+                return config
+            _hve_mod.get_habitat_config = _patched
+            try:
+                super().__init__(cfg)
+            finally:
+                _hve_mod.get_habitat_config = _orig_get_cfg
+            self._has_topdown_cam = True
+        else:
+            super().__init__(cfg)
 
         # --- build provider; auto-fill intrinsics from the habitat sensor ---
         settings = dict(cfg.agent.model_settings)
@@ -90,6 +127,14 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
         if isinstance(self.provider, BEVImageProvider):
             # this evaluator always hands metric depth to get_s2_extra
             self.provider.s2_depth_in_meters = True
+            # debug_dir is already passed via create_visual_provider() from settings
+        self._tdm_mpp = None  # cached on first successful metrics call
+        # Log resolved BEV modes (parent __init__ already logged resize/num_history).
+        print(
+            f"[ablation][bev] bev_s1_mode={settings.get('bev_s1_mode', 'fpv')} "
+            f"bev_s2_mode={settings.get('bev_s2_mode', 'fpv')}",
+            flush=True,
+        )
 
     # ------------------------------------------------------------------ S1
 
@@ -98,7 +143,107 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
         s1v = self.provider.get_s1_input(images_dp, depths_dp)
         images_dp = s1v.images if s1v.images is not None else images_dp
         depths_dp = s1v.depths if s1v.depths is not None else depths_dp
+        if isinstance(self.provider, BEVImageProvider) and self.provider.debug_dir:
+            self._save_eval_tdmap_debug()
         return images_dp, depths_dp
+
+    def _save_eval_tdmap_debug(self):
+        """Save Habitat topdown camera GT image at the last provider debug step.
+
+        Saved as step_XXXXXX_6_gt_cam.jpg. The topdown RGB sensor was injected
+        into the Habitat sim at init (only when debug_dir is set).
+        Falls back to TopDownMap crop if the camera sensor is not available.
+        """
+        try:
+            from habitat.tasks.nav.nav import TopDownMap as _TopDownMap
+
+            s         = self.provider._debug_step - 1  # get_s1_input already incremented
+            debug_dir = self.provider.debug_dir
+            os.makedirs(debug_dir, exist_ok=True)
+
+            agent_angle = float(
+                _TopDownMap.get_polar_angle(self.env._env.sim.get_agent_state())
+            )
+            S         = self.provider.processor.bev_size
+            bev_range = self.provider.processor.bev_range
+            c_px      = S // 2
+            px_m      = S / (2.0 * bev_range)
+            fa        = int(2.5 * px_m)
+            rot_deg   = math.degrees(math.pi + agent_angle)
+
+            if self._has_topdown_cam:
+                # Render current state from the downward-looking camera
+                sim_obs = self.env._env.sim.get_sensor_observations()
+                cam_rgb = sim_obs.get('topdown_rgb')  # (500, 500, 3) uint8
+                if cam_rgb is None:
+                    return
+                img_bgr = cv2.cvtColor(
+                    cv2.resize(cam_rgb, (S, S), interpolation=cv2.INTER_LINEAR),
+                    cv2.COLOR_RGB2BGR,
+                )
+            else:
+                # Fallback: TopDownMap crop
+                info = self.env.get_metrics()
+                if info is None:
+                    return
+                tdm = info.get('top_down_map')
+                if tdm is None or tdm.get('map') is None:
+                    return
+                raw_map  = tdm['map']
+                fog_mask = tdm.get('fog_of_war_mask')
+                tdm_rgb  = colorize_topdown_map(raw_map, fog_mask)
+                if self._tdm_mpp is None:
+                    try:
+                        self._tdm_mpp = calculate_meters_per_pixel(
+                            1024, pathfinder=self.env._env.sim.pathfinder
+                        )
+                    except Exception:
+                        self._tdm_mpp = 1.0
+                coord = tdm['agent_map_coord']
+                agent_row, agent_col = coord[0]
+                half_px = int(math.ceil(bev_range / self._tdm_mpp))
+                H_map, W_map = raw_map.shape[:2]
+                r0, r1 = agent_row - half_px, agent_row + half_px
+                c0, c1 = agent_col - half_px, agent_col + half_px
+                pad_t = max(0, -r0);  pad_b = max(0, r1 - H_map)
+                pad_l = max(0, -c0);  pad_r = max(0, c1 - W_map)
+                crop_src = tdm_rgb[max(0, r0):min(H_map, r1), max(0, c0):min(W_map, c1)]
+                crop = cv2.copyMakeBorder(crop_src, pad_t, pad_b, pad_l, pad_r,
+                                          cv2.BORDER_CONSTANT, value=(30, 30, 30))
+                img_bgr = cv2.cvtColor(
+                    cv2.resize(crop, (S, S), interpolation=cv2.INTER_LINEAR),
+                    cv2.COLOR_RGB2BGR,
+                )
+
+            # Rotate gt_cam to world frame and draw FWD arrow
+            def _rotate_world(im):
+                if abs(rot_deg % 360) > 0.5:
+                    M = cv2.getRotationMatrix2D((im.shape[1] / 2, im.shape[0] / 2), rot_deg, 1.0)
+                    im = cv2.warpAffine(im, M, (im.shape[1], im.shape[0]))
+                return im
+
+            def _draw_agent(im):
+                h, w = im.shape[:2]
+                cx, cy_px = w // 2, h // 2
+                fa_l = int(2.5 * (w / (2.0 * bev_range)))
+                ac = int(cx + fa_l * math.sin(agent_angle))
+                ar = int(cy_px + fa_l * math.cos(agent_angle))
+                cv2.arrowedLine(im, (cx, cy_px), (ac, ar), (0, 220, 0), 3, tipLength=0.25, line_type=cv2.LINE_AA)
+                cv2.circle(im, (cx, cy_px), 8, (0, 0, 255), -1, cv2.LINE_AA)
+                cv2.circle(im, (cx, cy_px), 8, (255, 255, 255), 1, cv2.LINE_AA)
+                return im
+
+            img_bgr = _draw_agent(_rotate_world(img_bgr))
+            cv2.imwrite(f"{debug_dir}/step_{s:06d}_5_gt_cam.jpg", img_bgr)
+
+            # Save world-aligned copies of _3_bev and _4_gt_bev (originals kept as robot frame)
+            for src_suffix, dst_suffix in [('_3_bev.jpg', '_3w_bev_world.jpg'),
+                                           ('_4_gt_bev.jpg', '_4w_gt_bev_world.jpg')]:
+                bev_img = cv2.imread(f"{debug_dir}/step_{s:06d}{src_suffix}")
+                if bev_img is not None:
+                    cv2.imwrite(f"{debug_dir}/step_{s:06d}{dst_suffix}", _rotate_world(bev_img))
+        except Exception:
+            import traceback; traceback.print_exc()
 
     # ------------------------------------------------------------------ loop
 
@@ -295,6 +440,8 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
 
                     inputs = self.processor(text=[text], images=input_images, return_tensors="pt").to(self.model.device)
 
+                    # FPV image [384, 384], depth [384, 384]; BEV ??
+                    # look_down_images [640, 480], look_down_depths_m [640, 480]
                     with torch.no_grad():
                         output_ids = self.model.generate(
                             **inputs,
@@ -332,7 +479,7 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                         with torch.no_grad():
                             traj_latents = self.model.generate_latents(output_ids, pixel_values, image_grid_thw)
 
-                        # === BEV: goal-frame snapshot hook (no-op for stateless provider) ===
+                        # === FPV: images_dp: [B=1, T=2, H=224, W=224, 3], depths_dp: [B=1, T=2, H=224, W=224]
                         self.provider.set_goal(look_down_rgb_np, look_down_depth_m)
 
                         image_dp = torch.tensor(np.array(look_down_image.resize((224, 224)))).to(torch.bfloat16) / 255
@@ -343,6 +490,7 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                         depths_dp = torch.stack([pix_goal_depth, depth_dp]).unsqueeze(0).to(self.device)
 
                         # === BEV: provider may replace the NavDP visual input ===
+                        # images_dp: [B=1, T=2, H=224, W=224, 3], depths_dp: [B=1, T=2, H=224, W=224]
                         images_dp, depths_dp = self._apply_s1_provider(images_dp, depths_dp)
 
                         with torch.no_grad():

@@ -1,6 +1,6 @@
 ---
 name: project_train_eval_qwenvl_python
-description: scripts/train_eval/qwenvl_train — shell 대신 Python으로 train+eval을 한 프로세스로 구동하는 신규 구조(batch_size 구현 완료)
+description: scripts/train_eval/qwenvl_train — shell 대신 Python으로 train+eval을 한 프로세스로 구동하는 신규 구조(batch_size2+bev 구현 완료)
 metadata:
   type: project
 ---
@@ -16,7 +16,7 @@ eval은 사실상 깨져 있었음). 이를 Python으로 대체한 신규 구조
 config(=Params 정의+기본값+eval 빌더)는 **별도 파일 `default_config.py`로 분리**. config 파일은 순수 선언적(PARAMS+eval_cfg).
 같은 config 파일을 runner(train)와 eval.py(eval)가 둘 다 `--config`로 읽음.
 
-**파일 구조 (batch_size 기준)**:
+**파일 구조 (batch_size2 기준)**:
 - `runner.py` — **순수 엔진/실행 진입점**(config 정의 안 들어있음). `run_train`/`run_eval`/`find_best_checkpoint`/
   `train_and_eval`/`main_cli`(`--config` 기반)+`__main__`. `default_config`에서 `Params`만 import(타입힌트용).
   `_load_config(path)`로 config 파일 import해 `PARAMS`/`EXP_NAME` 읽음(EXP_NAME 없으면 `parent/stem`으로 유추).
@@ -30,10 +30,10 @@ config(=Params 정의+기본값+eval 빌더)는 **별도 파일 `default_config.
     `HABITAT_MACHINE`에 머신별 infra(yaml/wandb/max_new_tokens/output_path/model_path) 정의,
     num_history/resize/predict_step_num은 학습 Params에서 주입. **h200=batch_size 학습값(8/384)과 일치**,
     5090은 다른 모델(4/256)이라 infra만 동일하고 모델 파라미터는 학습값이 들어감(의도된 동작).
-- `batch_size/b4_eff128_base.py`·`b2_eff128.py`·`b8_eff128.py` — **선언적 변형 config**(A 방식, shim 아님).
+- `batch_size2/b4_eff128_base.py`·`b2_eff128.py`·`b8_eff128.py` — **선언적 변형 config**(A 방식, shim 아님).
   부모 dir(qwenvl_train) sys.path 추가 후 `import default_config as base`, `PARAMS = replace(base.PARAMS, batch_size=, grad_accum_steps=)`(b4는 override 없음)
-  + `eval_cfg = base.make_eval_cfg(PARAMS)` + `EXP_NAME`. (구 `batch_size/config.py`·`batch_size/default_config.py` wrapper는 삭제.)
-- `batch_size/verify_params.py` — 4단계 검증, 전부 `ALL PARAMETERS MATCH ✅`:
+  + `eval_cfg = base.make_eval_cfg(PARAMS)` + `EXP_NAME`. (구 `batch_size2/config.py`·`batch_size2/default_config.py` wrapper는 삭제.)
+- `batch_size2/verify_params.py` — 4단계 검증, 전부 `ALL PARAMETERS MATCH ✅`:
   (1) `.sh` torchrun 인자 ↔ 신규 train_argv(b2/b4/b8, 숫자는 float 비교),
   (2) eval-infra: 생성 eval_cfg infra ↔ 실제 h200/5090 파일,
   (3) eval-full: 생성 h200 eval_cfg == h200 파일 전 키(model_path/output_path는 런타임 override라 제외,
@@ -45,11 +45,30 @@ config(=Params 정의+기본값+eval 빌더)는 **별도 파일 `default_config.
 num_history/resize_w/resize_h/predict_step_num/num_future_steps가 train==eval로 자동 일치.
 (기존 ABLATE_* env var 간접 전달 방식 대체. [[project_qwenvl_ablation_train_eval_sync]])
 
+**BEV 지원 (train+eval, bev/*.sh의 Python 대체)** — [[project_bev_injection]]:
+- `Params`에 BEV 노브 추가: `bev`(토글, 기본 False), `bev_s1_mode`('bev'|'fpv'|'fpv_bev'), `bev_s2_mode_eval`(기본 'fpv', S2 BEV 미학습),
+  `bev_image_type`('rgb'), `bev_depth_source`('gt'). `bev=False`면 기존 동작 그대로(train_argv·eval_cfg 불변 → batch_size2 verify 무영향).
+- `Params.trainer` 프로퍼티: `bev`면 `internvla_n1_bev_provider_trainer.py`, 아니면 base trainer. runner.run_train이 `p.trainer` 사용.
+- train_argv: `bev`면 맨 앞에 `--bev_s1_mode/--bev_image_type/--bev_depth_source` 추가(provider trainer가 떼어내 base parser에 안 넘김).
+- eval: `build_habitat_eval_cfg`가 `bev`면 `habitat_vln_bev` evaluator import(등록 side-effect) + eval_type='habitat_vln_bev' + model_settings에
+  `visual_provider='bev_image'`/`bev_s1_mode`(train-synced)/`bev_s2_mode`(=bev_s2_mode_eval)/`bev_cam_pitch_deg=0`/`bev_depth_scale=1` 추가, output_path+'_bev'.
+- 신규 config: `bev/bev_s1_bev.py`(s1=bev), `bev/bev_s1_fpv_base.py`(s1=fpv no-op baseline), `bev/verify_params.py`(bev_s1_bev.sh/bev_s1_fpv_base.sh와 train_argv+eval-sync 일치 검증, `ALL PARAMETERS MATCH ✅`).
+- BEV eval 파라미터도 Params에서 조정: `bev_visual_provider`('bev_image'), `bev_cam_pitch_deg`(0.0), `bev_depth_scale`(1.0) — builder가 하드코딩 안 하고 `p.*` 사용.
+- runner `--nproc N`: train+eval torchrun GPU 수 override(5090 1GPU용).
+  `python .../runner.py --config .../bev/bev_s1_bev.py --eval-target 5090 --nproc 1` (eval만: `--no-train --model-path <ckpt>`, train만: `--no-eval`).
+
+**VSCode attach 디버깅 (runner 하나로 train/eval/모델 breakpoint)**:
+- runner는 평소 `torchrun` **서브프로세스**로 train/eval을 띄움 → runner PID에 attach해도 워커(trainer/eval.py/모델)엔 breakpoint 안 걸림(nproc=1이어도 동일).
+- `--in-process`: torchrun 없이 **현재 프로세스**에서 직접 실행(`runpy.run_path(..., run_name="__main__")`), nproc=1 강제 → 같은 프로세스라 breakpoint 적중. train은 단일프로세스 dist env(RANK/WORLD_SIZE/LOCAL_RANK/MASTER_*) 세팅. eval은 `--quiet` 빼고 eval.py 직접 실행(5090 단일GPU는 torchrun 불필요).
+- `--debugpy`(+`--debugpy-port`, 기본 5678): `debugpy.listen`+`wait_for_client`로 attach 대기(자동 `--in-process`). VSCode "attach to port 5678"로 붙음.
+- **train/eval은 한 번에 하나씩** 디버그(`--no-eval`/`--no-train`) — in-process로 둘 다 돌리면 dist/CUDA 이미 init된 상태 재사용 문제.
+- 실행 예: `python .../runner.py --config .../bev/bev_s1_bev.py --eval-target 5090 --debugpy --no-eval`(train 디버그) / `... --debugpy --no-train --model-path <ckpt>`(eval 디버그).
+
 **실행**:
 - `python scripts/train_eval/qwenvl_train/runner.py` (기본=b4 baseline, train→habitat eval 자동)
-- `python scripts/train_eval/qwenvl_train/runner.py --config scripts/train_eval/qwenvl_train/batch_size/b2_eff128.py`
+- `python scripts/train_eval/qwenvl_train/runner.py --config scripts/train_eval/qwenvl_train/batch_size2/b2_eff128.py`
 - 플래그: `--eval-target h1` / `--no-train --model-path <ckpt>`(eval만) / `--print-train-argv` / `--data-root` / `--checkpoints-root`
-- 검증: `python scripts/train_eval/qwenvl_train/batch_size/verify_params.py`
+- 검증: `python scripts/train_eval/qwenvl_train/batch_size2/verify_params.py`
 
 **핵심 사실/함정**:
 - 분산학습은 torchrun 런처 필요 → Python 오케스트레이터도 내부에서 `torchrun` subprocess 호출(셸 1겹뿐).

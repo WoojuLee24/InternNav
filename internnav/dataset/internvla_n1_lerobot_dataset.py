@@ -1183,18 +1183,34 @@ class NavPixelGoalDataset(Dataset):
             data_dict["traj_cam_pitch_1"] = torch.tensor(float(pitch_1))   # degrees
             data_dict["traj_cam_pitch_2"] = torch.tensor(float(pitch_2))   # degrees (used for S1 BEV)
 
-            debug_modes = getattr(self.data_args, 'debug_modes', '')
-            if 'bev' in debug_modes:
+            if getattr(self.data_args, 'debug_dir', None):
                 sampled_ids = [start_frame_id + i for i in range(0, goal_len, interval)]
                 tdmaps = []
-                for fid in sampled_ids:
-                    td_path = os.path.join(video, 'observation.images.rgb.topdown', f'episode_{ep_id:06d}_{fid}.jpg')
+                world_headings = []
+                _T_cam2robot = np.array([[0,-1,0,0],[0,0,-1,0],[1,0,0,0],[0,0,0,1]], dtype=np.float32)
+                _td_dir = os.path.join(video, 'observation.images.rgb.topdown')
+                if not os.path.isdir(_td_dir):
+                    print(f'[dataset] topdown dir missing: {_td_dir} — '
+                          f'run scripts/eval/save_topdown_images.py first', flush=True)
+                for idx, fid in enumerate(sampled_ids):
+                    td_path = os.path.join(_td_dir, f'episode_{ep_id:06d}_{fid}.jpg')
                     if os.path.exists(td_path):
                         td_arr = np.asarray(Image.open(td_path).convert('RGB').resize((224, 224)))
                     else:
                         td_arr = np.zeros((224, 224, 3), dtype=np.uint8)
                     tdmaps.append(td_arr)
+                    # world heading from T_world2camera @ T_camera2robot → T_world2robot
+                    cid = list(frame_ids)[idx]
+                    if pose is not None:
+                        P = np.array(pose[cid], dtype=np.float32).reshape(4, 4)
+                        T_ref = P @ _T_cam2robot          # T_world2robot
+                        T_ref_inv = np.linalg.inv(T_ref)  # T_robot2world
+                        fwd = T_ref_inv[:3, 0]             # robot +X (forward) in world
+                        world_headings.append(float(np.arctan2(fwd[0], fwd[2])))
+                    else:
+                        world_headings.append(0.0)
                 data_dict["traj_tdmaps"] = torch.from_numpy(np.stack(tdmaps).astype(np.float32) / 255.0)
+                data_dict["traj_world_headings"] = torch.tensor(world_headings, dtype=torch.float32)
         return data_dict
 
 
@@ -1358,6 +1374,11 @@ class DataCollatorForSupervisedDataset(object):
                         t = torch.cat([t, pad], dim=0)
                     padded.append(t)
                 batch['traj_tdmaps'] = torch.stack(padded)
+            if "traj_world_headings" in instances[0]:
+                wh_list = [inst["traj_world_headings"] for inst in instances]
+                max_t = max(w.shape[0] for w in wh_list)
+                padded_wh = [torch.cat([w, w[-1:].expand(max_t - w.shape[0])]) if w.shape[0] < max_t else w for w in wh_list]
+                batch['traj_world_headings'] = torch.stack(padded_wh)
 
         return batch
 

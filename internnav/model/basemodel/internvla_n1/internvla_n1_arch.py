@@ -15,12 +15,54 @@ def build_navdp(navdp_cfg, memory_size):
     return navdp
 
 
+def _detect_traj_dit_ffn_dim(model_path):
+    """Return the traj_dit FeedForward inner dim stored in a checkpoint, or None.
+
+    Lets us support both the original DualVLN checkpoints (1024-wide FFN, trained
+    with an older diffusers whose LuminaFeedForward applied a 2/3 SwiGLU reduction)
+    and self-trained ones (1536-wide, current diffusers) without a manual flag.
+    Reads only safetensors metadata, so it never loads tensor data.
+    """
+    import glob
+    import os
+
+    if not model_path or not os.path.isdir(model_path):
+        return None
+    try:
+        from safetensors import safe_open
+    except Exception:
+        return None
+    for shard in sorted(glob.glob(os.path.join(model_path, "*.safetensors"))):
+        try:
+            with safe_open(shard, framework="pt") as f:
+                for key in f.keys():
+                    if key.endswith("traj_dit.model.layers.0.feed_forward.linear_1.weight"):
+                        return f.get_slice(key).get_shape()[0]
+        except Exception:
+            continue
+    return None
+
+
 def build_traj_dit(config):
     from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
 
     from .nextdit_crossattn_traj import NextDiTCrossAttn, NextDiTCrossAttnConfig
 
-    dit = NextDiTCrossAttn(NextDiTCrossAttnConfig(latent_embedding_size=LatentEmbSize))
+    dit_config = NextDiTCrossAttnConfig(latent_embedding_size=LatentEmbSize)
+    native_ffn_dim = dit_config.multiple_of * (
+        (4 * dit_config.dim + dit_config.multiple_of - 1) // dit_config.multiple_of
+    )
+    ckpt_ffn_dim = _detect_traj_dit_ffn_dim(getattr(config, "_name_or_path", None))
+    if ckpt_ffn_dim is not None and ckpt_ffn_dim != native_ffn_dim:
+        # Older checkpoints (e.g. InternVLA-N1-DualVLN) carry a narrower FFN because the
+        # diffusers version they were trained with reduced inner_dim by 2/3. Recreate that
+        # width so the state_dict loads. (2/3 * 4*384 -> 1024 vs. native 1536)
+        dit_config.ffn_dim_multiplier = 2 / 3
+        print(
+            f"[build_traj_dit] checkpoint traj_dit FFN dim={ckpt_ffn_dim} "
+            f"(native={native_ffn_dim}); applying ffn_dim_multiplier=2/3 for compatibility"
+        )
+    dit = NextDiTCrossAttn(dit_config)
     noise_scheduler = FlowMatchEulerDiscreteScheduler()
     return dit, noise_scheduler
 

@@ -59,23 +59,32 @@ def _build_ray_grid(
     return torch.einsum("ij,jhw->ihw", K_inv, uv1)  # [3, H, W]
 
 
-def _build_R_c2w(
-    cam_pitch_deg: float,
-    dtype: torch.dtype,
-    device: torch.device,
-) -> torch.Tensor:
-    """Camera-to-world rotation matrix [3, 3].
+def _build_R_c2w(cam_pitch_deg, dtype, device):
+    """Camera-to-world rotation matrix.
 
-    Camera frame : x=right, y=down, z=forward
-    World frame  : X=forward, Y=left, Z=up
-    Positive pitch = camera tilts downward.
+    Args:
+        cam_pitch_deg: scalar float or [B] tensor (degrees, positive = tilt down).
+    Returns:
+        [3, 3] for scalar input, [B, 3, 3] for batched input.
     """
-    cos_p = math.cos(math.radians(cam_pitch_deg))
-    sin_p = math.sin(math.radians(cam_pitch_deg))
+    if isinstance(cam_pitch_deg, torch.Tensor) and cam_pitch_deg.ndim > 0:
+        rad = cam_pitch_deg.to(device=device, dtype=torch.float64) * (math.pi / 180)
+        cos_p = rad.cos().to(dtype)   # [B]
+        sin_p = rad.sin().to(dtype)   # [B]
+        B = cos_p.shape[0]
+        z = torch.zeros(B, device=device, dtype=dtype)
+        o = torch.ones(B, device=device, dtype=dtype)
+        return torch.stack([
+            torch.stack([ z, -sin_p,  cos_p], dim=1),   # X_w (forward)
+            torch.stack([-o,  z,      z    ], dim=1),   # Y_w (left)
+            torch.stack([ z, -cos_p, -sin_p], dim=1),  # Z_w (up)
+        ], dim=1)  # [B, 3, 3]
+    cos_p = math.cos(math.radians(float(cam_pitch_deg)))
+    sin_p = math.sin(math.radians(float(cam_pitch_deg)))
     return torch.tensor(
-        [[ 0, -sin_p,  cos_p],   # X_w (forward)
-         [-1,  0,      0    ],   # Y_w (left)
-         [ 0, -cos_p, -sin_p]],  # Z_w (up; cam_height added separately)
+        [[ 0, -sin_p,  cos_p],
+         [-1,  0,      0    ],
+         [ 0, -cos_p, -sin_p]],
         dtype=dtype, device=device,
     )  # [3, 3]
 
@@ -118,9 +127,15 @@ def unproject_depth(
     xyz_c = D.unsqueeze(1) * xyz_c_norm.unsqueeze(0)  # [B, 3, H, W]
 
     # Step 3 — rotate to world frame + camera height translation
-    R_c2w = _build_R_c2w(cam_pitch_deg, dtype, device)  # [3, 3]
-    xyz_w = torch.einsum("ij,bjhw->bihw", R_c2w, xyz_c)  # [B, 3, H, W]
-    xyz_w[:, 2] += cam_height + cam_z_offset  # Z_w = torso_height + cam_z_offset above ground
+    R_c2w = _build_R_c2w(cam_pitch_deg, dtype, device)  # [3,3] or [B,3,3]
+    if R_c2w.ndim == 3:
+        xyz_w = torch.einsum("bij,bjhw->bihw", R_c2w, xyz_c)  # [B, 3, H, W]
+    else:
+        xyz_w = torch.einsum("ij,bjhw->bihw",  R_c2w, xyz_c)  # [B, 3, H, W]
+    if isinstance(cam_height, torch.Tensor) and cam_height.ndim > 0:
+        xyz_w[:, 2] += cam_height.to(device=device, dtype=dtype).view(B, 1, 1) + cam_z_offset
+    else:
+        xyz_w[:, 2] += cam_height + cam_z_offset
     xyz_w[:, 0] += cam_x_offset               # X_w: camera is cam_x_offset ahead of robot origin
 
     return xyz_w.permute(0, 2, 3, 1).contiguous()  # [B, H, W, 3]

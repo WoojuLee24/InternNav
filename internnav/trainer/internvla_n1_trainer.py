@@ -128,6 +128,7 @@ def train(attn_implementation="flash_attention_2"):
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     data_args.debug_modes = model_args.debug_modes
+    data_args.debug_dir   = model_args.debug_dir
 
     local_rank = training_args.local_rank
     os.makedirs(training_args.output_dir, exist_ok=True)
@@ -232,6 +233,12 @@ def train(attn_implementation="flash_attention_2"):
         for i, (n, p) in enumerate(trainer.model.named_parameters()):
             stat.append([i, n, p.shape, p.requires_grad])
         print(tabulate(stat, headers=["idx", "name", "shape", "trainable"]))
+    if model_args.debugpy == "trainer" and torch.distributed.get_rank() == 0:
+        import debugpy
+        debugpy.listen(("0.0.0.0", 5681))
+        print("[debugpy] model loaded — waiting for VSCode attach on port 5681 ...", flush=True)
+        debugpy.wait_for_client()
+
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
         logging.info("checkpoint found, resume training")
         trainer.train(resume_from_checkpoint=True)
