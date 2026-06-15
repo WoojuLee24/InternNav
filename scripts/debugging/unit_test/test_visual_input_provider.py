@@ -186,7 +186,7 @@ def test_bev_image_provider_s1_non_tensor_fallback():
 
 
 def test_bev_image_provider_s2_gating():
-    p = BEVImageProvider(make_processor(), s2_depth_in_meters=True)
+    p = BEVImageProvider(make_processor(), s2_mode='bev', s2_depth_in_meters=True)
     rgb = (np.random.rand(H, W, 3) * 255).astype(np.uint8)
     depth = np.random.rand(H, W).astype(np.float32) + 0.5
     assert p.get_s2_extra(rgb, depth, is_lookdown=False) == []
