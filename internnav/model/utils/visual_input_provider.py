@@ -23,6 +23,7 @@ Depth-unit contract:
     normalised [0, 1] with depth_scale=10.0; pass metres with depth_scale=1.0).
 """
 
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Optional
@@ -87,6 +88,8 @@ class BEVProcessor:
         cam_x_offset: float = 0.0,
         cam_z_offset: float = 0.0,
         device: str = 'cuda:0',
+        depth_source: str = 'gt',
+        dav2_max_depth: float = 10.0,
     ):
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
         self.cam_height = cam_height
@@ -98,6 +101,9 @@ class BEVProcessor:
         self.z_min, self.z_max = z_min, z_max
         self.cam_x_offset, self.cam_z_offset = cam_x_offset, cam_z_offset
         self.device = torch.device(device)
+        self.depth_source = depth_source
+        self.dav2_max_depth = dav2_max_depth
+        self._dav2_model = None
 
     # ------------------------------------------------------------------ utils
 
@@ -120,35 +126,56 @@ class BEVProcessor:
 
     # ------------------------------------------------------------ core (batch)
 
+    def _estimate_depth(self, rgb: torch.Tensor) -> torch.Tensor:
+        """Lazy DepthAnythingV2 depth estimation; result is metric metres.
+
+        Args:
+            rgb: [B, H, W, 3] float [0, 1].
+        Returns:
+            [B, H, W] metric depth in metres.
+        """
+        from internnav.model.basemodel.internvla_n1.internvla_n1_bev import (
+            _estimate_depth_dav2_batch,
+            _load_dav2_full,
+        )
+        if self._dav2_model is None:
+            self._dav2_model = _load_dav2_full(max_depth=self.dav2_max_depth).to(rgb.device)
+        depth = _estimate_depth_dav2_batch(rgb, self._dav2_model)
+        self._last_dav2_depth = depth  # [B, H, W] cached for debug saving
+        return depth
+
     def bev_chw(
         self,
         rgb: torch.Tensor,
-        depth: torch.Tensor,
+        depth: Optional[torch.Tensor] = None,
         depth_in_meters: bool = False,
         cam_pitch_deg: Optional[float] = None,
+        cam_height: Optional[float] = None,
     ) -> torch.Tensor:
         """Coloured BEV for a batch of frames.
 
         Args:
-            rgb  : [B, H, W, 3] float [0, 1] or uint8.
-            depth: [B, H, W] raw (× depth_scale → metres) or metres.
+            rgb       : [B, H, W, 3] float [0, 1] or uint8.
+            depth     : [B, H, W] raw (× depth_scale → metres) or metres.
+                        Ignored when depth_source=='dav2' (estimated from rgb).
+            cam_height: overrides self.cam_height for per-sample use.
         Returns:
             [B, 3, bev_size, bev_size] float [0, 1].
-
-        Training note: with metric ``traj_depths`` flattened to [B*T, H, W] and
-        ``traj_images`` flattened to [B*T, H, W, 3], this matches the
-        ``rgb_gt`` bev_mode of internvla_n1_bev.py.
         """
         rgb = self._to_float_rgb(rgb.to(self.device))
-        depth = depth.to(self.device).float()
+        if self.depth_source == 'dav2':
+            depth = self._estimate_depth(rgb)
+            depth_in_meters = True
+        else:
+            depth = depth.to(self.device).float()
         _, H, W = depth.shape
         fx, fy, cx, cy = self._scaled_intrinsics(H, W)
         pitch = self.cam_pitch_deg if cam_pitch_deg is None else cam_pitch_deg
-        # depth_rgb_to_bev multiplies depth by its depth_scale argument to get metres
+        height = self.cam_height if cam_height is None else cam_height
         scale = 1.0 if depth_in_meters else self.depth_scale
         return depth_rgb_to_bev(
             depth, rgb,
-            cam_height=self.cam_height,
+            cam_height=height,
             cam_pitch_deg=pitch,
             cam_x_offset=self.cam_x_offset,
             cam_z_offset=self.cam_z_offset,
@@ -161,27 +188,34 @@ class BEVProcessor:
 
     def occupancy(
         self,
-        depth: torch.Tensor,
+        depth: Optional[torch.Tensor] = None,
         depth_in_meters: bool = False,
         cam_pitch_deg: Optional[float] = None,
+        rgb: Optional[torch.Tensor] = None,
+        cam_height: Optional[float] = None,
     ) -> torch.Tensor:
         """Occupancy BEV for a batch of depth frames.
 
         Args:
-            depth: [B, H, W] raw or metres.
+            depth     : [B, H, W] raw or metres. Ignored when depth_source=='dav2'.
+            rgb       : [B, H, W, 3] float [0, 1], required when depth_source=='dav2'.
+            cam_height: overrides self.cam_height for per-sample use.
         Returns:
             [B, bev_size, bev_size] float [0, 1].
-
-        Training note: equivalent to the ``occ_gt`` bev_mode of internvla_n1_bev.py.
         """
+        if self.depth_source == 'dav2':
+            rgb = self._to_float_rgb(rgb.to(self.device))
+            depth = self._estimate_depth(rgb)
+            depth_in_meters = True
         depth = depth.to(self.device).float()
         _, H, W = depth.shape
         fx, fy, cx, cy = self._scaled_intrinsics(H, W)
         pitch = self.cam_pitch_deg if cam_pitch_deg is None else cam_pitch_deg
+        height = self.cam_height if cam_height is None else cam_height
         scale = 1.0 if depth_in_meters else self.depth_scale
         return depth_to_bev_occ(
             depth,
-            cam_height=self.cam_height,
+            cam_height=height,
             cam_pitch_deg=pitch,
             cam_x_offset=self.cam_x_offset,
             cam_z_offset=self.cam_z_offset,
@@ -197,7 +231,7 @@ class BEVProcessor:
     def for_s2(
         self,
         rgb: np.ndarray,
-        depth: np.ndarray,
+        depth: Optional[np.ndarray] = None,
         depth_in_meters: bool = False,
         cam_pitch_deg: Optional[float] = None,
     ) -> Image.Image:
@@ -205,38 +239,69 @@ class BEVProcessor:
 
         Args:
             rgb  : [H, W, 3] uint8 (or float [0, 1]).
-            depth: [H, W] (or [H, W, 1]) raw sensor depth, or metres.
+            depth: [H, W] (or [H, W, 1]) raw sensor depth or metres.
+                   Optional when depth_source=='dav2'.
         """
-        depth = np.asarray(depth)
-        if depth.ndim == 3:
-            depth = depth[..., 0]
         rgb_t = torch.from_numpy(np.ascontiguousarray(rgb)).unsqueeze(0)
-        depth_t = torch.from_numpy(np.ascontiguousarray(depth)).unsqueeze(0)
+        if depth is not None:
+            depth = np.asarray(depth)
+            if depth.ndim == 3:
+                depth = depth[..., 0]
+            depth_t = torch.from_numpy(np.ascontiguousarray(depth)).unsqueeze(0)
+        else:
+            depth_t = None
         bev = self.bev_chw(rgb_t, depth_t, depth_in_meters=depth_in_meters, cam_pitch_deg=cam_pitch_deg)
         bev_np = (bev[0].permute(1, 2, 0).clamp(0, 1).cpu().float().numpy() * 255).astype(np.uint8)
         return Image.fromarray(bev_np)
 
+    def _bev_batch(self, rgb_flat: torch.Tensor, depth_flat: Optional[torch.Tensor],
+                   pitch, image_type: str,
+                   cam_height=None) -> torch.Tensor:
+        """[N, H, W, 3] → [N, 3, S, S] BEV; pitch/cam_height may be scalar or [N] tensor."""
+        if image_type == 'occ':
+            bev_hw = self.occupancy(depth_flat, depth_in_meters=True,
+                                    cam_pitch_deg=pitch, rgb=rgb_flat, cam_height=cam_height)
+            return bev_hw.unsqueeze(1).expand(-1, 3, -1, -1).contiguous()
+        return self.bev_chw(rgb_flat, depth_flat, depth_in_meters=True,
+                            cam_pitch_deg=pitch, cam_height=cam_height)
+
     def for_s1(
         self,
         rgb: torch.Tensor,
-        depth: torch.Tensor,
-        cam_pitch_deg: Optional[float] = None,
+        depth: Optional[torch.Tensor] = None,
+        cam_pitch_deg=None,     # float | [B] tensor | None
+        image_type: str = 'rgb',
+        cam_height=None,        # float | [B] tensor | None
     ) -> torch.Tensor:
         """NavDP frame stack → BEV stack in the SAME layout/dtype as the input.
 
         Args:
-            rgb  : [B, T, H, W, 3] float [0, 1] (NavDP images_dp layout).
-            depth: [B, T, H, W, 1] METRES (NavDP depths_dp layout).
+            rgb          : [B, T, H, W, 3] float [0, 1] (NavDP images_dp layout).
+            depth        : [B, T, H, W] or [B, T, H, W, 1] METRES. Optional when depth_source=='dav2'.
+            cam_pitch_deg: scalar float, None, or [B] tensor for per-sample pitch.
+            cam_height   : scalar float, None, or [B] tensor for per-sample camera height.
+            image_type   : 'rgb' (coloured BEV) | 'occ' (occupancy BEV, replicated to 3ch).
         Returns:
             [B, T, H, W, 3] BEV frames, resized to (H, W), dtype of ``rgb``.
         """
         B, T, H, W = rgb.shape[:4]
-        rgb_flat = rgb.flatten(0, 1)                    # [B*T, H, W, 3]
-        depth_flat = depth.flatten(0, 1)[..., 0]        # [B*T, H, W]
-        bev = self.bev_chw(rgb_flat, depth_flat, depth_in_meters=True, cam_pitch_deg=cam_pitch_deg)
+        rgb_flat = rgb.flatten(0, 1)                                       # [B*T, H, W, 3]
+        if depth is not None:
+            d = depth.flatten(0, 1)
+            depth_flat = d[..., 0] if d.ndim == 4 else d                  # [B*T, H, W]
+        else:
+            depth_flat = None
+
+        # Expand [B] pitch/height to [B*T] so each frame in the stack gets its sample's value.
+        if isinstance(cam_pitch_deg, torch.Tensor) and cam_pitch_deg.ndim > 0:
+            cam_pitch_deg = cam_pitch_deg.repeat_interleave(T)  # [B] -> [B*T]
+        if isinstance(cam_height, torch.Tensor) and cam_height.ndim > 0:
+            cam_height = cam_height.repeat_interleave(T)        # [B] -> [B*T]
+        bev = self._bev_batch(rgb_flat, depth_flat, cam_pitch_deg, image_type, cam_height=cam_height)
+
         if bev.shape[-2:] != (H, W):
             bev = F.interpolate(bev, size=(H, W), mode='bilinear', align_corners=False)
-        bev = bev.permute(0, 2, 3, 1).reshape(B, T, H, W, 3)  # back to HWC stack
+        bev = bev.permute(0, 2, 3, 1).reshape(B, T, H, W, 3)             # back to HWC stack
         return bev.to(device=rgb.device, dtype=rgb.dtype)
 
 
@@ -316,10 +381,12 @@ class BEVImageProvider(VisualInputProvider):
         self,
         processor: BEVProcessor,
         s1_mode: str = 'bev',
-        s2_mode: str = 'fpv_bev',
+        s2_mode: str = 'fpv',
         s1_pitch_deg: Optional[float] = None,
         s2_pitch_deg: Optional[float] = None,
         s2_depth_in_meters: bool = False,
+        image_type: str = 'rgb',
+        debug_dir: Optional[str] = None,
     ):
         if s1_mode not in _VALID_MODES or s2_mode not in _VALID_MODES:
             raise ValueError(f"s1_mode/s2_mode must be one of {_VALID_MODES}, got {s1_mode!r}/{s2_mode!r}")
@@ -329,16 +396,88 @@ class BEVImageProvider(VisualInputProvider):
         self.s1_pitch_deg = s1_pitch_deg
         self.s2_pitch_deg = s2_pitch_deg
         self.s2_depth_in_meters = s2_depth_in_meters
+        self.image_type = image_type
+        self.debug_dir = debug_dir
+        self._debug_step = 0
 
-    def get_s1_input(self, rgb, depth) -> S1VisualInput:
+    # ------------------------------------------------------------------ debug
+
+    def _save_s1_debug(self, rgb, depth, bev, pitch, cam_height):
+        """Save all batch samples frame[0]: FPV | GT-depth | BEV-out | [GT-BEV when dav2].
+
+        Args:
+            rgb   : [B, T, H, W, 3] float [0,1]
+            depth : [B, T, H, W, 1] metres, or None
+            bev   : [B, T, H, W, 3] float [0,1]  — provider output
+            pitch : scalar or [B] tensor (degrees)
+            cam_height: scalar or [B] tensor (metres)
+        """
+        import os
+        from internnav.model.utils.depth_rgb_to_bev_torch import depth_rgb_to_bev, depth_to_bev_occ, save_image
+        os.makedirs(self.debug_dir, exist_ok=True)
+        s = self._debug_step
+        B = rgb.shape[0]
+
+        for b in range(B):
+            prefix = f"{self.debug_dir}/step_{s:06d}_b{b:02d}"
+            fpv  = rgb[b, 0]   # [H, W, 3]
+            bev0 = bev[b, 0]   # [H, W, 3]
+            save_image(fpv,  f"{prefix}_1_fpv.jpg")
+            save_image(bev0, f"{prefix}_3_bev.jpg")
+
+            if depth is not None:
+                gt_d = depth[b, 0, ..., 0]   # [H, W] metres
+                depth_vis = (gt_d / gt_d.max().clamp(min=0.1)).clamp(0, 1)
+                save_image(depth_vis, f"{prefix}_2_gt_depth.jpg")
+
+                if self.processor.depth_source == 'dav2':
+                    with torch.no_grad():
+                        dav2_d = self.processor._estimate_depth(fpv.unsqueeze(0))[0]
+                    dav2_vis = (dav2_d / dav2_d.max().clamp(min=0.1)).clamp(0, 1)
+                    save_image(dav2_vis, f"{prefix}_2b_dav2_depth.jpg")
+
+                    p0 = pitch[b].item()      if isinstance(pitch,      torch.Tensor) else (pitch      or self.processor.cam_pitch_deg)
+                    h0 = cam_height[b].item() if isinstance(cam_height, torch.Tensor) else (cam_height or self.processor.cam_height)
+                    S = self.processor.bev_size
+                    fx, fy, cx, cy = self.processor._scaled_intrinsics(S, S)
+                    bev_kwargs = dict(
+                        cam_height=h0, cam_pitch_deg=p0,
+                        cam_x_offset=self.processor.cam_x_offset,
+                        cam_z_offset=self.processor.cam_z_offset,
+                        fx=fx, fy=fy, cx=cx, cy=cy,
+                        bev_range=self.processor.bev_range,
+                        bev_size=S,
+                        depth_scale=1.0,
+                        z_min=self.processor.z_min, z_max=self.processor.z_max,
+                    )
+                    if self.image_type == 'occ':
+                        gt_bev = depth_to_bev_occ(gt_d.unsqueeze(0), **bev_kwargs)[0]  # [S, S]
+                    else:
+                        fpv_s = F.interpolate(fpv.permute(2, 0, 1).unsqueeze(0), size=(S, S), mode='bilinear', align_corners=False).squeeze(0).permute(1, 2, 0).unsqueeze(0)
+                        gt_bev = depth_rgb_to_bev(gt_d.unsqueeze(0), fpv_s, **bev_kwargs)[0]  # [3, S, S]
+                    save_image(gt_bev, f"{prefix}_4_gt_bev.jpg")
+
+    # ------------------------------------------------------------------ API
+
+    def get_s1_input(self, rgb, depth, cam_pitch_deg=None, cam_height=None) -> S1VisualInput:
+        """Per-call overrides accept float or [B] tensor (for per-sample train batches)."""
         if self.s1_mode == 'fpv':
             return S1VisualInput()
-        if not (isinstance(rgb, torch.Tensor) and isinstance(depth, torch.Tensor)):
+        if not (isinstance(rgb, torch.Tensor) and (depth is None or isinstance(depth, torch.Tensor))):
             # Legacy 'sync' path hands raw numpy frames straight to generate_traj;
             # BEV substitution is only defined for the stacked-tensor layout.
             print('[BEVImageProvider] non-tensor S1 input — falling back to FPV for this call')
             return S1VisualInput()
-        bev = self.processor.for_s1(rgb, depth, cam_pitch_deg=self.s1_pitch_deg)
+        pitch = cam_pitch_deg if cam_pitch_deg is not None else self.s1_pitch_deg
+        bev = self.processor.for_s1(rgb, depth, cam_pitch_deg=pitch,
+                                     image_type=self.image_type, cam_height=cam_height)
+        if self.debug_dir:
+            try:
+                self._save_s1_debug(rgb, depth, bev, pitch, cam_height)
+            except Exception:
+                import traceback; traceback.print_exc()
+        self._debug_step += 1
+
         if self.s1_mode == 'bev':
             return S1VisualInput(images=bev)
         # 'fpv_bev': [fpv_goal, fpv_cur, bev_goal, bev_cur] along T (fpv_concat_gt
@@ -347,6 +486,75 @@ class BEVImageProvider(VisualInputProvider):
         images = torch.cat([rgb, bev], dim=1)
         depths = torch.cat([depth, depth], dim=1)  # BEV frames reuse the FPV depth
         return S1VisualInput(images=images, depths=depths)
+
+    def save_train_tdmap_debug(self, tdmap: torch.Tensor, world_heading: Optional[float] = None, batch_idx: int = 0) -> None:
+        """Save tdmap + world-aligned BEV for training debug. Call AFTER get_s1_input.
+
+        Agent-frame (order: bev → gt_bev → gt_topdown):
+          step_XXXXXX_bNN_3_bev.jpg          — BEV (agent frame)         [saved by _save_s1_debug]
+          step_XXXXXX_bNN_4_gt_bev.jpg       — GT BEV (dav2, agent frame)[saved by _save_s1_debug]
+          step_XXXXXX_bNN_5_gt_topdown.jpg   — topdown (agent forward = up)
+
+        World-frame (order: bev → gt_bev → gt_topdown), only when world_heading is not None:
+          step_XXXXXX_bNN_w3_bev_world.jpg        — BEV rotated to world frame
+          step_XXXXXX_bNN_w4_gt_bev_world.jpg     — GT BEV rotated to world frame
+          step_XXXXXX_bNN_w5_gt_topdown_world.jpg — topdown rotated to world + FWD arrow
+        """
+        if not self.debug_dir:
+            return
+        try:
+            import cv2
+            import math
+            import numpy as np
+            from internnav.model.utils.depth_rgb_to_bev_torch import save_image
+
+            s         = self._debug_step - 1
+            debug_dir = self.debug_dir
+            S         = self.processor.bev_size
+            bev_range = self.processor.bev_range
+            os.makedirs(debug_dir, exist_ok=True)
+            prefix = f"step_{s:06d}_b{batch_idx:02d}"
+
+            td_np = (tdmap.clamp(0, 1).cpu().float().numpy() * 255).astype(np.uint8)  # [H,W,3] uint8
+
+            # agent-frame topdown
+            save_image(tdmap, f"{debug_dir}/{prefix}_5_gt_topdown.jpg")
+
+            if world_heading is None:
+                return
+
+            agent_angle = float(world_heading)
+            rot_deg     = math.degrees(math.pi + agent_angle)
+            c_px        = S // 2
+            fa          = int(2.5 * S / (2.0 * bev_range))
+
+            def _rotate_world(im):
+                if abs(rot_deg % 360) > 0.5:
+                    M  = cv2.getRotationMatrix2D((im.shape[1] / 2, im.shape[0] / 2), rot_deg, 1.0)
+                    im = cv2.warpAffine(im, M, (im.shape[1], im.shape[0]))
+                return im
+
+            # world-aligned BEV and GT-BEV
+            for src_sfx, dst_sfx in [('_3_bev.jpg',    '_w3_bev_world.jpg'),
+                                      ('_4_gt_bev.jpg', '_w4_gt_bev_world.jpg')]:
+                img = cv2.imread(f"{debug_dir}/{prefix}{src_sfx}")
+                if img is not None:
+                    cv2.imwrite(f"{debug_dir}/{prefix}{dst_sfx}", _rotate_world(img))
+
+            # world-aligned topdown + FWD arrow
+            td_world = _rotate_world(cv2.cvtColor(
+                cv2.resize(td_np, (S, S), interpolation=cv2.INTER_LINEAR),
+                cv2.COLOR_RGB2BGR,
+            ))
+            ac = int(c_px + fa * math.sin(agent_angle))
+            ar = int(c_px + fa * math.cos(agent_angle))
+            cv2.arrowedLine(td_world, (c_px, c_px), (ac, ar), (0, 220, 0), 3, tipLength=0.25,
+                            line_type=cv2.LINE_AA)
+            cv2.circle(td_world, (c_px, c_px), 8, (0, 0, 255), -1, cv2.LINE_AA)
+            cv2.circle(td_world, (c_px, c_px), 8, (255, 255, 255), 1, cv2.LINE_AA)
+            cv2.imwrite(f"{debug_dir}/{prefix}_w5_gt_topdown_world.jpg", td_world)
+        except Exception:
+            import traceback; traceback.print_exc()
 
     def get_s2_extra(self, rgb, depth, is_lookdown: bool = False) -> List[Image.Image]:
         if self.s2_mode == 'fpv' or not is_lookdown:
@@ -420,6 +628,8 @@ def create_visual_provider(config, device: str = 'cuda:0') -> VisualInputProvide
         cam_x_offset=_cfg_get(config, 'bev_cam_x_offset', 0.0),
         cam_z_offset=_cfg_get(config, 'bev_cam_z_offset', 0.0),
         device=device,
+        depth_source=_cfg_get(config, 'bev_depth_source', 'gt'),
+        dav2_max_depth=_cfg_get(config, 'bev_dav2_max_depth', 10.0),
     )
     if ptype == 'bev_feature':
         return BEVFeatureProvider(processor)
@@ -434,4 +644,6 @@ def create_visual_provider(config, device: str = 'cuda:0') -> VisualInputProvide
         s1_pitch_deg=_cfg_get(config, 'bev_s1_pitch_deg', None),
         s2_pitch_deg=_cfg_get(config, 'bev_s2_pitch_deg', None),
         s2_depth_in_meters=_cfg_get(config, 'bev_s2_depth_in_meters', False),
+        image_type=_cfg_get(config, 'bev_image_type', 'rgb'),
+        debug_dir=_cfg_get(config, 'debug_dir', None),
     )

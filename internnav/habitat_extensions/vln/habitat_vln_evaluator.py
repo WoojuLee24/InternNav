@@ -332,10 +332,10 @@ class HabitatVLNEvaluator(DistributedEvaluator):
         # Optional post-load debugger attach (after model load to avoid debugger-tracing
         # OOM during checkpoint loading). Gated so normal/multi-GPU eval never hangs:
         # only when DEBUGPY_ENABLE=1, and only rank 0 binds the port.
-        if os.environ.get('DEBUGPY_ENABLE') == '1' and int(os.environ.get('RANK', '0')) == 0:
+        if os.environ.get('DEBUGPY') == 'eval' and int(os.environ.get('RANK', '0')) == 0:
             import debugpy
             debugpy.listen(("0.0.0.0", 5679))
-            print("Waiting for debugger attach on port 5679...", flush=True)
+            print("[debugpy] model loaded — waiting for VSCode attach on port 5679 ...", flush=True)
             debugpy.wait_for_client()
 
         model.eval()

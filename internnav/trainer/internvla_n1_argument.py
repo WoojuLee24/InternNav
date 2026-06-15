@@ -18,6 +18,7 @@ class ModelArguments:
     dav2_max_depth: float = field(default=10.0)
     debug_modes: str = field(default="")
     debug_dir: Optional[str] = field(default=None)
+    debugpy: str = field(default="", metadata={"help": "debugpy attach target: 'trainer' listens on port 5681 after model load (rank 0 only)"})
 
 
 @dataclass
