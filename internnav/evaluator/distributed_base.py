@@ -167,6 +167,8 @@ class DistributedEvaluator(Evaluator):
                 wandb.finish()
             except ImportError:
                 print("[Warning] wandb not installed. Skipping wandb logging.")
+            except Exception as e:
+                print(f"[Warning] wandb logging failed: {e}. Skipping wandb logging.")
 
         return result_all
 

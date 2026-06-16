@@ -162,16 +162,44 @@ def _prep_ckpt_aux_files(output_dir: str, ckpt: str, system2_ckpt: str) -> None:
             pass
 
 
-def _wandb_resume_env(base_env=None) -> dict:
-    """Resume the training wandb run so eval metrics land in the same run."""
-    env = dict(base_env or os.environ)
+_WANDB_RUN_ID_FILE = "wandb_run_id.txt"
+
+
+def _save_wandb_run_id(output_dir: str) -> None:
+    """After training, save the wandb run ID to the checkpoint dir (on shared storage)."""
     runs = sorted(glob.glob(os.path.join(REPO_ROOT, "wandb", "run-*")), key=os.path.getmtime, reverse=True)
-    if runs:
-        base = os.path.basename(runs[0])  # run-<date>_<time>-<id>
-        run_id = base.split("-", 2)[-1] if base.count("-") >= 2 else None
-        if run_id:
-            env["WANDB_RUN_ID"] = run_id
-            env["WANDB_RESUME"] = "allow"
+    if not runs:
+        return
+    base = os.path.basename(runs[0])
+    run_id = base.split("-", 2)[-1] if base.count("-") >= 2 else None
+    if run_id:
+        with open(os.path.join(output_dir, _WANDB_RUN_ID_FILE), "w") as f:
+            f.write(run_id)
+
+
+def _wandb_resume_env(output_dir: str = None, base_env=None) -> dict:
+    """Resume the training wandb run so eval metrics land in the same run.
+
+    Reads run ID from <output_dir>/wandb_run_id.txt (written after training,
+    on shared storage) so eval on a different machine can find the correct run.
+    Falls back to the local wandb/ directory for backward compatibility.
+    """
+    env = dict(base_env or os.environ)
+    run_id = None
+    # 1) shared storage: run ID saved by _save_wandb_run_id after training
+    if output_dir:
+        id_file = os.path.join(output_dir, _WANDB_RUN_ID_FILE)
+        if os.path.exists(id_file):
+            run_id = open(id_file).read().strip() or None
+    # 2) fallback: local wandb/ directory (same-machine case)
+    if not run_id:
+        runs = sorted(glob.glob(os.path.join(REPO_ROOT, "wandb", "run-*")), key=os.path.getmtime, reverse=True)
+        if runs:
+            base = os.path.basename(runs[0])
+            run_id = base.split("-", 2)[-1] if base.count("-") >= 2 else None
+    if run_id:
+        env["WANDB_RUN_ID"] = run_id
+        env["WANDB_RESUME"] = "allow"
     return env
 
 
@@ -179,7 +207,7 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
              machine: str = "h200", nproc: int = 8, master_port: int = 2333,
              in_process: bool = False, debugpy: str = None,
              debug_dir: Optional[str] = None) -> int:
-    env = _wandb_resume_env()
+    env = _wandb_resume_env(output_dir=output_dir)
     env["TRAIN_EVAL_TARGET"] = machine  # read by the experiment config.py
     if debugpy:
         env["DEBUGPY"] = debugpy  # habitat_vln_evaluator.py checks DEBUGPY=='eval' after model load
@@ -219,6 +247,7 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
         if rc != 0:
             print(f"[train] FAILED (exit {rc}); skipping eval.", file=sys.stderr)
             return
+        _save_wandb_run_id(output_dir)
 
     if not do_eval:
         return
