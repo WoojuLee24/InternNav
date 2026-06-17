@@ -19,13 +19,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 
 import default_config as base  # noqa: E402
 
-EXP_NAME = "bev/s1.bev_s2.fpv_occ_gt"
+EXP_NAME = "bev/s1.bev_s2.fpv_occ.dist_gt"
 PARAMS = replace(
     base.PARAMS,
     bev=True,
     bev_s1_mode="bev",       # S1 trained with BEV
     bev_s2_mode_eval="fpv",  # eval S2 stays fpv (S2 BEV not trained)
-    bev_image_type="occ",
+    bev_image_type="occ.dist",
     bev_depth_source="gt",
     bev_z_min=0.05,          # ROS2 standard: exclude floor/ceiling
     bev_z_max=2.0,

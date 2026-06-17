@@ -80,6 +80,8 @@ class Params:
     bev_image_type: str = "rgb"    # 'rgb' | 'occ'              (train)
     bev_depth_source: str = "gt"   # 'gt' | 'dav2'   (train + eval)
     bev_dav2_max_depth: float = 10.0               # dav2 metric depth cap (metres)
+    bev_z_min: float = -0.2                        # height filter lower bound (metres)
+    bev_z_max: float = 2.5                         # height filter upper bound (metres)
     # -- eval only --
     bev_s2_mode_eval: str = "fpv"     # eval-time S2 mode (S2 BEV is not trained; train always fpv)
     bev_visual_provider: str = "bev_image"  # 'fpv' | 'bev_image' | 'bev_feature'
@@ -131,6 +133,8 @@ class Params:
                 "--bev_s1_mode", self.bev_s1_mode,
                 "--bev_image_type", self.bev_image_type,
                 "--bev_depth_source", self.bev_depth_source,
+                "--bev_z_min", str(self.bev_z_min),
+                "--bev_z_max", str(self.bev_z_max),
             ]
             if self.debug_dir:
                 bev_argv += ["--debug_dir", self.debug_dir]
@@ -296,6 +300,8 @@ def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
             "bev_image_type": p.bev_image_type,        # 'rgb' | 'occ' — train-synced
             "bev_depth_source": p.bev_depth_source,    # 'gt' | 'dav2' — train-synced
             "bev_dav2_max_depth": p.bev_dav2_max_depth,
+            "bev_z_min": p.bev_z_min,
+            "bev_z_max": p.bev_z_max,
             "debug_dir": p.debug_dir or os.environ.get("BEV_DEBUG_DIR"),
         })
 
