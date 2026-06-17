@@ -44,6 +44,38 @@ from internnav.model.utils.depth_rgb_to_bev_torch import (
 )
 
 
+def _load_dav2_full(max_depth: float = 10.0):
+    """Load full DepthAnythingV2 (ViT-S + depth head) for metric depth estimation."""
+    from internnav.model.encoder.depth_anything.depth_anything_v2.dpt import DepthAnythingV2
+    model_cfg = {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384], 'max_depth': max_depth}
+    model = DepthAnythingV2(**model_cfg)
+    ckpt = 'checkpoints/depth_anything_v2_metric_hypersim_vits.pth'
+    if os.path.exists(ckpt):
+        model.load_state_dict(torch.load(ckpt, map_location='cpu'), assign=True)
+    model.eval().requires_grad_(False)
+    return model
+
+
+def _estimate_depth_dav2_batch(
+    rgb_flat: torch.Tensor,   # [N, H, W, 3] float [0,1] RGB HWC
+    dav2_model,
+) -> torch.Tensor:            # [N, H, W] metric depth in metres
+    N, H, W, _ = rgb_flat.shape
+    x = rgb_flat.permute(0, 3, 1, 2).float()
+    mean_t = x.new_tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+    std_t  = x.new_tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+    x = (x - mean_t) / std_t
+    H14 = max((H // 14) * 14, 14)
+    W14 = max((W // 14) * 14, 14)
+    if H14 != H or W14 != W:
+        x = F.interpolate(x, (H14, W14), mode='bilinear', align_corners=False)
+    with torch.no_grad():
+        depth = dav2_model(x)
+    if H14 != H or W14 != W:
+        depth = F.interpolate(depth.unsqueeze(1), (H, W), mode='bilinear', align_corners=True).squeeze(1)
+    return depth
+
+
 def _cfg_get(config, key, default=None):
     """Read a key from a dict, argparse.Namespace, or pydantic/attr object."""
     if config is None:
@@ -139,10 +171,6 @@ class BEVProcessor:
         Returns:
             [B, H, W] metric depth in metres.
         """
-        from internnav.model.basemodel.internvla_n1.internvla_n1_bev import (
-            _estimate_depth_dav2_batch,
-            _load_dav2_full,
-        )
         if self._dav2_model is None:
             self._dav2_model = _load_dav2_full(max_depth=self.dav2_max_depth).to(rgb.device)
         depth = _estimate_depth_dav2_batch(rgb, self._dav2_model)
