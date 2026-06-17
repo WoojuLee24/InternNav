@@ -63,6 +63,8 @@ def make_train_bev_processor(
     depth_scale: float = 1.0,
     depth_source: str = 'gt',
     dav2_max_depth: float = 10.0,
+    z_min: float = _Z_MIN,
+    z_max: float = _Z_MAX,
 ) -> BEVProcessor:
     """BEVProcessor configured to match internvla_n1_bev.py exactly.
 
@@ -74,7 +76,7 @@ def make_train_bev_processor(
         cam_height=cam_height, cam_pitch_deg=_DEFAULT_CAM_PITCH,
         ref_width=_BASE_W, ref_height=_BASE_H,
         bev_size=_BEV_SIZE, bev_range=_BEV_RANGE,
-        depth_scale=depth_scale, z_min=_Z_MIN, z_max=_Z_MAX,
+        depth_scale=depth_scale, z_min=z_min, z_max=z_max,
         device=device,
         depth_source=depth_source,
         dav2_max_depth=dav2_max_depth,
@@ -124,9 +126,11 @@ def parse_bev_cli_args(argv: List[str]) -> Tuple[dict, List[str]]:
     """
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument('--bev_s1_mode', choices=['fpv', 'bev', 'fpv_bev'], default='bev')
-    p.add_argument('--bev_image_type', choices=['rgb', 'occ'], default='rgb')
+    p.add_argument('--bev_image_type', choices=['rgb', 'occ', 'occ.binary', 'occ.prob', 'occ.dist', 'occ.dist.sep'], default='rgb')
     p.add_argument('--bev_depth_source', choices=['gt', 'dav2'], default='gt')
     p.add_argument('--bev_dav2_max_depth', type=float, default=10.0)
+    p.add_argument('--bev_z_min', type=float, default=_Z_MIN)
+    p.add_argument('--bev_z_max', type=float, default=_Z_MAX)
     # --debug_dir is NOT parsed here: it belongs to ModelArguments in the base
     # trainer (internvla_n1_argument.py). Peeling it here would leave
     # model_args.debug_dir==None, causing trainer.py line 165 to overwrite
@@ -167,6 +171,8 @@ class InternVLAN1BEVProviderForCausalLM(InternVLAN1ForCausalLM):
         """
         depth_source = getattr(self.config, 'bev_depth_source', 'gt')
         dav2_max_depth = getattr(self.config, 'bev_dav2_max_depth', 10.0)
+        z_min = getattr(self.config, 'bev_z_min', _Z_MIN)
+        z_max = getattr(self.config, 'bev_z_max', _Z_MAX)
         s1_mode = getattr(self.config, 'bev_s1_mode', 'bev')
         image_type = getattr(self.config, 'bev_image_type', 'rgb')
         debug_dir = getattr(self.config, 'debug_dir', None)
@@ -174,10 +180,13 @@ class InternVLAN1BEVProviderForCausalLM(InternVLAN1ForCausalLM):
         if (p is None
                 or p.processor.depth_source != depth_source
                 or p.s1_mode != s1_mode
-                or p.image_type != image_type):
+                or p.image_type != image_type
+                or p.processor.z_min != z_min
+                or p.processor.z_max != z_max):
             processor = make_train_bev_processor(
                 _DEFAULT_CAM_HEIGHT, device,
                 depth_source=depth_source, dav2_max_depth=dav2_max_depth,
+                z_min=z_min, z_max=z_max,
             )
             self._bev_provider = BEVImageProvider(
                 processor, s1_mode=s1_mode, image_type=image_type,

@@ -233,12 +233,15 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                 cv2.circle(im, (cx, cy_px), 8, (255, 255, 255), 1, cv2.LINE_AA)
                 return im
 
-            img_bgr = _draw_agent(_rotate_world(img_bgr))
-            cv2.imwrite(f"{debug_dir}/step_{s:06d}_5_gt_cam.jpg", img_bgr)
+            # agent-frame topdown camera (no rotation, no arrow)
+            cv2.imwrite(f"{debug_dir}/step_{s:06d}_b00_5_gt_cam.jpg", img_bgr)
+            # world-aligned topdown + FWD arrow — matches train _w5_gt_topdown_world.jpg
+            cv2.imwrite(f"{debug_dir}/step_{s:06d}_w5_gt_topdown_world.jpg",
+                        _draw_agent(_rotate_world(img_bgr)))
 
             # Save world-aligned copies of _3_bev and _4_gt_bev (originals kept as robot frame)
-            for src_suffix, dst_suffix in [('_3_bev.jpg', '_3w_bev_world.jpg'),
-                                           ('_4_gt_bev.jpg', '_4w_gt_bev_world.jpg')]:
+            for src_suffix, dst_suffix in [('_3_bev.jpg', '_w3_bev_world.jpg'),
+                                           ('_4_gt_bev.jpg', '_w4_gt_bev_world.jpg')]:
                 bev_img = cv2.imread(f"{debug_dir}/step_{s:06d}{src_suffix}")
                 if bev_img is not None:
                     cv2.imwrite(f"{debug_dir}/step_{s:06d}{dst_suffix}", _rotate_world(bev_img))

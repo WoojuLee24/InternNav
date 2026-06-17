@@ -272,6 +272,148 @@ def depth_to_bev_occ(
     return bev  # [B, bev_size, bev_size]
 
 
+def _raycast_free_torch(occ_mask: torch.Tensor) -> torch.Tensor:
+    """[S, S] bool → [S, S] float32: 0.0=unknown, 0.5=free (raycasted), 1.0=occupied.
+
+    For each occupied cell, casts a ray from the BEV center and marks all
+    intermediate unknown cells as free — equivalent to the numpy _raycast_free.
+    """
+    S = occ_mask.shape[0]
+    device = occ_mask.device
+    ci = cj = S // 2
+
+    result = torch.zeros(S, S, device=device, dtype=torch.float32)
+    result[occ_mask] = 1.0
+
+    occ_r, occ_c = occ_mask.nonzero(as_tuple=True)   # [K]
+    K = occ_r.shape[0]
+    if K == 0:
+        return result
+
+    # n_k: Chebyshev distance from center to each occupied cell
+    n_k = torch.maximum((occ_r - ci).abs(), (occ_c - cj).abs()).float().clamp(min=1)  # [K]
+    max_n = int(n_k.max().item())
+
+    t_range  = torch.arange(max_n, device=device, dtype=torch.float32).unsqueeze(0)   # [1, max_n]
+    n_k_exp  = n_k.unsqueeze(1)                                                        # [K, 1]
+    valid    = t_range < n_k_exp                                                        # [K, max_n]
+
+    fracs  = t_range / n_k_exp                                                          # [K, max_n]
+    ray_r  = (ci + fracs * (occ_r.float().unsqueeze(1) - ci)).long().clamp(0, S - 1)  # [K, max_n]
+    ray_c  = (cj + fracs * (occ_c.float().unsqueeze(1) - cj)).long().clamp(0, S - 1)
+
+    flat_idx = (ray_r * S + ray_c).view(-1)[valid.view(-1)]   # [M]
+
+    free_marker = torch.zeros(S, S, device=device, dtype=torch.bool)
+    free_marker.view(-1)[flat_idx] = True
+
+    result[free_marker & (result == 0.0)] = 0.5
+    return result
+
+
+def depth_to_bev_occ_ros2(
+    depth: torch.Tensor,
+    cam_height: float = 1.25,
+    cam_pitch_deg: float = 0.0,
+    cam_x_offset: float = 0.0,
+    cam_z_offset: float = 0.0,
+    fx: float = 585.0,
+    fy: float = 585.0,
+    cx: float = 320.0,
+    cy: float = 240.0,
+    bev_range: float = 5.0,
+    bev_size: int = 224,
+    depth_scale: float = 1.0,
+    z_min: float = 0.05,
+    z_max: float = 2.0,
+) -> torch.Tensor:
+    """FPV depth → raycasted BEV occupancy matching build_occupancy_grid (ros2).
+
+    Pipeline:
+      1. Unproject depth with floor-based BEV indexing (not truncation).
+      2. Exclude OOB points (not clamped to border).
+      3. Strict > / < height filter (ros2 convention).
+      4. Raycast: for each occupied cell cast a ray from BEV center, mark
+         intermediate unknown cells as free.
+
+    Args:
+        depth: [B, H, W] metric metres (depth_scale=1.0) or raw (set depth_scale)
+    Returns:
+        bev: [B, bev_size, bev_size] float32
+             0.0 = unknown, 0.5 = free (raycasted), 1.0 = occupied
+    """
+    B = depth.shape[0]
+    device = depth.device
+
+    xyz_w = unproject_depth(depth.float(), cam_height, cam_pitch_deg,
+                            cam_x_offset, cam_z_offset, fx, fy, cx, cy, depth_scale)
+    X_w, Y_w, Z_w = xyz_w[..., 0], xyz_w[..., 1], xyz_w[..., 2]
+
+    D = depth.float() * depth_scale
+    mask = (Z_w > z_min) & (Z_w < z_max) & (D > 0.1)
+
+    scale = bev_size / (2.0 * bev_range)
+    i_idx = torch.floor(bev_size / 2.0 - X_w * scale).long()
+    j_idx = torch.floor(bev_size / 2.0 - Y_w * scale).long()
+    oob = (i_idx < 0) | (i_idx >= bev_size) | (j_idx < 0) | (j_idx >= bev_size)
+    mask = mask & ~oob
+
+    flat_idx  = (i_idx.clamp(0, bev_size - 1) * bev_size + j_idx.clamp(0, bev_size - 1)).view(B, -1)
+    flat_mask = mask.float().view(B, -1)
+
+    bev = torch.zeros(B, bev_size, bev_size, device=device, dtype=torch.float32)
+    bev.view(B, -1).scatter_add_(1, flat_idx, flat_mask)
+
+    return torch.stack([_raycast_free_torch(b > 0) for b in bev], dim=0)
+
+
+def bev_3state_to_binary(bev: torch.Tensor) -> torch.Tensor:
+    """[B,S,S] 3-state (0=unk,0.5=free,1=occ) → [B,3,S,S]: [free_ch, occ_ch, unk_ch]."""
+    free = ((bev >= 0.25) & (bev < 0.75)).float()
+    occ  = (bev >= 0.75).float()
+    unk  = (bev < 0.25).float()
+    return torch.stack([free, occ, unk], dim=1)
+
+
+def bev_3state_to_prob(bev: torch.Tensor) -> torch.Tensor:
+    """[B,S,S] 3-state → [B,S,S]: free=0.0, unknown=0.5, occupied=1.0 (probability)."""
+    return torch.where(bev >= 0.75, torch.ones_like(bev),
+           torch.where(bev >= 0.25, torch.zeros_like(bev),
+           torch.full_like(bev, 0.5)))
+
+
+def bev_3state_to_dist(bev: torch.Tensor) -> torch.Tensor:
+    """[B,S,S] 3-state → [B,S,S]: EDT from obstacle(occ|unk), normalized [0,1].
+
+    Conservative: unknown treated as obstacle. Free space near obstacles = 0,
+    far from obstacles = 1. Suitable as a continuous costmap for trajectory models.
+    """
+    import numpy as np
+    from scipy.ndimage import distance_transform_edt
+    result = torch.zeros_like(bev)
+    for i in range(bev.shape[0]):
+        free_map = ((bev[i] >= 0.25) & (bev[i] < 0.75)).cpu().numpy().astype(np.uint8)
+        dist = distance_transform_edt(free_map).astype(np.float32)
+        max_d = dist.max()
+        if max_d > 0:
+            dist /= max_d
+        result[i] = torch.from_numpy(dist).to(bev.device)
+    return result
+
+
+def bev_3state_to_dist_sep(bev: torch.Tensor) -> torch.Tensor:
+    """[B,S,S] 3-state → [B,3,S,S]: [dist_ch, occ_ch, unk_ch].
+
+    Ch0 (dist): EDT from obstacle(occ|unk), normalized [0,1]. Same as bev_3state_to_dist.
+    Ch1 (occ) : 1.0 where occupied, 0.0 elsewhere.
+    Ch2 (unk) : 1.0 where unknown,  0.0 elsewhere.
+    """
+    dist = bev_3state_to_dist(bev)
+    occ  = (bev >= 0.75).float()
+    unk  = (bev <  0.25).float()
+    return torch.stack([dist, occ, unk], dim=1)
+
+
 def save_image(img, path: str) -> None:
     """Save a single image to disk with cv2.imwrite.
 

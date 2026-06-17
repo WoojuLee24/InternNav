@@ -36,6 +36,11 @@ from PIL import Image
 from internnav.model.utils.depth_rgb_to_bev_torch import (
     depth_rgb_to_bev,
     depth_to_bev_occ,
+    depth_to_bev_occ_ros2,
+    bev_3state_to_binary,
+    bev_3state_to_prob,
+    bev_3state_to_dist,
+    bev_3state_to_dist_sep,
 )
 
 
@@ -258,7 +263,31 @@ class BEVProcessor:
                    pitch, image_type: str,
                    cam_height=None) -> torch.Tensor:
         """[N, H, W, 3] → [N, 3, S, S] BEV; pitch/cam_height may be scalar or [N] tensor."""
-        if image_type == 'occ':
+        if image_type in ('occ', 'occ.binary', 'occ.prob', 'occ.dist', 'occ.dist.sep'):
+            depth_m = depth_flat.to(self.device).float()
+            _, H, W = depth_m.shape
+            fx, fy, cx, cy = self._scaled_intrinsics(H, W)
+            height = self.cam_height if cam_height is None else cam_height
+            p = self.cam_pitch_deg if pitch is None else pitch
+            bev_3s = depth_to_bev_occ_ros2(
+                depth_m,
+                cam_height=height, cam_pitch_deg=p,
+                cam_x_offset=self.cam_x_offset, cam_z_offset=self.cam_z_offset,
+                fx=fx, fy=fy, cx=cx, cy=cy,
+                bev_range=self.bev_range, bev_size=self.bev_size,
+                depth_scale=1.0, z_min=self.z_min, z_max=self.z_max,
+            )  # [N, S, S]: 0=unknown, 0.5=free, 1.0=occupied
+            if image_type == 'occ':
+                return bev_3s.unsqueeze(1).expand(-1, 3, -1, -1).contiguous()
+            if image_type == 'occ.binary':
+                return bev_3state_to_binary(bev_3s)   # [N, 3, S, S]: [free, occ, unk]
+            if image_type == 'occ.prob':
+                return bev_3state_to_prob(bev_3s).unsqueeze(1).expand(-1, 3, -1, -1).contiguous()
+            if image_type == 'occ.dist':
+                return bev_3state_to_dist(bev_3s).unsqueeze(1).expand(-1, 3, -1, -1).contiguous()
+            if image_type == 'occ.dist.sep':
+                return bev_3state_to_dist_sep(bev_3s)  # [N, 3, S, S]: [dist, occ, unk]
+        if image_type == 'occ_old':
             bev_hw = self.occupancy(depth_flat, depth_in_meters=True,
                                     cam_pitch_deg=pitch, rgb=rgb_flat, cam_height=cam_height)
             return bev_hw.unsqueeze(1).expand(-1, 3, -1, -1).contiguous()
@@ -422,13 +451,110 @@ class BEVImageProvider(VisualInputProvider):
             prefix = f"{self.debug_dir}/step_{s:06d}_b{b:02d}"
             fpv  = rgb[b, 0]   # [H, W, 3]
             bev0 = bev[b, 0]   # [H, W, 3]
-            save_image(fpv,  f"{prefix}_1_fpv.jpg")
+            save_image(fpv, f"{prefix}_1_fpv.jpg")
             save_image(bev0, f"{prefix}_3_bev.jpg")
 
             if depth is not None:
                 gt_d = depth[b, 0, ..., 0]   # [H, W] metres
                 depth_vis = (gt_d / gt_d.max().clamp(min=0.1)).clamp(0, 1)
                 save_image(depth_vis, f"{prefix}_2_gt_depth.jpg")
+
+                # ── occupancy comparison (training torch vs ROS2 numpy) ────────
+                def _raycast_free(grid_np):
+                    """BEV 중심 → occupied 셀 방향으로 raycasting해 free(0) 셀 표시."""
+                    g = grid_np.copy()
+                    S2 = g.shape[0]
+                    ci = cj = S2 // 2
+                    occ_r, occ_c = np.where(g == 100)
+                    for r, c in zip(occ_r, occ_c):
+                        n = max(abs(int(r) - ci), abs(int(c) - cj))
+                        if n == 0:
+                            continue
+                        ts = np.arange(n) / n          # [0, 1) — exclude endpoint
+                        rs = (ci + ts * (r - ci)).astype(np.int32).clip(0, S2 - 1)
+                        cs = (cj + ts * (c - cj)).astype(np.int32).clip(0, S2 - 1)
+                        free_mask = g[rs, cs] == -1
+                        g[rs[free_mask], cs[free_mask]] = 0
+                    return g
+
+                def _vis_occ(grid_np):
+                    """[-1/0/100] int8 [S,S] → [S,S,3] uint8 BGR (ROS2 rviz 색상)."""
+                    img = np.full((*grid_np.shape, 3), 128, dtype=np.uint8)  # unknown → gray
+                    img[grid_np == 0]   = (255, 255, 255)   # free    → white
+                    img[grid_np == 100] = (0,   0,   0  )   # occupied → black
+                    return img
+
+                H2, W2 = gt_d.shape
+                fx2, fy2, cx2, cy2 = self.processor._scaled_intrinsics(H2, W2)
+                p0 = pitch[b].item()      if isinstance(pitch,      torch.Tensor) else (float(pitch)      if pitch      is not None else self.processor.cam_pitch_deg)
+                h0 = cam_height[b].item() if isinstance(cam_height, torch.Tensor) else (float(cam_height) if cam_height is not None else self.processor.cam_height)
+                # 3_train_occ: _vis_occ visualization from bev0 per image_type
+                _bev0_np = bev0.float().cpu().numpy()  # [H, W, 3]
+                _101 = None
+                if self.image_type == 'occ':
+                    _101 = np.where(_bev0_np[..., 0] >= 0.75, 100,
+                           np.where(_bev0_np[..., 0] >= 0.25, 0, -1)).astype(np.int8)
+                elif self.image_type == 'occ.binary':
+                    _free_ch, _occ_ch = _bev0_np[..., 0], _bev0_np[..., 1]
+                    _101 = np.where(_occ_ch > 0.5, 100,
+                           np.where(_free_ch > 0.5, 0, -1)).astype(np.int8)
+                elif self.image_type == 'occ.prob':
+                    _ch = _bev0_np[..., 0]
+                    _101 = np.where(_ch >= 0.75, 100,
+                           np.where(_ch <= 0.25, 0, -1)).astype(np.int8)
+                if _101 is not None:
+                    save_image(_vis_occ(_101), f"{prefix}_3_train_occ.jpg")
+                # 2. ROS2-style OCC: numpy pinhole + R_c2w (occgrid_publisher.py 로직 재현)
+                gt_d_np = gt_d.float().cpu().numpy()
+                vv, uu = np.mgrid[0:H2, 0:W2]
+                zc = gt_d_np
+                xc = (uu - cx2) * zc / fx2
+                yc = (vv - cy2) * zc / fy2
+                cos_p = np.cos(np.radians(p0))
+                sin_p = np.sin(np.radians(p0))
+                # R_c2w: cam(right,down,fwd) → world(X=fwd, Y=left, Z=up)
+                Xw = -sin_p * yc + cos_p * zc
+                Yw = -xc
+                Zw = -cos_p * yc - sin_p * zc + h0
+                height_mask = (Zw > self.processor.z_min) & (Zw < self.processor.z_max) & (zc > 0.1)
+                S = self.processor.bev_size
+                bev_scale = S / (2.0 * self.processor.bev_range)
+                ii = np.floor(S / 2.0 - Xw * bev_scale).astype(np.int32)
+                jj = np.floor(S / 2.0 - Yw * bev_scale).astype(np.int32)
+                in_bounds = (ii >= 0) & (ii < S) & (jj >= 0) & (jj < S)
+                valid = height_mask & in_bounds
+                ros2_101 = np.full((S, S), -1, dtype=np.int8)
+                ros2_101[ii[valid], jj[valid]] = 100
+                save_image(_vis_occ(_raycast_free(ros2_101)), f"{prefix}_6_ros2_occ.jpg")
+                # 3. ROS2 package build_occupancy_grid (same z filter, 224×224)
+                try:
+                    import sys as _sys
+                    _occ_pub_dir = os.path.normpath(os.path.join(
+                        os.path.dirname(os.path.abspath(__file__)),
+                        '..', '..', '..', 'scripts', 'realworld'))
+                    if _occ_pub_dir not in _sys.path:
+                        _sys.path.insert(0, _occ_pub_dir)
+                    from occgrid_publisher import build_occupancy_grid as _build_occ_grid
+                    from builtin_interfaces.msg import Time as _RosTime
+                    pcloud_xy_v = np.stack([Xw.ravel()[valid.ravel()],
+                                            Yw.ravel()[valid.ravel()]], axis=-1)
+                    _resolution = 2.0 * self.processor.bev_range / S   # 10/224 m/cell
+                    _msg = _build_occ_grid(
+                        pcloud_xy_v,
+                        stamp=_RosTime(sec=0, nanosec=0),
+                        frame_id='debug',
+                        resolution=_resolution,
+                        grid_size=S,
+                        center_x=0.0, center_y=0.0,
+                    )
+                    ros2_pkg_grid = np.array(_msg.data, dtype=np.int8).reshape(S, S)
+                    # build_occupancy_grid: grid[cy, cx] where cx=X(fwd)→col, cy=Y(left)→row
+                    # training BEV: bev[i,j] = bev[S/2-X*s, S/2-Y*s] (forward=top, left=left)
+                    # alignment: bev[i,j] = ros2[S-1-j, S-1-i]
+                    ros2_pkg_aligned = np.fliplr(np.flipud(ros2_pkg_grid)).T
+                    save_image(_vis_occ(_raycast_free(ros2_pkg_aligned)), f"{prefix}_7_ros2_pkg_occ.jpg")
+                except Exception:
+                    import traceback as _tb; _tb.print_exc()
 
                 if self.processor.depth_source == 'dav2':
                     with torch.no_grad():
