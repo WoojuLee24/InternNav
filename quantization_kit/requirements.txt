@@ -1,0 +1,32 @@
+# Runtime dependencies for the S2 quantization kit.
+# Tested with torch 2.9 / transformers 4.51 / CUDA 13.
+#
+# Install order:
+#   1. torch (CUDA-appropriate wheel, see below)
+#   2. pip install -r requirements.txt
+#   3. pip install -e <InternNav-repo-root>   OR   set PYTHONPATH=<InternNav-repo-root>
+
+# --- torch: install separately to match your CUDA version ---
+# CUDA 12.8:  pip install torch --index-url https://download.pytorch.org/whl/cu128
+# CUDA 13.0:  pip install torch --index-url https://download.pytorch.org/whl/cu130
+torch>=2.4
+
+# --- core inference ---
+transformers>=4.49          # Qwen2_5_VLForConditionalGeneration base class
+accelerate>=0.34            # device_map support in from_pretrained
+diffusers>=0.33             # FlowMatchEulerDiscreteScheduler used by InternVLAN1ForCausalLM
+qwen-vl-utils>=0.0.8        # AutoProcessor image preprocessing for Qwen2.5-VL
+Pillow>=10.0
+numpy>=1.24
+
+# --- data preparation (prepare_dataset.py) ---
+pandas>=2.0
+pyarrow>=14.0               # parquet reader
+
+# --- optional: faster attention (pass --attn_implementation sdpa if not installed) ---
+# flash-attn>=2.5
+
+# --- optional: quantization backends ---
+# bitsandbytes>=0.43         # 4-bit / 8-bit BnB
+# auto-gptq>=0.7             # GPTQ
+# autoawq>=0.2               # AWQ
