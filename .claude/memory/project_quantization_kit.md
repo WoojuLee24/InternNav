@@ -12,6 +12,19 @@ InternVLA-N1 S2(System 2, Qwen2.5-VL 기반 플래너)를 양자화 실험에서
 
 **Why:** 양자화 팀이 모델만 교체(S2Inferencer._load_model 오버라이드)하고 나머지 파이프라인을 동일하게 유지할 수 있어야 결과 비교가 공정함.
 
+## 설치 (빈 Docker 환경)
+
+```bash
+# 1. torch (CUDA 버전에 맞게)
+pip install torch --index-url https://download.pytorch.org/whl/cu128   # CUDA 12.8
+# 2. kit 의존성 (transformers, accelerate, diffusers, qwen-vl-utils, pandas 등)
+pip install -r quantization_kit/requirements.txt
+# 3. internnav 패키지 (InternVLAN1ForCausalLM import용)
+pip install -e .   # 또는: export PYTHONPATH=/path/to/InternNav
+# 4. (선택) flash-attn — 없으면 --attn_implementation sdpa
+pip install flash-attn==2.7.4.post1
+```
+
 ## 파일 구조
 
 | 파일 | 역할 |
