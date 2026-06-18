@@ -27,5 +27,7 @@ PARAMS = replace(
     bev_s2_mode_eval="fpv",  # eval S2 stays fpv (S2 BEV not trained)
     bev_image_type="occ",
     bev_depth_source="dav2",
+    bev_z_min=0.05,          # ROS2 standard: exclude floor/ceiling
+    bev_z_max=2.0,
 )
 eval_cfg = base.make_eval_cfg(PARAMS)

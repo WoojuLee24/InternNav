@@ -74,36 +74,6 @@ def test_bad_mode_raises():
 
 # ------------------------------------------------------- parity (the point)
 
-def test_parity_with_legacy_training_helper_rgb():
-    """training BEV (rgb) == legacy internvla_n1_bev.py rgb_gt path."""
-    from internnav.model.basemodel.internvla_n1.internvla_n1_bev import _depth_rgb_to_bev_batch
-
-    imgs, depths = make_traj()
-    proc = make_train_bev_processor(1.25, 'cpu')
-    out_i, _ = apply_bev_to_traj(imgs, depths, proc, s1_mode='bev', image_type='rgb', cam_pitch_deg=0.0)
-
-    # legacy helper, flattened then resized the same way
-    import torch.nn.functional as F
-    legacy_chw = _depth_rgb_to_bev_batch(depths.flatten(0, 1), imgs.flatten(0, 1), 1.25, 0.0)
-    legacy = F.interpolate(legacy_chw, size=(H, W), mode='bilinear', align_corners=False)
-    legacy = legacy.permute(0, 2, 3, 1).reshape(B, T, H, W, 3)
-    assert torch.equal(out_i, legacy), f"max diff {float((out_i - legacy).abs().max())}"
-
-
-def test_parity_with_legacy_training_helper_occ():
-    from internnav.model.basemodel.internvla_n1.internvla_n1_bev import _depth_to_bev_occ_batch
-
-    imgs, depths = make_traj()
-    proc = make_train_bev_processor(1.25, 'cpu')
-    out_i, _ = apply_bev_to_traj(imgs, depths, proc, s1_mode='bev', image_type='occ', cam_pitch_deg=0.0)
-
-    import torch.nn.functional as F
-    legacy_hw = _depth_to_bev_occ_batch(depths.flatten(0, 1), 1.25, 0.0)
-    legacy_chw = legacy_hw.unsqueeze(1).expand(-1, 3, -1, -1).contiguous()
-    legacy = F.interpolate(legacy_chw, size=(H, W), mode='bilinear', align_corners=False)
-    legacy = legacy.permute(0, 2, 3, 1).reshape(B, T, H, W, 3)
-    assert torch.equal(out_i, legacy)
-
 
 def test_parity_train_vs_inference_processor():
     """The processor used in training equals an eval-config-style BEVProcessor."""

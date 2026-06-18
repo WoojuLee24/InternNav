@@ -11,7 +11,7 @@ modified. This file gives training the inference-side abstraction:
         'fpv'     → no change (baseline training)
         'bev'     → BEV replaces traj_images   (≡ legacy rgb_gt / occ_gt)
         'fpv_bev' → FPV ++ BEV along T          (≡ legacy fpv_concat_gt)
-    ``bev_image_type`` ∈ {rgb, occ} and ``bev_depth_source`` ∈ {gt, dav2}
+    ``bev_image_type`` ∈ {rgb, occ} and ``bev_depth_source`` ∈ {gt, dav2, udv2}
     together cover all five legacy ``bev_mode`` values.
 
 Only the training path (``labels is not None``) substitutes; inference passes
@@ -127,7 +127,7 @@ def parse_bev_cli_args(argv: List[str]) -> Tuple[dict, List[str]]:
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument('--bev_s1_mode', choices=['fpv', 'bev', 'fpv_bev'], default='bev')
     p.add_argument('--bev_image_type', choices=['rgb', 'occ', 'occ.binary', 'occ.prob', 'occ.dist', 'occ.dist.sep'], default='rgb')
-    p.add_argument('--bev_depth_source', choices=['gt', 'dav2'], default='gt')
+    p.add_argument('--bev_depth_source', choices=['gt', 'dav2', 'udv2'], default='gt')
     p.add_argument('--bev_dav2_max_depth', type=float, default=10.0)
     p.add_argument('--bev_z_min', type=float, default=_Z_MIN)
     p.add_argument('--bev_z_max', type=float, default=_Z_MAX)
@@ -234,7 +234,7 @@ class InternVLAN1BEVProviderForCausalLM(InternVLAN1ForCausalLM):
 
         # Same BEVImageProvider.get_s1_input() path as eval.
         # depth shape: train [B,T,H,W] ↔ provider [B,T,H,W,1] — adapt around the call.
-        if labels is not None and s1_mode != 'fpv' and (depth_source == 'dav2' or traj_depths is not None):
+        if labels is not None and s1_mode != 'fpv' and (depth_source in ('dav2', 'udv2') or traj_depths is not None):
             # pass [B] tensors so each sample uses its own pitch and cam_height
             # .float(): HF Trainer casts batch to bfloat16; bfloat16(0.6)=0.6016 (7-bit mantissa loss)
             cam_pitch  = traj_cam_pitch_2.float()  if traj_cam_pitch_2  is not None else _DEFAULT_CAM_PITCH

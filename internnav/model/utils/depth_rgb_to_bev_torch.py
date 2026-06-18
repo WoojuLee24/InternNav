@@ -185,6 +185,7 @@ def depth_rgb_to_bev(
     depth_scale: float = 10.0,
     z_min: float = -0.1,
     z_max: float = 2.0,
+    z_filter: bool = True,
 ) -> torch.Tensor:
     """FPV depth + RGB → coloured BEV image.
 
@@ -192,8 +193,9 @@ def depth_rgb_to_bev(
     (mirrors DenseLoc's ``bev.color`` mode: get_valid_batch_points2 with RGB).
 
     Args:
-        depth: [B, H, W]    normalised depth [0, 1]
-        rgb  : [B, H, W, 3] float RGB [0, 1]  (HWC layout)
+        depth   : [B, H, W]    normalised depth [0, 1]
+        rgb     : [B, H, W, 3] float RGB [0, 1]  (HWC layout)
+        z_filter: if False, skip height filter and project ALL valid depth pixels.
     Returns:
         bev  : [B, 3, bev_size, bev_size]  coloured BEV [0, 1]
     """
@@ -204,7 +206,10 @@ def depth_rgb_to_bev(
     X_w, Y_w, Z_w = xyz_w[..., 0], xyz_w[..., 1], xyz_w[..., 2]
 
     D = depth * depth_scale
-    mask = (Z_w >= z_min) & (Z_w <= z_max) & (D > 0.1)  # [B, H, W]
+    if z_filter:
+        mask = (Z_w >= z_min) & (Z_w <= z_max) & (D > 0.1)  # [B, H, W]
+    else:
+        mask = (D > 0.1)
 
     i_idx, j_idx = _world_to_bev_idx(X_w, Y_w, bev_range, bev_size)
     flat_idx = (i_idx * bev_size + j_idx).view(B, -1)           # [B, H*W]
