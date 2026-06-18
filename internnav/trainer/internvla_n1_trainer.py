@@ -150,7 +150,7 @@ def train(attn_implementation="flash_attention_2"):
 
     if 'internvla-n1-system2' in model_args.model_name_or_path.lower():
         if model_args.bev_mode != 'none':
-            from internnav.model.basemodel.internvla_n1.internvla_n1_bev import InternVLAN1BEVForCausalLM
+            from internnav.model.basemodel.internvla_n1.internvla_n1_bev_provider import InternVLAN1BEVProviderForCausalLM as InternVLAN1BEVForCausalLM
             ModelClass = InternVLAN1BEVForCausalLM
         else:
             ModelClass = InternVLAN1ForCausalLM
