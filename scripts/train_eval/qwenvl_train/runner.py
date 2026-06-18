@@ -63,6 +63,7 @@ def _run_and_tee(cmd: List[str], log_path: Optional[str], env=None) -> int:
 
     print("[run] " + " ".join(cmd), flush=True)
     fp = open(log_path, "w") if log_path else None
+    os.umask(0o000)  # child processes inherit this → new dirs/files get 777/666
     try:
         proc = subprocess.Popen(
             cmd, cwd=REPO_ROOT, env=env, stdout=subprocess.PIPE,
