@@ -21,4 +21,4 @@ docker run --name internnav-isaac-lab-5090 --shm-size 32g --entrypoint bash -it 
    -v /media/TrainDataset:/ws/src/InternNav/data:rw \
    -v /media/TrainDataset/InternData-N1-v0.5-mini/scene_data/mp3d_pe:/isaac-sim/Matterport3D/data/v1/scans:ro \
    -w /ws \
-   dnwn24/internnav:torch2.9.0-cuda13.0-issaclab-ros2-jazzy-5090
+   dnwn24/internnav:torch2.9.0-cuda13.0-issacsim5.1.0-ros2-jazzy-5090
