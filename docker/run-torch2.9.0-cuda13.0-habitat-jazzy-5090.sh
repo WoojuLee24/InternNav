@@ -1,0 +1,17 @@
+#!/bin/bash
+
+xhost +local:root
+
+docker run --name internnav-torch2.9.0-cuda13.0-habitat-jazzy-5090 \
+    --shm-size 32g \
+    --entrypoint bash \
+    -it --rm \
+    --network=host \
+    --gpus all \
+    -v $HOME/.Xauthority:/root/.Xauthority \
+    -v /home/universe/gd_project/modules/gd_vln/workspace:/ws:rw \
+    -v /home/universe/gd_project/modules/gd_vln/workspace:/gd_vln:rw \
+    -v /home/universe/data:/datasets:ro \
+    -v /media/TrainDataset:/ws/src/InternNav/data:rw \
+    -w /ws \
+    dnwn24/internnav:torch2.9.0-cuda13.0-habitat-jazzy-5090
