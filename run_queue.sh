@@ -31,7 +31,7 @@ while true; do
         log "========================================"
 
         # 줄 번호 기반으로 comment out (특수문자 안전)
-        sed -i "${LINE_NUM}s|.*|# [done] ${NEXT}|" "$QUEUE_FILE"
+        sed -i "${LINE_NUM}s|.*|# ${NEXT}|" "$QUEUE_FILE"
     else
         log "Running (last, repeating): $NEXT"
         log "========================================"
