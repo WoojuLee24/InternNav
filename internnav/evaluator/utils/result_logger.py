@@ -20,6 +20,7 @@ class ResultLogger:
         self.name = config.task_name
         self.lmdb_path = get_lmdb_path(self.name)
         self.dataset_type = dataset_cfg.dataset_type
+        self.last_result = None
         self.split_map = self.get_split_map(
             base_data_dir=config.base_data_dir,
             split_data_types=config.split_data_types,
@@ -242,6 +243,9 @@ class ResultLogger:
                 "total_osr": 0.0,
                 "total_success": 0.0,
                 "total_spl": 0.0,
+                "total_collision_count": 0,
+                "total_steps": 0,
+                "collision_free_success": 0,
                 "reason_map": collections.Counter({"reach_goal": 0}),
                 "count": 0,
             }
@@ -282,11 +286,17 @@ class ResultLogger:
                     success = data["info"]["success"]
                     spl = data["info"]["spl"]
 
+                    collision_count = data["info"].get("collision_count", 0)
+                    steps = data["info"].get("steps", 0)
+
                     acc["total_TL"] += TL
                     acc["total_NE"] += NE
                     acc["total_osr"] += osr
                     acc["total_success"] += success
                     acc["total_spl"] += spl
+                    acc["total_collision_count"] += collision_count
+                    acc["total_steps"] += steps
+                    acc["collision_free_success"] += int(success > 0 and collision_count == 0)
                     acc["count"] += 1
 
                     ret_type = data.get("fail_reason", "") or "success"
@@ -307,6 +317,7 @@ class ResultLogger:
             fall = reason_map.get("fall", 0)
             stuck = reason_map.get("stuck", 0)
 
+            total_steps = acc["total_steps"]
             json_data[split] = {
                 "TL": round(acc["total_TL"] / count, 4),
                 "NE": round(acc["total_NE"] / count, 4),
@@ -315,9 +326,17 @@ class ResultLogger:
                 "OS": round(acc["total_osr"] / count, 4),
                 "SR": round(acc["total_success"] / count, 4),
                 "SPL": round(acc["total_spl"] / count, 4),
+                "CR": round(acc["total_collision_count"] / total_steps, 4) if total_steps > 0 else 0.0,
+                "CFSR": round(acc["collision_free_success"] / count, 4),
                 "Count": count,
             }
 
         # write log content to file
-        with open(f"{PROJECT_ROOT_PATH}/logs/{self.name}/result.json", "w") as f:
+        output_dir = os.environ.get("EVAL_OUTPUT_DIR") or f"{PROJECT_ROOT_PATH}/logs/{self.name}"
+        os.makedirs(output_dir, exist_ok=True)
+        machine = os.environ.get("TRAIN_EVAL_TARGET", "")
+        fname = f"result_{machine}.json" if machine else "result.json"
+        with open(os.path.join(output_dir, fname), "w") as f:
             json.dump(json_data, f, indent=2, ensure_ascii=False)
+        self.last_result = json_data
+        return json_data

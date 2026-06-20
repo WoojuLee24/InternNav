@@ -138,17 +138,20 @@ def load_eval_cfg(config_path, attr_name='eval_cfg'):
 
 def main():
     args = parse_args()
+    eval_output_dir = os.environ.get("EVAL_OUTPUT_DIR")
     if args.quiet:
-        apply_quiet_mode(args.model_path)
+        apply_quiet_mode(eval_output_dir or args.model_path)
     evaluator_cfg = load_eval_cfg(args.config, attr_name='eval_cfg')
 
     if args.model_path is not None:
-        import os
         evaluator_cfg.agent.model_settings['model_path'] = args.model_path
         ckpt_name = os.path.basename(args.model_path.rstrip('/'))
         evaluator_cfg.eval_settings.setdefault('wandb_run_name', ckpt_name)
         evaluator_cfg.eval_settings.setdefault('output_path', f"./logs/eval/{ckpt_name}")
         evaluator_cfg.eval_settings['best_checkpoint'] = ckpt_name
+
+    if eval_output_dir:
+        evaluator_cfg.eval_settings["output_path"] = eval_output_dir
 
     if args.bev_s1_mode is not None:
         evaluator_cfg.agent.model_settings['bev_s1_mode'] = args.bev_s1_mode

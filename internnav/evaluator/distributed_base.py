@@ -142,7 +142,9 @@ class DistributedEvaluator(Evaluator):
         print(result_all)
         if self.output_path:
             os.makedirs(self.output_path, exist_ok=True)
-            out_path = os.path.join(self.output_path, "result.json")
+            machine = os.environ.get("TRAIN_EVAL_TARGET", "")
+            fname = f"result_{machine}.json" if machine else "result.json"
+            out_path = os.path.join(self.output_path, fname)
             with open(out_path, "a") as f:
                 f.write(json.dumps(result_all) + "\n")
 
