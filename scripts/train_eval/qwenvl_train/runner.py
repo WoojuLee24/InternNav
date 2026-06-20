@@ -39,11 +39,13 @@ from datetime import datetime
 from typing import List, Optional
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+H1_PYTHON = "/workspace/isaaclab/_isaac_sim/python.sh"
 
 # The config (Params + eval-cfg builders) lives in its own file, separated out so
 # this module stays a pure train+eval engine. runner imports Params for type hints
 # and uses default_config.py as the default --config (the b4 baseline).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO_ROOT)  # make `internnav` importable without pip install -e .
 from default_config import Params  # noqa: E402
 
 
@@ -118,7 +120,8 @@ def run_train(p: Params, output_dir: str, run_name: str, in_process: bool = Fals
         # single-process distributed env (mirrors torchrun --nproc_per_node=1 so
         # DeepSpeed / HF Trainer initialize the process group correctly)
         env = {"RANK": "0", "WORLD_SIZE": "1", "LOCAL_RANK": "0",
-               "MASTER_ADDR": p.master_addr, "MASTER_PORT": str(master_port)}
+               "MASTER_ADDR": p.master_addr, "MASTER_PORT": str(master_port),
+               "WANDB_DIR": output_dir}
         return _run_in_process(p.trainer, argv, env_extra=env)
     launcher = [
         "torchrun",
@@ -130,7 +133,10 @@ def run_train(p: Params, output_dir: str, run_name: str, in_process: bool = Fals
         p.trainer,  # base trainer, or the BEV provider trainer when p.bev
     ]
     cmd = launcher + argv
-    return _run_and_tee(cmd, os.path.join(output_dir, "train.log"))
+    log_dir = os.path.join(output_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    return _run_and_tee(cmd, os.path.join(log_dir, "train.log"),
+                        env={**os.environ, "WANDB_DIR": output_dir})
 
 
 def _pick_port() -> int:
@@ -168,7 +174,7 @@ _WANDB_RUN_ID_FILE = "wandb_run_id.txt"
 
 def _save_wandb_run_id(output_dir: str) -> None:
     """After training, save the wandb run ID to the checkpoint dir (on shared storage)."""
-    runs = sorted(glob.glob(os.path.join(REPO_ROOT, "wandb", "run-*")), key=os.path.getmtime, reverse=True)
+    runs = sorted(glob.glob(os.path.join(output_dir, "wandb", "run-*")), key=os.path.getmtime, reverse=True)
     if not runs:
         return
     base = os.path.basename(runs[0])
@@ -178,38 +184,74 @@ def _save_wandb_run_id(output_dir: str) -> None:
             f.write(run_id)
 
 
-def _wandb_resume_env(output_dir: str = None, base_env=None) -> dict:
-    """Resume the training wandb run so eval metrics land in the same run.
+def _wandb_resume_env(output_dir: str = None, base_env=None, override_run_id: str = None) -> dict:
+    """Return env vars that make the subprocess resume an existing wandb run.
 
-    Reads run ID from <output_dir>/wandb_run_id.txt (written after training,
-    on shared storage) so eval on a different machine can find the correct run.
-    Falls back to the local wandb/ directory for backward compatibility.
+    Priority:
+      1. override_run_id — caller already resolved a run ID (e.g. --wandb-new-run one-shot)
+      2. <output_dir>/wandb_run_id.txt — written after training or first eval
     """
     env = dict(base_env or os.environ)
-    run_id = None
-    # 1) shared storage: run ID saved by _save_wandb_run_id after training
-    if output_dir:
+    run_id = override_run_id or None
+    if not run_id and output_dir:
         id_file = os.path.join(output_dir, _WANDB_RUN_ID_FILE)
         if os.path.exists(id_file):
             run_id = open(id_file).read().strip() or None
-    # 2) fallback: local wandb/ directory (same-machine case)
-    if not run_id:
-        runs = sorted(glob.glob(os.path.join(REPO_ROOT, "wandb", "run-*")), key=os.path.getmtime, reverse=True)
-        if runs:
-            base = os.path.basename(runs[0])
-            run_id = base.split("-", 2)[-1] if base.count("-") >= 2 else None
     if run_id:
         env["WANDB_RUN_ID"] = run_id
         env["WANDB_RESUME"] = "allow"
+        print(f"[wandb] resuming run {run_id}", flush=True)
     return env
 
 
 def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
              machine: str = "h200", nproc: int = 8, master_port: int = 2333,
              in_process: bool = False, debugpy: str = None,
-             debug_dir: Optional[str] = None) -> int:
-    env = _wandb_resume_env(output_dir=output_dir)
+             debug_dir: Optional[str] = None,
+             wandb_run_id: Optional[str] = None,
+             wandb_new_run: bool = False) -> int:
+    log_dir = os.path.join(output_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    id_file = os.path.join(output_dir, _WANDB_RUN_ID_FILE)
+    one_shot_run_id = None  # set for --wandb-new-run (not saved to txt)
+
+    if wandb_run_id:
+        # --wandb-run-id: explicit run to resume; persist so future evals reuse it
+        with open(id_file, "w") as f:
+            f.write(wandb_run_id)
+        print(f"[wandb] using specified run ID: {wandb_run_id}", flush=True)
+    elif wandb_new_run:
+        # --wandb-new-run: fresh run for this eval only; do NOT overwrite txt
+        ckpt_name = os.path.basename(output_dir.rstrip('/'))
+        new_run_name = f"new/{ckpt_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        try:
+            import wandb
+            if wandb.run is None:
+                run = wandb.init(project="huggingface", name=new_run_name, dir=output_dir)
+                print(f"[wandb] new run created (one-shot): {run.url}", flush=True)
+                wandb.finish()
+                one_shot_run_id = run.id
+        except Exception as e:
+            print(f"[wandb] init failed: {e}", flush=True)
+    elif not os.path.exists(id_file):
+        # old checkpoint without txt: create run and save for future evals
+        ckpt_name = os.path.basename(output_dir.rstrip('/'))
+        new_run_name = f"original/{ckpt_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        try:
+            import wandb
+            if wandb.run is None:
+                run = wandb.init(project="huggingface", name=new_run_name, dir=output_dir)
+                print(f"[wandb] new run created: {run.url}", flush=True)
+                wandb.finish()
+                with open(id_file, "w") as f:
+                    f.write(run.id)
+        except Exception as e:
+            print(f"[wandb] init failed: {e}", flush=True)
+
+    env = _wandb_resume_env(output_dir=output_dir, override_run_id=one_shot_run_id)
     env["TRAIN_EVAL_TARGET"] = machine  # read by the experiment config.py
+    env["EVAL_OUTPUT_DIR"] = os.path.abspath(log_dir)
+    env["WANDB_DIR"] = output_dir
     if debugpy:
         env["DEBUGPY"] = debugpy  # habitat_vln_evaluator.py checks DEBUGPY=='eval' after model load
     if debug_dir:
@@ -223,16 +265,23 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
         # dropped so console logs are visible while stepping in the debugger.
         argv = [a for a in eval_argv if a != "--quiet"]
         return _run_in_process("scripts/eval/eval.py", argv, env_extra=env)
-    cmd = ["torchrun", f"--nproc_per_node={nproc}", f"--master_port={master_port}",
-           "scripts/eval/eval.py"] + eval_argv
-    return _run_and_tee(cmd, os.path.join(output_dir, "test.log"), env=env)
+    if machine == "h1":
+        # Isaac Sim does not support torchrun; run as a single process.
+        python = H1_PYTHON if os.path.exists(H1_PYTHON) else sys.executable
+        cmd = [python, "scripts/eval/eval.py"] + eval_argv
+    else:
+        cmd = ["torchrun", f"--nproc_per_node={nproc}", f"--master_port={master_port}",
+               "scripts/eval/eval.py"] + eval_argv
+    return _run_and_tee(cmd, os.path.join(log_dir, f"test_{machine}.log"), env=env)
 
 
 def train_and_eval(p: Params, exp_name: str, config_path: str, *,
                    machine: str = "h200", do_train: bool = True, do_eval: bool = True,
                    checkpoints_root: str = "/home/irteam/data-vol2/checkpoints",
                    model_path: Optional[str] = None, in_process: bool = False,
-                   debugpy: str = None) -> None:
+                   debugpy: str = None,
+                   wandb_run_id: Optional[str] = None,
+                   wandb_new_run: bool = False) -> None:
     """End-to-end driver. ``exp_name`` e.g. 'batch_size/b4_eff128_base'.
 
     ``in_process=True`` runs train/eval in THIS process (no torchrun) for VSCode
@@ -240,7 +289,10 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
     running both in one process re-uses an already-initialized dist/CUDA state.
     """
     run_name = f"{exp_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    output_dir = os.path.join(checkpoints_root, run_name)
+    if not do_train and model_path:
+        output_dir = os.path.abspath(model_path)
+    else:
+        output_dir = os.path.join(checkpoints_root, run_name)
 
     if do_train:
         rc = run_train(p, output_dir, run_name, in_process=in_process,
@@ -269,7 +321,8 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
     os.makedirs(output_dir, exist_ok=True)
     run_eval(config_path, best, run_name, output_dir, machine=machine,
              nproc=p.nproc_per_node, in_process=in_process, debugpy=debugpy,
-             debug_dir=p.debug_dir)
+             debug_dir=p.debug_dir,
+             wandb_run_id=wandb_run_id, wandb_new_run=wandb_new_run)
 
 
 # --------------------------------------------------------------------------- #
@@ -310,7 +363,7 @@ def main_cli() -> None:
                     help="experiment config .py exposing PARAMS (+ optional EXP_NAME). "
                          "Defaults to batch_size/default_config.py (the b4 baseline).")
     ap.add_argument("--machine", choices=["h200", "5090", "h1"], default="h200",
-                    help="target machine: h200/5090 selects train+eval infra presets; h1 = Isaac Sim (eval manual)")
+                    help="target machine: h200/5090 selects train+eval infra presets; h1 = Isaac Sim (single-process python.sh)")
     ap.add_argument("--no-train", action="store_true", help="skip training (eval an existing ckpt)")
     ap.add_argument("--no-eval", action="store_true", help="train only")
     ap.add_argument("--model-path", default=None, help="ckpt to eval when --no-train")
@@ -327,7 +380,22 @@ def main_cli() -> None:
                          "runner: pauses at start; trainer/eval: pauses after model load.")
     ap.add_argument("--debug-dir", default=None,
                     help="BEV debug image output dir (auto-set to output/bev_debug when --debugpy is given)")
+    # --- wandb control ---
+    ap.add_argument("--wandb-run-id", default=None,
+                    help="resume a specific wandb run ID (saved to wandb_run_id.txt for future evals)")
+    ap.add_argument("--wandb-new-run", action="store_true",
+                    help="force a fresh wandb run for this eval (does NOT overwrite wandb_run_id.txt)")
     args = ap.parse_args()
+
+    try:
+        import wandb
+        wandb.login(relogin=False)  # prompts once if not logged in; saves to ~/.netrc for subprocesses
+    except Exception as e:
+        print(f"[Warning] wandb login failed: {e}. Metrics will not be logged to wandb.")
+
+    # Set TRAIN_EVAL_TARGET before _load_config so that make_eval_cfg in the config
+    # module builds the correct eval config (e.g. h1 → Isaac Sim, not Habitat).
+    os.environ["TRAIN_EVAL_TARGET"] = args.machine
 
     in_process = args.in_process
     if args.debugpy == "runner":
@@ -386,6 +454,8 @@ def main_cli() -> None:
         model_path=args.model_path,
         in_process=in_process,
         debugpy=args.debugpy,
+        wandb_run_id=args.wandb_run_id,
+        wandb_new_run=args.wandb_new_run,
     )
 
 

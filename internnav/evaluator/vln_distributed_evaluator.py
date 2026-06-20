@@ -1,3 +1,4 @@
+import os
 from enum import Enum
 from pathlib import Path
 from time import time
@@ -225,7 +226,15 @@ class VLNDistributedEvaluator(DistributedEvaluator):
                         result=obs['metrics'][list(obs['metrics'].keys())[0]][0]['fail_reason'],
                     )
                 # json format result
-                self.result_logger.finalize_all_results(self.rank, self.world_size)
+                result = self.result_logger.finalize_all_results(self.rank, self.world_size)
+                if self._wandb_active and result:
+                    try:
+                        import wandb
+                        for split, metrics in result.items():
+                            count = metrics.get("Count", 0)
+                            wandb.log({f"eval_{split}/samples": count}, step=count)
+                    except Exception as e:
+                        print(f"[Warning] wandb step log failed: {e}")
                 self.runner_status[env_id] = runner_status_code.NOT_RESET
                 log.info(f'env{env_id}: states switch to NOT_RESET.')
         # need this status to reset
@@ -266,8 +275,24 @@ class VLNDistributedEvaluator(DistributedEvaluator):
         log.info(f'[TIME] Env Reset time: {duration}s')
         return False, reset_infos
 
+    def _wandb_init(self):
+        if not self.eval_config.eval_settings.get("use_wandb", True):
+            return False
+        try:
+            import wandb
+            if wandb.run is None:
+                wandb.init(
+                    project=self.eval_config.eval_settings.get("wandb_project", "huggingface"),
+                    name=self.eval_config.eval_settings.get("wandb_run_name"),
+                )
+            return True
+        except Exception as e:
+            print(f"[Warning] wandb init failed: {e}")
+            return False
+
     def eval(self):
         print('--- VlnMultiEvaluator start ---')
+        self._wandb_active = self._wandb_init()
         obs, reset_info = self.env.reset()
         for info in reset_info:
             if info is None:
@@ -302,6 +327,13 @@ class VLNDistributedEvaluator(DistributedEvaluator):
 
             if env_terminate:
                 break
+
+            # debugpy: early exit after 2 episodes for quick wandb connectivity check
+            if os.environ.get("DEBUGPY") and self.result_logger.last_result:
+                count = max((m.get("Count", 0) for m in self.result_logger.last_result.values()), default=0)
+                if count >= 2:
+                    print(f"[debugpy] Early exit after {count} episodes.", flush=True)
+                    break
 
             # show live RGB from env 0
             if self.show_rgb:
@@ -373,5 +405,14 @@ class VLNDistributedEvaluator(DistributedEvaluator):
 
         self.env.close()
         progress_log_multi_util.report()
+
+        if self._wandb_active and self.result_logger.last_result:
+            try:
+                import wandb
+                for split, metrics in self.result_logger.last_result.items():
+                    wandb.log({f"test_{split}/{k}": v for k, v in metrics.items()})
+                wandb.finish()
+            except Exception as e:
+                print(f"[Warning] wandb logging failed: {e}")
 
         print('--- VlnMultiEvaluator end ---')

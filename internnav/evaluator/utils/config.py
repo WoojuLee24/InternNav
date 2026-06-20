@@ -46,6 +46,10 @@ def parse_config(config_file) -> dict:
 
 
 def get_lmdb_path(name):
+    import os
+    eval_output_dir = os.environ.get("EVAL_OUTPUT_DIR")
+    if eval_output_dir:
+        return os.path.join(eval_output_dir, "lmdb", name)
     return PROJECT_ROOT_PATH + f'/data/sample_episodes/{name}'
 
 
