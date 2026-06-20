@@ -22,7 +22,6 @@ production.
 
 import copy
 import itertools
-import random
 import re
 import sys
 import time
@@ -64,7 +63,7 @@ CONJUNCTIONS = [
     "ahead of you is ",
     "in your sight is ",
 ]
-CONJUNCTION = CONJUNCTIONS[0]  # kept for backward-compat; infer() uses CONJUNCTIONS
+CONJUNCTION = CONJUNCTIONS[0]  # fixed for reproducible evaluation
 
 ACTIONS2IDX = OrderedDict({
     "STOP": [0],
@@ -275,9 +274,8 @@ class S2Inferencer:
         input_images = history_pil + [cur_pil]
 
         # ── Step 1 ───────────────────────────────────────────────────────────
-        conjunction = random.choice(CONJUNCTIONS)
+        conjunction = CONJUNCTIONS[0]
         prompt = self._build_prompt(instruction, n_history=len(history_pil))
-        # replace fixed CONJUNCTION in _build_prompt with the randomly chosen one
         prompt = prompt.replace(CONJUNCTION, conjunction, 1)
         conversation = self._make_conversation(prompt, input_images)
 
@@ -299,7 +297,7 @@ class S2Inferencer:
 
             # New user turn: " {conjunction}<image>." using the appended (last) image.
             # Mirrors evaluator: sources[0]["value"] starts as "" then += f" {prompt}."
-            step2_conjunction = random.choice(CONJUNCTIONS)
+            step2_conjunction = CONJUNCTIONS[0]
             step2_user_content = []
             for part in split_and_clean(f" {step2_conjunction}{DEFAULT_IMAGE_TOKEN}."):
                 if part == DEFAULT_IMAGE_TOKEN:
