@@ -52,7 +52,9 @@ def load_sample(sample_dir: Path):
             break
         history.append(np.array(Image.open(p).convert("RGB")))
         i += 1
-    return instruction, current, history, meta
+    lookdown_path = sample_dir / "lookdown.jpg"
+    lookdown = np.array(Image.open(lookdown_path).convert("RGB")) if lookdown_path.exists() else None
+    return instruction, current, history, meta, lookdown
 
 
 def percentile(xs, q):
@@ -93,9 +95,13 @@ def compare(pred: dict, ref: dict):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model_path", required=True)
-    ap.add_argument("--samples_dir", default="quantization_kit/data/samples")
-    ap.add_argument("--reference", default="quantization_kit/data/reference_outputs.jsonl")
-    ap.add_argument("--output_dir", default="quantization_kit/results/run")
+    ap.add_argument("--dataset", choices=["vln-pe", "vln-ce"], default="vln-ce")
+    ap.add_argument("--samples_dir", default=None,
+                    help="Override samples dir (default: quantization_kit/data/<dataset>/samples)")
+    ap.add_argument("--reference", default=None,
+                    help="Override reference jsonl (default: quantization_kit/data/<dataset>/reference_outputs.jsonl)")
+    ap.add_argument("--output_dir", default=None,
+                    help="Override output dir (default: quantization_kit/results/<dataset>/run)")
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--attn_implementation", default="flash_attention_2",
                     help='Pass "sdpa" if flash-attention is not installed.')
@@ -107,14 +113,18 @@ def main():
 
     dtype = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}[args.dtype]
 
-    samples_dir = Path(args.samples_dir)
+    data_root = Path(f"quantization_kit/data/{args.dataset}")
+    samples_dir = Path(args.samples_dir) if args.samples_dir else data_root / "samples"
+    reference = Path(args.reference) if args.reference else data_root / "reference_outputs.jsonl"
+    out_dir = Path(args.output_dir) if args.output_dir else Path(f"quantization_kit/results/{args.dataset}/run")
+
     sample_dirs = sorted([p for p in samples_dir.iterdir() if p.is_dir() and p.name.startswith("sample_")])
     if args.limit > 0:
         sample_dirs = sample_dirs[: args.limit]
 
     # Load reference outputs.
     ref_map = {}
-    with open(args.reference) as f:
+    with open(reference) as f:
         for line in f:
             row = json.loads(line)
             ref_map[row["sample_id"]] = row
@@ -122,7 +132,6 @@ def main():
     if missing:
         print(f"[warn] {len(missing)} samples missing from reference (first 3: {missing[:3]})")
 
-    out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     pred_path = out_dir / "predictions.jsonl"
     metrics_path = out_dir / "metrics.json"
@@ -139,8 +148,8 @@ def main():
     if args.warmup > 0:
         print(f"[eval] warm-up on {min(args.warmup, len(sample_dirs))} samples ...")
         for sd in sample_dirs[: args.warmup]:
-            instruction, current, history, _ = load_sample(sd)
-            _ = infer.infer(current, history, instruction)
+            instruction, current, history, _, lookdown = load_sample(sd)
+            _ = infer.infer(current, history, instruction, lookdown_image=lookdown)
         if torch.cuda.is_available():
             torch.cuda.synchronize()
             torch.cuda.reset_peak_memory_stats()
@@ -160,8 +169,8 @@ def main():
     t_wall_start = time.time()
     with open(pred_path, "w") as f:
         for i, sd in enumerate(sample_dirs):
-            instruction, current, history, meta = load_sample(sd)
-            result = infer.infer(current, history, instruction)
+            instruction, current, history, meta, lookdown = load_sample(sd)
+            result = infer.infer(current, history, instruction, lookdown_image=lookdown)
             pred_row = {
                 "sample_id": meta["sample_id"],
                 "scene": meta.get("scene"),

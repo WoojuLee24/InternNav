@@ -10,68 +10,36 @@ S2는 Qwen2.5-VL 기반 Vision-Language 모델로, 현재 RGB 프레임·과거 
 
 ## 설치
 
-### 1. torch — CUDA 버전에 맞게 먼저 설치
+### option 1: Dockerhub
+docker pull dnwn24/internnav:torch2.9.1-cuda13.0-habitat-jazzy-5090
 
-```bash
-# CUDA 12.8
-pip install torch --index-url https://download.pytorch.org/whl/cu128
-# CUDA 13.0
-pip install torch --index-url https://download.pytorch.org/whl/cu130
-```
+### option 2: build Dockerfile
+docker build -t [image_name] -f docker/Dockerfile-torch2.9.1-cuda13.0-habitat-jazzy-5090 .
 
-### 2. kit 의존성 설치
+## 실행
+bash docker/run-torch2.9.1-cuda13.0-habitat-jazzy-5090
 
-```bash
-pip install -r quantization_kit/requirements.txt
-```
-
-### 3. internnav 패키지 등록
-
-`InternVLAN1ForCausalLM`, `split_and_clean` import에 필요합니다.
-
-```bash
-# 방법 A: editable install (core_requirements.txt까지 설치됨)
-pip install -e .
-
-# 방법 B: 경량 Docker 환경 — PYTHONPATH만 설정
-export PYTHONPATH=/path/to/InternNav
-```
-
-### 4. (선택) flash-attn
-
-없으면 `--attn_implementation sdpa`로 대체 가능합니다.
-
-```bash
-pip install flash-attn==2.7.4.post1
-```
-
----
-
-## 구성
+## 구성 및 데이터 저장 위치
 
 ```
 quantization_kit/
 ├── README.md
 ├── requirements.txt
-├── s2_inference.py            # S2Inferencer 클래스 — quant 팀이 수정하는 유일한 파일
+├── s2_inference.py            # S2Inferencer 클래스 — quant 팀이 수정할 유일한 파일 (예시)
 ├── generate_reference.py      # bf16 baseline 생성 (최초 1회)
 ├── evaluate.py                # quantized 모델의 accuracy + latency 측정
 ├── prepare_dataset.py         # 소스 데이터에서 data/ 디렉토리 생성
 └── data/
     ├── vln-pe/
-    │   ├── samples/           # (current.jpg, history_*.jpg, instruction.txt, meta.json)
-    │   ├── episodes/
-    │   ├── manifest.jsonl
-    │   └── reference_outputs.jsonl
     └── vln-ce/
         ├── samples/           # (current.jpg, lookdown.jpg, history_*.jpg, ...)
         ├── manifest.jsonl
-        └── reference_outputs.jsonl
+        └── reference_dualvln_outputs.jsonl
+        └── reference_internvla-n1_outputs.jsonl
 ```
-
 ---
 
-## 데이터 소스
+## 원본 데이터 소스
 
 | 옵션 | 소스 경로 | 특징 |
 |---|---|---|
@@ -82,22 +50,17 @@ VLN-CE 권장: look-down 이미지가 실제로 존재해 two-step S2 iteration�
 
 ---
 
-## 빠른 시작 (VLN-CE 예시)
+## 빠른 시작 (DualVLN, VLN-CE 예시)
 
 ```bash
-# 1) 샘플 데이터셋 생성 (최초 1회)
+# 1) 샘플 데이터셋 생성 (최초 1회) or quantization_kit/data/vln-ce에 data 저장
 python quantization_kit/prepare_dataset.py --dataset vln-ce
 
 # 2) bf16 reference 출력 생성 (최초 1회)
-python quantization_kit/generate_reference.py --dataset vln-ce --model_path checkpoints/InternVLA-N1-DualVLN --attn_implementation sdpa
+python quantization_kit/generate_reference.py --dataset vln-ce --model_path checkpoints/InternVLA-N1-DualVLN --output quantization_kit/data/vln-ce/reference_dualvln_outputs.jsonl
 
 # 3) quantized 모델 평가
-python quantization_kit/evaluate.py --model_path /path/to/quantized --dataset vln-ce --output_dir results/my_run
-```
-
-10개 샘플 드라이런:
-```bash
-python quantization_kit/evaluate.py --model_path <path> --dataset vln-ce --limit 10
+python quantization_kit/evaluate.py --dataset vln-ce --model_path /path/to/quantized --reference quantization_kit/data/vln-ce/reference_dualvln_outputs.jsonl --output_dir results/dualvln
 ```
 
 ---
