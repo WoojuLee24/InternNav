@@ -37,6 +37,11 @@ from transformers import (
     Trainer,
 )
 
+try:
+    from transformers import Qwen3VLForConditionalGeneration
+except ImportError:
+    Qwen3VLForConditionalGeneration = None
+
 from internnav.dataset.internvla_n1_lerobot_dataset import make_supervised_data_module
 from internnav.model.basemodel.internvla_n1.internvla_n1 import InternVLAN1ForCausalLM
 from internnav.trainer.internvla_n1_argument import (
@@ -179,6 +184,21 @@ def train(attn_implementation="flash_attention_2"):
             model_args.model_name_or_path,
         ).image_processor
         data_args.model_type = "qwen2.5vl"
+    elif "qwen3" in model_args.model_name_or_path.lower():
+        assert Qwen3VLForConditionalGeneration is not None, (
+            "Qwen3-VL requires transformers>=4.57.0. "
+            "Please upgrade: pip install 'transformers>=4.57.0'"
+        )
+        model = Qwen3VLForConditionalGeneration.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            attn_implementation=attn_implementation,
+            torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+        )
+        data_args.image_processor = AutoProcessor.from_pretrained(
+            model_args.model_name_or_path,
+        ).image_processor
+        data_args.model_type = "qwen3vl"
     else:
         model = Qwen2VLForConditionalGeneration.from_pretrained(
             model_args.model_name_or_path,
