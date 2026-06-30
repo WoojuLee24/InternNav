@@ -329,7 +329,7 @@ class LazySupervisedDataset(Dataset):
         self.video_max_total_pixels = getattr(data_args, "video_max_total_pixels", 1664 * 28 * 28)
         self.video_min_total_pixels = getattr(data_args, "video_min_total_pixels", 256 * 28 * 28)
         self.model_type = data_args.model_type
-        if data_args.model_type == "qwen2.5vl":
+        if data_args.model_type in ("qwen2.5vl", "qwen3vl"):
             self.get_rope_index = get_rope_index_25
         else:
             self.get_rope_index = get_rope_index_2
@@ -865,7 +865,7 @@ class NavPixelGoalDataset(Dataset):
         self.video_max_total_pixels = getattr(data_args, "video_max_total_pixels", 1664 * 28 * 28)
         self.video_min_total_pixels = getattr(data_args, "video_min_total_pixels", 256 * 28 * 28)
         self.model_type = data_args.model_type
-        if data_args.model_type == "qwen2.5vl":
+        if data_args.model_type in ("qwen2.5vl", "qwen3vl"):
             self.get_rope_index = get_rope_index_25
         else:
             self.get_rope_index = get_rope_index_2
