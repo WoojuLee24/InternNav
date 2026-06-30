@@ -33,8 +33,9 @@ vln_datasets=r2r_125cm_0_30,r2r_125cm_0_45,r2r_60cm_15_15,r2r_60cm_30_30,rxr_125
 data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1/vln_ce}
 
 # Output configuration
-run_name=s2_backbone/7b_$(date +%Y%m%d_%H%M%S)
-output_dir=checkpoints/${run_name}
+run_suffix=7b_$(date +%Y%m%d_%H%M%S)
+run_name=s2_backbone/${run_suffix}
+output_dir=$HOME/data-vol2/checkpoints/s2_backbone/${run_suffix}
 
 mkdir -p ${output_dir}
 
