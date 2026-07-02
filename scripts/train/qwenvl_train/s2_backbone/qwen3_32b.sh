@@ -33,7 +33,7 @@ max_pixels=313600
 min_pixels=3136
 
 # Validation configuration
-val_ratio=0.01
+val_ratio=0.02
 val_interval_steps=2000
 
 # Dataset configuration
