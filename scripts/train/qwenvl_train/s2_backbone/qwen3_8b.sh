@@ -33,8 +33,8 @@ max_pixels=313600
 min_pixels=3136
 
 # Validation configuration
-val_ratio=0.1
-val_interval_steps=500
+val_ratio=0.01
+val_interval_steps=2000
 
 # Dataset configuration
 vln_datasets=r2r_125cm_0_30,r2r_125cm_0_45,r2r_60cm_15_15,r2r_60cm_30_30,rxr_125cm_0_30,rxr_125cm_0_45,rxr_60cm_15_15,rxr_60cm_30_30
