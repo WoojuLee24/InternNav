@@ -33,7 +33,7 @@ vln_datasets=r2r_125cm_0_30,r2r_125cm_0_45,r2r_60cm_15_15,r2r_60cm_30_30,rxr_125
 data_root=${1:-/home/irteam/git/InternNav/data/InternData-N1/vln_ce}
 
 # Output configuration
-run_suffix=7b_$(date +%Y%m%d_%H%M%S)
+run_suffix=qwen2.5_7b_$(date +%Y%m%d_%H%M%S)
 run_name=s2_backbone/${run_suffix}
 output_dir=$HOME/data-vol2/checkpoints/s2_backbone/${run_suffix}
 
@@ -74,8 +74,11 @@ torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --eval_strategy "steps" \
     --eval_steps ${val_interval_steps} \
     --save_strategy "steps" \
-    --save_steps 5000 \
-    --save_total_limit 5 \
+    --save_steps 2000 \
+    --save_total_limit 3 \
+    --load_best_model_at_end True \
+    --metric_for_best_model eval_loss \
+    --greater_is_better False \
     --learning_rate ${lr} \
     --vision_tower_lr ${vision_tower_lr} \
     --weight_decay 0 \

@@ -84,8 +84,11 @@ torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
     --eval_strategy "steps" \
     --eval_steps ${val_interval_steps} \
     --save_strategy "steps" \
-    --save_steps 5000 \
-    --save_total_limit 5 \
+    --save_steps 2000 \
+    --save_total_limit 3 \
+    --load_best_model_at_end True \
+    --metric_for_best_model eval_loss \
+    --greater_is_better False \
     --learning_rate ${lr} \
     --vision_tower_lr ${vision_tower_lr} \
     --weight_decay 0 \
