@@ -23,7 +23,7 @@ max_pixels=313600
 min_pixels=3136
 
 # Validation configuration
-val_ratio=0.01         # fraction of data for validation (0.0 to disable)
+val_ratio=0.02         # fraction of data for validation (0.0 to disable)
 val_interval_steps=2000  # evaluate every N steps
 
 # Dataset configuration
