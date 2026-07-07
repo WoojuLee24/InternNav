@@ -55,8 +55,16 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
     def get_model(self):
         return self.model
 
-    def _build_cond_token(self, memory_tokens, traj_hidden_states, traj_images, logits=None, labels=None):
+    def _build_cond_token(self, memory_tokens, traj_hidden_states, traj_images, logits=None, labels=None, traj_depths=None):
         return self.get_model().cond_projector(traj_hidden_states)
+
+    def _build_goal_prefix(self, traj_images, traj_depths, logits=None, labels=None):
+        """Optional (bsz, 1, 3) [x, y, yaw] step prepended to the diffusion trajectory
+        sequence before the noisy future steps. This is the goal's ABSOLUTE position in
+        the current frame (yaw undefined) — NOT a delta like the trajectory steps below,
+        which are per-step increments. None (default) = no prepend, i.e. the original
+        behavior below is unchanged."""
+        return None
 
     def forward(
         self,
@@ -254,13 +262,17 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
                     memory_feat = torch.cat([images_dp_feat.flatten(1, 2), memory_feat], dim=-1)
                     memory_tokens = self.get_model().rgb_resampler(memory_feat)
 
-                    cond_token = self._build_cond_token(memory_tokens, traj_hidden_states, traj_images, logits, labels)
+                    cond_token = self._build_cond_token(memory_tokens, traj_hidden_states, traj_images, logits, labels, traj_depths)
                     latents = torch.cat([memory_tokens, cond_token], dim=1)
+                    goal_prefix = self._build_goal_prefix(traj_images, traj_depths, logits, labels)
                 else:
                     traj_hidden_states = self.get_model().cond_projector(traj_hidden_states)
                     latents = traj_hidden_states
+                    goal_prefix = None
 
                 relative_poses = traj_poses.flatten(0, 1)
+                if goal_prefix is not None:
+                    relative_poses = torch.cat([goal_prefix.to(relative_poses.dtype), relative_poses], dim=1)
                 bsz = relative_poses.shape[0]
                 noise = torch.randn(relative_poses.shape, device=relative_poses.device, dtype=relative_poses.dtype)
                 u = torch.rand(size=(bsz,), device="cpu")
@@ -271,6 +283,9 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
                 )
 
                 noisy_trajectory = (1 - sigmas) * relative_poses + sigmas * noise
+                if goal_prefix is not None:
+                    # the goal step is given context, not something to denoise: keep it clean
+                    noisy_trajectory = torch.cat([relative_poses[:, :1], noisy_trajectory[:, 1:]], dim=1)
                 action_features = self.get_model().action_encoder(noisy_trajectory)
                 pos_ids = torch.arange(relative_poses.shape[1]).reshape(1, -1).repeat(bsz, 1).to(relative_poses.device)
                 pos_embed = self.get_model().pos_encoding(pos_ids)
@@ -283,6 +298,9 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
                 )
                 noise_pred = self.get_model().action_decoder(noise_pred)
                 target = noise - relative_poses
+                if goal_prefix is not None:
+                    # loss is only computed on the actual future steps, not the prepended goal
+                    noise_pred, target = noise_pred[:, 1:], target[:, 1:]
                 loss = F.mse_loss(noise_pred.float(), target.float(), reduction="none")
                 mask = loss_mask.flatten(0, 1)[:, None, None]
                 masked_loss = loss * mask

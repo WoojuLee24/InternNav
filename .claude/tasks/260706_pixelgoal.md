@@ -85,5 +85,27 @@ goal_step = [X_forward * 4, Y_lateral * 4, 0.0]  # (dx, dy, dyaw=0)
 → MLP projector 없이 goal 정보를 diffusion에 직접 전달
 
 **디버깅: 아래 두 코드 정상 실행 확인 및 pixel goal을 fpv와 bev에 시각화해서 디버깅**
-`python scripts/train_eval/qwenvl_train/runner.py --config scripts/train_eval/qwenvl_train/bev/s1.bev_s2.fpv_rgb_gt.pixel_goal.py --machine 5090 --debugpy trainer --no-eval`
-`python scripts/train_eval/qwenvl_train/runner.py --config scripts/train_eval/qwenvl_train/bev/base_s1.fpv_s2.fpv_rgb_gt.pixel_goal.py --machine 5090 --debugpy trainer --no-eval`
+`/workspace/isaaclab/_isaac_sim/python.sh scripts/train_eval/qwenvl_train/runner.py --config scripts/train_eval/qwenvl_train/bev/s1.bev_s2.fpv_rgb_gt.pixel_goal.py --machine 5090 --no-eval --debug-dir logs/pixel_goal_bev`
+`/workspace/isaaclab/_isaac_sim/python.sh scripts/train_eval/qwenvl_train/runner.py --config scripts/train_eval/qwenvl_train/bev/base_s1.fpv_s2.fpv_rgb_gt.pixel_goal.py --machine 5090 --no-eval --debug-dir logs/pixel_goal_fpv`
+(`--debugpy` 사용 금지 — guideline.md 업데이트에 따름)
+
+---
+
+## 2026-07-07 업데이트 — 구현 완료 + 설계 수정
+
+**발견한 버그:** `_extract_pixel_coords`가 `data_args.resize_w/resize_h`(384, VLM chat 이미지 리사이즈 크기)로 정규화하고 있었는데, parquet `goal.{setting}` 라벨을 실측(최대 col=546, row=452, 640×480 이미지)해보니 실제로는 **native 카메라 해상도 640×480**(= `internvla_n1_bev_provider.py`의 `_BASE_W/_BASE_H`) 기준이었음. `internvla_n1_trainer.py`의 `setup_pixel_goal_decoder` 호출부를 `_BASE_W, _BASE_H`로 수정.
+
+**최종 설계 (`internvla_n1_pixel_goal.py`):**
+- `_pixel_norm_to_metric()`: pixel_norm + depth(traj_depths[:,0]) + intrinsics(_BASE_FX/FY/CX/CY, `_BASE_W/H`로 스케일) + cam_pitch(traj_cam_pitch_2, bev_provider.py에서 unconditional stash) → **(X_forward, Y_lateral)**, 현재 프레임 기준 goal의 **절대 위치**(미터). `depth_rgb_to_bev_torch.py`의 world-frame 공식과 동일.
+- **네이밍 정정**: 이 값은 궤적의 각 스텝(`dx,dy,dyaw` — 이전 스텝 대비 증분)과 다르게, **절대 (x, y) 위치**(yaw는 미정=0)임. 처음에 "goal_step = (dx,dy,dyaw)"로 잘못 명명했던 것을 `goal_pose`/"ABSOLUTE position" 용어로 정정.
+- **스케일**: `× 4.0` (traj_poses 학습 스케일과 맞춤)을 하드코딩하지 않고 `pixel_goal_scale`(config, 기본 4.0)로 노출 — goal까지의 거리가 한 스텝 델타보다 훨씬 클 수 있어 조정 가능해야 함.
+- **`pixel_goal_mode` config로 두 가지 방식 모두 지원**:
+  - `"prepend"` (기본, MLP 없음): `_build_goal_prefix()`가 goal_pose를 diffusion trajectory 시퀀스 맨 앞(0번째 스텝)에 prepend. 노이즈 안 씌우고(clean), loss도 제외. `action_encoder`(기존 Linear(3,384))를 그대로 재사용.
+  - `"mlp_cond"`: `_build_cond_token()`이 동일한 goal_xy를 `pixel_cond_projector`(Linear(2,768)+GELU+Linear, `__init__`에서 항상 생성)로 z_latents 컨디셔닝 토큰으로 투사. 기존 VLM-latent conditioning과 같은 자리.
+  - 둘 다 `_decode_goal_xy()` 공유 헬퍼로 동일한 goal 값을 사용 → 모드만 바꿔서 비교 가능.
+- `internvla_n1.py` core 변경은 **guard clause만 추가**(코드 이동/추출 없음) — `_build_goal_prefix` 훅 + `relative_poses`/`noisy_trajectory`/loss 부분에 `if goal_prefix is not None:` 3곳 삽입, `goal_prefix=None`이면 기존 코드와 100% 동일 경로.
+- config 필드 추가 위치: `internvla_n1_argument.py`(`pixel_goal_mode`, `pixel_goal_scale`) → `internvla_n1_trainer.py`(model.config로 전달) → `default_config.py` Params + `train_argv()`(커맨드라인으로 노출).
+
+**미해결/후속 과제:**
+- 추론측(`s1_step_pixel`/`s2_step`)의 `resize_w/resize_h`(384) 정규화는 이번 수정 범위 밖 — 학습 라벨(640×480 native)과 실제 일치하는지 별도 확인 필요.
+- `pixel_goal_scale`(기본 4.0)이 실제로 적절한지는 학습 후 loss/시각화로 검증 필요.

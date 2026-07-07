@@ -73,6 +73,8 @@ class Params:
     gradient_checkpointing: bool = True
     system1: str = "nextdit_async"
     use_pixel_goal: bool = False  # S1 conditioning: True=pixel coord [0,1]^2, False=VLM latent
+    pixel_goal_mode: str = "prepend"  # 'prepend' (no MLP, goal x,y in the diffusion sequence) | 'mlp_cond' (MLP -> z_latents token)
+    pixel_goal_scale: float = 4.0    # scale applied to the metric pixel-goal (x,y) before it enters the network
 
     # ---- BEV visual input (bev=False => plain trainer + fpv eval, unchanged) ----
     bev: bool = False              # master toggle for the BEV pipeline (train + eval)
@@ -161,6 +163,8 @@ class Params:
             "--pixel_goal_only", b(self.pixel_goal_only),
             "--system1", self.system1,
             "--use_pixel_goal", b(self.use_pixel_goal),
+            "--pixel_goal_mode", self.pixel_goal_mode,
+            "--pixel_goal_scale", _fmt_num(self.pixel_goal_scale),
             "--output_dir", output_dir,
             "--num_train_epochs", str(self.num_train_epochs),
             "--per_device_train_batch_size", str(self.batch_size),

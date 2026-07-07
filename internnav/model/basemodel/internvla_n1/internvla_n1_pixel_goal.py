@@ -1,15 +1,28 @@
 """pixel_goal conditioning: BEV image processing (optional) + pixel-coord S1 conditioning.
 
 InternVLAN1BEVProviderPixelGoalForCausalLM inherits BEVProvider.forward() which applies
-BEV when bev_s1_mode != 'fpv', then calls super().forward(). The _build_cond_token()
-hook in InternVLAN1ForCausalLM.forward() is overridden here to replace the VLM latent
-with a projected pixel coord. bev_s1_mode='fpv' (default) skips BEV entirely.
+BEV when bev_s1_mode != 'fpv', then calls super().forward(). Two hooks in
+InternVLAN1ForCausalLM.forward() are overridden here, switched by config.pixel_goal_mode:
+  - 'prepend' (default, no MLP): _build_goal_prefix() converts the decoded pixel goal to
+    its metric ABSOLUTE position [x, y] in the current frame (yaw undefined) and prepends
+    it as an extra step directly to the diffusion trajectory sequence (the same units the
+    network already predicts), so no extra projector is needed. _build_cond_token()
+    contributes nothing (empty (B,0,C) tensor).
+  - 'mlp_cond': _build_cond_token() instead projects that same metric [x, y] through a
+    learned MLP (pixel_cond_projector) into a z_latents conditioning token, mirroring the
+    original VLM-latent conditioning path; _build_goal_prefix() contributes nothing.
+bev_s1_mode='fpv' (default) skips BEV entirely.
+
+The pixel_coord -> metric conversion reuses depth + the camera intrinsics/pitch/height
+already used to build BEV (internvla_n1_bev_provider.py), since the pixel-goal label is
+always defined in that same raw pitch_2/lookdown camera frame, regardless of bev_s1_mode.
 
 Training:  internvla_n1_pixel_goal_trainer.py monkey-patches this in.
 Inference: InternVLAN1PixelGoalAgent uses InternVLAN1PixelGoalNet.
 """
 
 import copy
+import math
 import re
 from typing import Optional, Union
 
@@ -25,6 +38,14 @@ from internnav.model.basemodel.internvla_n1.internvla_n1 import (
     InternVLAN1ModelConfig,
 )
 from internnav.model.basemodel.internvla_n1.internvla_n1_bev_provider import (
+    _BASE_CX,
+    _BASE_CY,
+    _BASE_FX,
+    _BASE_FY,
+    _BASE_H,
+    _BASE_W,
+    _BEV_RANGE,
+    _BEV_SIZE,
     InternVLAN1BEVProviderForCausalLM,
 )
 from internnav.model.basemodel.internvla_n1.internvla_n1_policy import InternVLAN1Net
@@ -32,17 +53,27 @@ from internnav.model.utils.vln_utils import S1Output, S2Output, chunk_token, spl
 
 _LATENT_EMB_SIZE = 768
 
+# traj_poses are trained at x4 scale (see vln_utils.py traj_to_actions: `dp_actions[:, :, :2] /= 4.0`
+# undoes this at inference); the metric goal position is scaled to match by default. Config-tunable
+# via `pixel_goal_scale` (internvla_n1_argument.py / default_config.py's Params), since the goal's
+# magnitude (distance to a possibly-far waypoint) can differ a lot from a single step's delta.
+_DEFAULT_PIXEL_GOAL_SCALE = 4.0
+
 
 class InternVLAN1BEVProviderPixelGoalForCausalLM(InternVLAN1BEVProviderForCausalLM):
     """BEV image processing (optional) + pixel-coord S1 conditioning.
 
     Call chain at training:
         BEVProvider.forward() → applies BEV to traj_images → super().forward()
-        InternVLAN1ForCausalLM.forward() → self._build_cond_token() [overridden here]
+        InternVLAN1ForCausalLM.forward() → self._build_cond_token() / self._build_goal_prefix()
+        [both overridden here]
     """
 
     def __init__(self, config):
         super().__init__(config)
+        # Only used when config.pixel_goal_mode == 'mlp_cond'; harmless (a few hundred KB,
+        # unused in forward()) otherwise — avoids needing pixel_goal_mode at construction
+        # time, since it's only set on config *after* from_pretrained() by the trainer.
         self.get_model().pixel_cond_projector = nn.Sequential(
             nn.Linear(2, _LATENT_EMB_SIZE),
             nn.GELU(approximate="tanh"),
@@ -80,13 +111,118 @@ class InternVLAN1BEVProviderPixelGoalForCausalLM(InternVLAN1BEVProviderForCausal
             ))
         return torch.stack(result, dim=0)
 
-    def _build_cond_token(self, memory_tokens, traj_hidden_states, traj_images, logits=None, labels=None):
+    def _pixel_norm_to_metric(self, pixel_coord_norm: torch.Tensor, depth_frame: torch.Tensor) -> torch.Tensor:
+        """(B,2) normalized [x,y] pixel (native _BASE_W x _BASE_H camera frame) + depth (B,H,W)
+        metres -> (B,2) metric [X_forward, Y_lateral] metres, robot/world-forward frame.
+
+        Mirrors depth_rgb_to_bev_torch.py's world-frame unprojection. Note this is the goal's
+        ABSOLUTE position relative to the current frame, not a per-step delta like the
+        trajectory steps generate_traj() predicts — it shares their coordinate system/units
+        (metres, robot-forward frame) but not their "increment from the previous step" meaning.
+        """
+        depth_frame = depth_frame.to(pixel_coord_norm.device).float()
+        B, H, W = depth_frame.shape
+
+        col_px = (pixel_coord_norm[:, 0] * W).long().clamp(0, W - 1)
+        row_px = (pixel_coord_norm[:, 1] * H).long().clamp(0, H - 1)
+        batch_idx = torch.arange(B, device=depth_frame.device)
+        d = depth_frame[batch_idx, row_px, col_px]
+
+        fx = _BASE_FX * W / _BASE_W
+        fy = _BASE_FY * H / _BASE_H
+        cx = _BASE_CX * W / _BASE_W
+        cy = _BASE_CY * H / _BASE_H
+
+        x_c = (col_px.float() - cx) / fx * d
+        y_c = (row_px.float() - cy) / fy * d
+        z_c = d
+
+        cam_pitch_deg = getattr(self, '_pixel_goal_cam_pitch', None)
+        if cam_pitch_deg is None:
+            pitch = torch.zeros_like(d)
+        else:
+            pitch = cam_pitch_deg.to(d.device).float() * (math.pi / 180.0)
+
+        x_forward = z_c * torch.cos(pitch) - y_c * torch.sin(pitch)
+        y_lateral = -x_c
+
+        valid = (d > 0).unsqueeze(-1)
+        goal_xy = torch.where(valid, torch.stack([x_forward, y_lateral], dim=-1), torch.zeros(B, 2, device=d.device))
+        return goal_xy.to(pixel_coord_norm.dtype)
+
+    def _debug_visualize_goal_train(self, traj_images, pixel_coord_norm, goal_xy, debug_dir):
+        import os
+
+        import cv2
+
+        from internnav.model.utils.pixel_goal_utils import visualize_pixel_goal
+
+        s1_mode = getattr(self.config, 'bev_s1_mode', 'fpv')
+        frame = (traj_images[0, 0].detach().float().cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+        H, W = frame.shape[:2]
+
+        if s1_mode == 'bev':
+            scale = _BEV_SIZE / (2.0 * _BEV_RANGE)
+            row_px = _BEV_SIZE / 2.0 - float(goal_xy[0, 0]) * scale
+            col_px = _BEV_SIZE / 2.0 - float(goal_xy[0, 1]) * scale
+            pixel_px = np.array([col_px * W / _BEV_SIZE, row_px * H / _BEV_SIZE])
+            mode = 'bev'
+        else:
+            pixel_px = np.array([float(pixel_coord_norm[0, 0]) * W, float(pixel_coord_norm[0, 1]) * H])
+            mode = 'fpv'
+
+        save_dir = os.path.join(debug_dir, 'pixel_goal_train')
+        vis = visualize_pixel_goal(
+            frame, pixel_px, pixel_coord_norm[0].detach().float().cpu().numpy(), save_dir, mode=mode
+        )
+        text = f"goal m: [{float(goal_xy[0, 0]):.2f}, {float(goal_xy[0, 1]):.2f}]"
+        cv2.putText(vis, text, (10, 84), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
+        cv2.imwrite(os.path.join(save_dir, f"pixel_goal_{mode}_metric.jpg"), cv2.cvtColor(vis, cv2.COLOR_RGB2BGR))
+
+    def _decode_goal_xy(self, traj_images, traj_depths, logits, labels):
+        """(B, 2) metric [x, y] ABSOLUTE goal position in the current frame (metres),
+        scaled by config.pixel_goal_scale to match traj_poses' units. None if undecodable.
+        Shared by both pixel_goal_mode branches so they see the exact same goal value."""
+        if logits is None or labels is None or not hasattr(self, '_pixel_goal_tokenizer') or traj_depths is None:
+            return None, None
+        pixel_coord_norm = self._extract_pixel_coords(logits, labels)  # (B, 2), original batch
+        goal_xy = self._pixel_norm_to_metric(pixel_coord_norm, traj_depths[:, 0])  # (B, 2) metres
+
+        debug_dir = getattr(self.config, 'debug_dir', None)
+        if debug_dir:
+            self._debug_visualize_goal_train(traj_images, pixel_coord_norm, goal_xy, debug_dir)
+
+        scale = getattr(self.config, 'pixel_goal_scale', _DEFAULT_PIXEL_GOAL_SCALE)
+        return goal_xy * scale, pixel_coord_norm
+
+    def _build_cond_token(self, memory_tokens, traj_hidden_states, traj_images, logits=None, labels=None, traj_depths=None):
         if logits is None or labels is None or not hasattr(self, '_pixel_goal_tokenizer'):
             return self.get_model().cond_projector(traj_hidden_states)
-        pixel_coord_norm = self._extract_pixel_coords(logits, labels)
+        if getattr(self.config, 'pixel_goal_mode', 'prepend') != 'mlp_cond':
+            # 'prepend' (default): goal injected directly into the diffusion trajectory
+            # sequence via _build_goal_prefix(); no extra z_latents token needed here.
+            return memory_tokens.new_zeros(memory_tokens.shape[0], 0, memory_tokens.shape[-1])
+        goal_xy, _ = self._decode_goal_xy(traj_images, traj_depths, logits, labels)
+        if goal_xy is None:
+            return memory_tokens.new_zeros(memory_tokens.shape[0], 0, memory_tokens.shape[-1])
         T = traj_images.size(1)
-        repeated = pixel_coord_norm.unsqueeze(1).repeat(1, T, 1).flatten(0, 1)
+        repeated = goal_xy.unsqueeze(1).repeat(1, T, 1).flatten(0, 1)
         return self.get_model().pixel_cond_projector(repeated.to(memory_tokens.dtype)).unsqueeze(1)
+
+    def _build_goal_prefix(self, traj_images, traj_depths, logits=None, labels=None):
+        if getattr(self.config, 'pixel_goal_mode', 'prepend') != 'prepend':
+            return None
+        goal_xy, _ = self._decode_goal_xy(traj_images, traj_depths, logits, labels)
+        if goal_xy is None:
+            return None
+
+        B = goal_xy.shape[0]
+        goal_pose = goal_xy.new_zeros(B, 3)  # [x, y, yaw]; yaw undefined (0) — a pixel goal has no heading
+        goal_pose[:, :2] = goal_xy
+
+        T = traj_images.size(1)
+        goal_pose = goal_pose.unsqueeze(1).repeat(1, T, 1).flatten(0, 1).unsqueeze(1)  # (B*T, 1, 3)
+        return goal_pose
 
     def generate_traj_pixel(
         self,
@@ -97,25 +233,41 @@ class InternVLAN1BEVProviderPixelGoalForCausalLM(InternVLAN1BEVProviderForCausal
         guidance_scale: float = 1.0,
         num_inference_steps: int = 10,
         num_sample_trajs: int = 32,
+        cam_pitch_deg: float = 0.0,
     ):
-        """generate_traj() nextdit_async path with pixel_coord_norm instead of VLM latent.
+        """generate_traj() nextdit_async path with the pixel goal converted to its metric
+        ABSOLUTE position [x, y] and fed to the network the same way training did (see
+        config.pixel_goal_mode — mirrors _build_cond_token / _build_goal_prefix):
+          - 'prepend' (default, no MLP): goal position prepended as an extra step directly
+            into the denoised trajectory sequence.
+          - 'mlp_cond': goal position projected through pixel_cond_projector into a
+            z_latents conditioning token instead.
 
         Args:
-            pixel_coord_norm: (B, 2) normalized [x, y] in [0, 1]
+            pixel_coord_norm: (B, 2) normalized [x, y] in [0, 1], native camera frame
             images_dp: (B, 2, 224, 224, 3) [goal_frame, current_frame]
+            depths_dp: (B, 2, 224, 224, 1) metric depth, same frame pairing as images_dp
         """
         from diffusers import FlowMatchEulerDiscreteScheduler
         from diffusers.utils.torch_utils import randn_tensor
 
         assert 'nextdit' in self.get_system1_type() and 'async' in self.get_system1_type(), \
             "generate_traj_pixel only supports nextdit_async system1"
+        assert depths_dp is not None, "generate_traj_pixel needs depth to project pixel_coord_norm to metric"
 
+        mode = getattr(self.config, 'pixel_goal_mode', 'prepend')
         scheduler = FlowMatchEulerDiscreteScheduler()
         device = pixel_coord_norm.device
         dtype = pixel_coord_norm.dtype
         batch_size = pixel_coord_norm.shape[0]
 
-        pixel_cond = self.get_model().pixel_cond_projector(pixel_coord_norm).unsqueeze(1)
+        self._pixel_goal_cam_pitch = torch.full((batch_size,), cam_pitch_deg, device=device)
+        # depths_dp[..., 0, 0] would index (W, channel) instead of selecting the goal
+        # frame's (H, W) map — [:, 0, :, :, 0] keeps H,W and picks frame=0 (goal_frame) +
+        # channel=0, matching _pixel_norm_to_metric's expected (B, H, W).
+        goal_xy = self._pixel_norm_to_metric(pixel_coord_norm, depths_dp[:, 0, :, :, 0])
+        goal_scale = getattr(self.config, 'pixel_goal_scale', _DEFAULT_PIXEL_GOAL_SCALE)
+        goal_xy = (goal_xy * goal_scale).to(dtype)
 
         with torch.no_grad():
             images_dp_norm = (images_dp.permute(0, 1, 4, 2, 3) - self._resnet_mean) / self._resnet_std
@@ -129,9 +281,19 @@ class InternVLAN1BEVProviderPixelGoalForCausalLM(InternVLAN1BEVProviderForCausal
             memory_feat = torch.cat([images_dp_feat.flatten(1, 2), memory_feat], dim=-1)
             memory_tokens = self.get_model().rgb_resampler(memory_feat)
 
-        hidden_states = torch.cat([memory_tokens, pixel_cond], dim=1)
+        goal_pose = None
+        if mode == 'mlp_cond':
+            cond_token = self.get_model().pixel_cond_projector(goal_xy).unsqueeze(1)
+            hidden_states = torch.cat([memory_tokens, cond_token], dim=1)
+        else:
+            hidden_states = memory_tokens
+            goal_pose = goal_xy.new_zeros(batch_size, 1, 3)  # [x, y, yaw]; yaw undefined (0)
+            goal_pose[:, 0, :2] = goal_xy
+
         hidden_states_input = torch.cat([torch.zeros_like(hidden_states), hidden_states], 0)
         hidden_states_input = hidden_states_input.repeat_interleave(num_sample_trajs, dim=0)
+        if goal_pose is not None:
+            goal_pose = goal_pose.repeat_interleave(num_sample_trajs, dim=0)
 
         latents = randn_tensor(
             shape=(batch_size * num_sample_trajs, predict_step_nums, 3),
@@ -141,7 +303,8 @@ class InternVLAN1BEVProviderPixelGoalForCausalLM(InternVLAN1BEVProviderForCausal
         scheduler.set_timesteps(num_inference_steps, sigmas=sigmas)
 
         for t in scheduler.timesteps:
-            latent_features = self.get_model().action_encoder(latents)
+            traj_in = torch.cat([goal_pose, latents], dim=1) if goal_pose is not None else latents
+            latent_features = self.get_model().action_encoder(traj_in)
             pos_ids = torch.arange(latent_features.shape[1]).reshape(1, -1).repeat(batch_size, 1).to(device)
             latent_features += self.get_model().pos_encoding(pos_ids)
             latent_model_input = latent_features.repeat(2, 1, 1)
@@ -153,6 +316,8 @@ class InternVLAN1BEVProviderPixelGoalForCausalLM(InternVLAN1BEVProviderForCausal
                 z_latents=hidden_states_input,
             )
             noise_pred = self.get_model().action_decoder(noise_pred)
+            if goal_pose is not None:
+                noise_pred = noise_pred[:, 1:]  # drop the goal-position slot; only the rest is diffused
             noise_pred_uncond, noise_pred = noise_pred.chunk(2)
             noise_pred = noise_pred_uncond + guidance_scale * (noise_pred - noise_pred_uncond)
             latents = scheduler.step(noise_pred, t, latents).prev_sample
@@ -279,18 +444,25 @@ class InternVLAN1PixelGoalNet(InternVLAN1Net):
         Args:
             rgb: (1, 2, 224, 224, 3) [goal_frame, current_frame]
             depth: (1, 2, 224, 224, 1)
-            pixel_coord_s2: np.array [col, row] in resize_w x resize_h space
+            pixel_coord_s2: np.array [row, col] (s2_step stores it swapped, matching the
+                cv2-visualization convention shared with the base pointing feature). The
+                training-side decoder (_extract_pixel_coords) reads text as [col, row]
+                normalized against the native camera resolution (_BASE_W/_BASE_H, 640x480),
+                not resize_w/resize_h (384, the VLM chat image size) — match that here so
+                inference uses the same pixel/scale convention the model was trained on.
             debug_dir: if set, saves visualization
             step: episode step for debug filename
         """
         from internnav.model.utils.pixel_goal_utils import fpv_pixel_to_normalized, visualize_pixel_goal
 
-        pixel_norm = fpv_pixel_to_normalized(pixel_coord_s2, (self.resize_w, self.resize_h))
+        col_row = np.array([pixel_coord_s2[1], pixel_coord_s2[0]])
+        pixel_norm = fpv_pixel_to_normalized(col_row, (_BASE_W, _BASE_H))
 
         if debug_dir is not None:
             cur_frame = (rgb[0, 1].cpu().numpy() * 255).astype(np.uint8)
-            scale_x, scale_y = 224.0 / self.resize_w, 224.0 / self.resize_h
-            pixel_224 = np.array([pixel_coord_s2[0] * scale_x, pixel_coord_s2[1] * scale_y])
+            H224, W224 = cur_frame.shape[:2]
+            scale_x, scale_y = W224 / _BASE_W, H224 / _BASE_H
+            pixel_224 = np.array([col_row[0] * scale_x, col_row[1] * scale_y])
             visualize_pixel_goal(cur_frame, pixel_224, pixel_norm, debug_dir, step=step, mode='fpv')
 
         pixel_tensor = torch.tensor(pixel_norm, dtype=torch.bfloat16).unsqueeze(0).to(self.model_config.device)
@@ -301,6 +473,7 @@ class InternVLAN1PixelGoalNet(InternVLAN1Net):
                 images_dp=rgb,
                 depths_dp=depth,
                 predict_step_nums=getattr(self.model_config, 'predict_step_nums', 32),
+                cam_pitch_deg=getattr(self.model_config, 'cam_pitch_deg', 0.0),
             )
 
         if self.continuous_traj:

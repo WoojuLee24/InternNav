@@ -139,3 +139,48 @@ _Last updated: 2026-04-10 13:27_
 ### [fd2d28b7] 2026-04-06 — [chore] mv run_queue.sh
 
 ### [f7ec314c] 2026-04-06 — [chore] move run_queue.sh
+
+## Imported Claude Project Guidelines
+
+Source: `.claude/rules/guideline.md`.
+
+### Python and Pip Paths
+
+- For the Isaac Lab environment, use `/workspace/isaaclab/_isaac_sim/python.sh` instead of `python` or `python3`.
+- For Isaac Lab pip commands, use `/workspace/isaaclab/_isaac_sim/python.sh -m pip`.
+- Do not rely on `.bashrc` aliases in non-interactive shells.
+- For the Habitat environment, use `/usr/bin/python` and `/usr/bin/pip`.
+
+### Development Constraints
+
+- Keep code changes conservative and narrowly scoped.
+- Do not change existing function or class signatures unless the new argument is optional and has a backward-compatible default.
+- Prefer a top-level guard clause that delegates to a separate method or file for new behavior.
+- Do not insert feature branches into the middle of existing logic when that causes the default path to share changed state with the new path.
+- If a change requires more than a small guard clause in an existing function, prefer a new file.
+- New behavior must be configurable through config files or arguments. Do not hardcode feature switches or parameters.
+- New config fields must be optional and safe when absent.
+- Do not rename or remove existing config schema fields.
+- For new functionality, prefer a new file plus inheritance from the existing class. Use composition only when inheritance is not practical.
+- Follow the existing directory layout and naming conventions.
+- Connect new classes through factory or registry patterns where possible.
+
+### Verification
+
+- After changes, verify both the default path and the new behavior.
+- Run existing relevant tests before and after substantial code changes when practical.
+- For development related to the target behavior, save visualizations for debugging.
+
+### Project Commands
+
+- Training and evaluation: `/workspace/isaaclab/_isaac_sim/python.sh scripts/train_eval/qwenvl_train/runner.py --config scripts/train_eval/qwenvl_train/bev/base_s1.fpv_s2.fpv_rgb_gt.py --machine 5090`
+- Training only debug args: `--no-eval --debugpy trainer --debug-dir logs/260615_base_s1.fpv_s2.fpv_rgb_gt`
+- Evaluation only debug args: `--no-train --debugpy eval --debug-dir logs/260615_base_s1.fpv_s2.fpv_rgb_gt`
+- `r2r_h1_replay` collection: `/workspace/isaaclab/_isaac_sim/python.sh scripts/eval/eval_r2r_h1_replay.py --config scripts/eval/configs/h1_internvla_n1_async_cfg_orig.py --r2r_dir data/InternData-N1-v0.5-mini/vln_pe/traj_data/r2r --save_dir data/InternData-N1-v0.5-mini/vln_pe/traj_data/r2r_h1_replay --scenes <SCENE> --max_eps <N>`
+- Debug image export: `/workspace/isaaclab/_isaac_sim/python.sh scripts/eval/save_debug_images.py --src_dir data/InternData-N1-v0.5-mini/vln_pe/traj_data/r2r --scan <SCENE> --ep <N>`
+
+### Output and Markdown Rules
+
+- Provide multiline shell commands as one-line commands so they are safe to copy and paste.
+- When creating or updating memory, task, or summary markdown files, write them under `InternNav/.claude/` so they remain checked into the repository.
+

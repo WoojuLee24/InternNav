@@ -13,6 +13,8 @@ class ModelArguments:
 
     system1: Optional[str] = field(default='nextdit')
     use_pixel_goal: bool = field(default=False)
+    pixel_goal_mode: str = field(default="prepend", metadata={"help": "prepend (default, no MLP: goal x,y prepended into the diffusion trajectory sequence) | mlp_cond (goal x,y projected through an MLP into a z_latents conditioning token, like the original VLM-latent conditioning)"})
+    pixel_goal_scale: float = field(default=4.0, metadata={"help": "scale applied to the metric pixel-goal (x, y) in metres before it enters the network; matches traj_poses' own training-time x4 scale (see vln_utils.py)"})
     n_query: int = field(default=4)
 
     bev_mode: str = field(default="none", metadata={"help": "none|occ_gt|rgb_gt|fpv_concat_gt|occ_depthanythingv2|rgb_depthanythingv2"})

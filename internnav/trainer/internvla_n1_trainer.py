@@ -171,6 +171,8 @@ def train(attn_implementation="flash_attention_2"):
         model.config.debug_modes = model_args.debug_modes
         model.config.debug_dir = model_args.debug_dir
         model.config.use_pixel_goal = model_args.use_pixel_goal
+        model.config.pixel_goal_mode = model_args.pixel_goal_mode
+        model.config.pixel_goal_scale = model_args.pixel_goal_scale
         data_args.image_processor = AutoProcessor.from_pretrained(
             model_args.model_name_or_path,
         ).image_processor
@@ -239,7 +241,13 @@ def train(attn_implementation="flash_attention_2"):
         model.get_model().initialize_vision_modules(model_args=model_args)
     set_model(model_args, model)
     if data_args.model_type == "internvla-n1" and model_args.use_pixel_goal:
-        model.setup_pixel_goal_decoder(tokenizer, data_args.resize_w, data_args.resize_h)
+        # Pixel-goal labels (dataset `goal.{setting}` column) are in the native
+        # pitch_2/lookdown camera frame (640x480, same as internvla_n1_bev_provider.py's
+        # _BASE_W/_BASE_H), NOT the resize_w/resize_h (384x384) used to resize the VLM's
+        # own chat image — decoding must be normalized against the label's native scale.
+        from internnav.model.basemodel.internvla_n1.internvla_n1_bev_provider import _BASE_H, _BASE_W
+
+        model.setup_pixel_goal_decoder(tokenizer, _BASE_W, _BASE_H)
 
     if torch.distributed.get_rank() == 0:
         model.visual.print_trainable_parameters()

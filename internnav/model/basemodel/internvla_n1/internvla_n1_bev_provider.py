@@ -232,6 +232,12 @@ class InternVLAN1BEVProviderForCausalLM(InternVLAN1ForCausalLM):
         s1_mode = getattr(self.config, 'bev_s1_mode', 'fpv')
         depth_source = getattr(self.config, 'bev_depth_source', 'gt')
 
+        if labels is not None:
+            # Stashed for subclasses (e.g. pixel_goal) that need per-sample camera pitch to
+            # project a pixel goal to metric coordinates, regardless of bev_s1_mode.
+            # .float(): HF Trainer casts batch to bfloat16; bfloat16(0.6)=0.6016 (7-bit mantissa loss)
+            self._pixel_goal_cam_pitch = traj_cam_pitch_2.float() if traj_cam_pitch_2 is not None else None
+
         # Same BEVImageProvider.get_s1_input() path as eval.
         # depth shape: train [B,T,H,W] ↔ provider [B,T,H,W,1] — adapt around the call.
         if labels is not None and s1_mode != 'fpv' and (depth_source in ('dav2', 'udv2') or traj_depths is not None):
