@@ -55,6 +55,9 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
     def get_model(self):
         return self.model
 
+    def _build_cond_token(self, memory_tokens, traj_hidden_states, traj_images, logits=None, labels=None):
+        return self.get_model().cond_projector(traj_hidden_states)
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -251,8 +254,8 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
                     memory_feat = torch.cat([images_dp_feat.flatten(1, 2), memory_feat], dim=-1)
                     memory_tokens = self.get_model().rgb_resampler(memory_feat)
 
-                    traj_hidden_states = self.get_model().cond_projector(traj_hidden_states)
-                    latents = torch.cat([memory_tokens, traj_hidden_states], dim=1)
+                    cond_token = self._build_cond_token(memory_tokens, traj_hidden_states, traj_images, logits, labels)
+                    latents = torch.cat([memory_tokens, cond_token], dim=1)
                 else:
                     traj_hidden_states = self.get_model().cond_projector(traj_hidden_states)
                     latents = traj_hidden_states
@@ -439,3 +442,4 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
             else:
                 all_trajs = self.model.navdp.predict_pointgoal_action(traj_latents.to(self.get_model().device))
             return all_trajs
+

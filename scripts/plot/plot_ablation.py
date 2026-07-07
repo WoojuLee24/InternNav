@@ -30,7 +30,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 SPLIT = "val_unseen"
 
 # ── Set these to run the script directly ─────────────────────────────────────
-GROUP   = "num_history"
+GROUP   = "bev"
 OUTPUT  = None   # None → auto: figures/<group>.png
 METRICS = ["SR", "SPL", "OSS", "NES"]   # any subset of these four
 
@@ -138,6 +138,16 @@ GROUPS: list[ExperimentGroup] = [
             Condition("2",        SR=52.855, SPL=46.334, OSS=58.891, NES=4.81709),
             Condition("4\n(base)",SR=53.844, SPL=47.446, OSS=60.305, NES=4.79420),
             Condition("8",        SR=53.562, SPL=47.428, OSS=59.815, NES=4.84289),
+        ],
+    ),
+    ExperimentGroup(
+        name="bev",
+        xlabel="bev",
+        conditions=[
+            Condition("fpv.rgb\n(base)", SR=51.659, SPL=45.398, OSS=58.891, NES=4.79637),
+            Condition("bev.rgb",         SR=57.368, SPL=51.341, OSS=64.981, NES=4.52454),
+            Condition("bev.occ_gt",      SR=52.094, SPL=45.682, OSS=59.761, NES=4.84741),
+            Condition("bev.occ_binary",  SR=51.06, SPL=44.187, OSS=58.075, NES=4.99203),
         ],
     ),
 ]

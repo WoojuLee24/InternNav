@@ -107,6 +107,7 @@ def set_model(model_args, model):
             'action_decoder',
             'traj_dit',
             'cond_projector',
+            'pixel_cond_projector',
             'memory_encoder',
             'rgb_resampler',
             'rgb_model',
@@ -164,6 +165,7 @@ def train(attn_implementation="flash_attention_2"):
         model.config.dav2_max_depth = model_args.dav2_max_depth
         model.config.debug_modes = model_args.debug_modes
         model.config.debug_dir = model_args.debug_dir
+        model.config.use_pixel_goal = model_args.use_pixel_goal
         data_args.image_processor = AutoProcessor.from_pretrained(
             model_args.model_name_or_path,
         ).image_processor
@@ -216,6 +218,8 @@ def train(attn_implementation="flash_attention_2"):
     if data_args.model_type == "internvla-n1":
         model.get_model().initialize_vision_modules(model_args=model_args)
     set_model(model_args, model)
+    if data_args.model_type == "internvla-n1" and model_args.use_pixel_goal:
+        model.setup_pixel_goal_decoder(tokenizer, data_args.resize_w, data_args.resize_h)
 
     if torch.distributed.get_rank() == 0:
         model.visual.print_trainable_parameters()
@@ -245,6 +249,7 @@ def train(attn_implementation="flash_attention_2"):
     else:
         trainer.train()
     trainer.save_state()
+    
     data_args.image_processor.save_pretrained(training_args.output_dir)
 
     model.config.use_cache = True

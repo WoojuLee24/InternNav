@@ -12,6 +12,7 @@ class ModelArguments:
     tune_mm_vision: bool = field(default=False)
 
     system1: Optional[str] = field(default='nextdit')
+    use_pixel_goal: bool = field(default=False)
     n_query: int = field(default=4)
 
     bev_mode: str = field(default="none", metadata={"help": "none|occ_gt|rgb_gt|fpv_concat_gt|occ_depthanythingv2|rgb_depthanythingv2"})

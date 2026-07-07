@@ -22,6 +22,10 @@ def get_policy(policy_name):
         )
 
         return InternVLAN1Net
+    elif policy_name == 'InternVLAN1PixelGoal_Policy':
+        from .basemodel.internvla_n1.internvla_n1_pixel_goal import InternVLAN1PixelGoalNet
+
+        return InternVLAN1PixelGoalNet
     elif policy_name == 'NavDP_Policy':
         from .basemodel.navdp.navdp_policy import NavDPNet
 
@@ -52,6 +56,10 @@ def get_config(policy_name):
             InternVLAN1ModelConfig,
             InternVLAN1Net,
         )
+
+        return InternVLAN1ModelConfig
+    elif policy_name == 'InternVLAN1PixelGoal_Policy':
+        from .basemodel.internvla_n1.internvla_n1_policy import InternVLAN1ModelConfig
 
         return InternVLAN1ModelConfig
     elif policy_name == 'NavDP_Policy':

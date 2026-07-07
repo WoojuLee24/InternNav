@@ -72,6 +72,7 @@ class Params:
     tune_mm_llm: bool = False
     gradient_checkpointing: bool = True
     system1: str = "nextdit_async"
+    use_pixel_goal: bool = False  # S1 conditioning: True=pixel coord [0,1]^2, False=VLM latent
 
     # ---- BEV visual input (bev=False => plain trainer + fpv eval, unchanged) ----
     bev: bool = False              # master toggle for the BEV pipeline (train + eval)
@@ -106,6 +107,8 @@ class Params:
     @property
     def trainer(self) -> str:
         """Trainer entry script. BEV swaps in the provider trainer (base file untouched)."""
+        if self.use_pixel_goal:
+            return "internnav/trainer/internvla_n1_pixel_goal_trainer.py"
         if self.bev:
             return "internnav/trainer/internvla_n1_bev_provider_trainer.py"
         return "internnav/trainer/internvla_n1_trainer.py"
@@ -157,6 +160,7 @@ class Params:
             "--predict_step_num", str(self.predict_step_num),
             "--pixel_goal_only", b(self.pixel_goal_only),
             "--system1", self.system1,
+            "--use_pixel_goal", b(self.use_pixel_goal),
             "--output_dir", output_dir,
             "--num_train_epochs", str(self.num_train_epochs),
             "--per_device_train_batch_size", str(self.batch_size),
@@ -281,6 +285,7 @@ def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
         "max_new_tokens": m["max_new_tokens"],
         "vis_debug": False,
         "vis_debug_path": "./logs/habitat/vis_debug",
+        "use_pixel_goal": p.use_pixel_goal,
     }
     eval_type = "habitat_vln"
     output_path = m["output_path"]
