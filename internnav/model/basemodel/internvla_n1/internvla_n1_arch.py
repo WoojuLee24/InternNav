@@ -116,6 +116,13 @@ class SinusoidalPositionalEncoding(nn.Module):
         return enc
 
 
+def _s1_bev_concat(cfg) -> bool:
+    """True when S1 feeds BEV as a 3rd image slot (s1_image_view='bev' +
+    s1_combine_mode='concat') — the memory_encoder token budget then needs
+    3*256=768 instead of the default 2*256=512 (see MemoryEncoder.max_len)."""
+    return getattr(cfg, 's1_image_view', 'fpv') == 'bev' and getattr(cfg, 's1_combine_mode', 'none') == 'concat'
+
+
 class MemoryEncoder(nn.Module):
     def __init__(self, hidden_size=384, num_heads=6, num_layers=3, max_len=512, dropout=0.1):
         super().__init__()
@@ -178,7 +185,7 @@ class InternVLAN1MetaModel:
 
                 if 'async' in config.system1:
                     self.rgb_model = build_depthanythingv2(config)
-                    self.memory_encoder = MemoryEncoder()
+                    self.memory_encoder = MemoryEncoder(max_len=768 if _s1_bev_concat(config) else 512)
                     self.rgb_resampler = QFormer()
 
             elif 'navdp' in config.system1:
@@ -200,7 +207,12 @@ class InternVLAN1MetaModel:
 
             if 'async' in model_args.system1:
                 self.rgb_model = build_depthanythingv2(model_args)
-                self.memory_encoder = MemoryEncoder()
+                # NOTE: s1_image_view/s1_combine_mode are peeled from argv and applied
+                # to self.config (not model_args) by InternVLAN1UnifiedProviderForCausalLM
+                # .__init__'s pending-settings step, which runs before this method (called
+                # from internvla_n1_trainer.py right after from_pretrained returns) — so
+                # check self.config here, not model_args.
+                self.memory_encoder = MemoryEncoder(max_len=768 if _s1_bev_concat(self.config) else 512)
                 self.rgb_resampler = QFormer()
         elif 'navdp' in model_args.system1:
             if 'async' in model_args.system1:

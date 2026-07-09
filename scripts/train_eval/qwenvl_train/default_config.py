@@ -24,7 +24,7 @@ Baseline values mirror scripts/train/qwenvl_train/batch_size/b4_eff128_base.sh.
 import json
 import os
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 
 # --------------------------------------------------------------------------- #
@@ -88,6 +88,24 @@ class Params:
     bev_cam_pitch_deg: float = 0.0          # Habitat base camera is horizontal
     bev_depth_scale: float = 1.0            # evaluator hands metric depth to the provider
     debug_dir: str = None                   # BEV debug image output dir (None = disabled)
+    bev_s2_always: bool = False             # True → pass BEV to S2 every step; False → only on LOOKDOWN steps
+
+    # ---- unified image provider (view x type x mode x combine, independent of `bev`) ----
+    image_provider: bool = False   # master toggle; mutually exclusive with `bev` (different trainer/eval classes)
+    s1_image_view: str = "fpv"        # 'fpv' | 'bev'
+    s1_image_type: str = "rgb"        # 'rgb' | 'depth' | 'panorama' (panorama not implemented)
+    s1_image_mode: str = "raw"        # value-processing; vocabulary depends on (view,type) — see unified_image_provider.py
+    s1_combine_mode: str = "none"     # 'none' | 'replace' | 'concat' (concat only supported via view='bev')
+    s2_image_view: str = "fpv"
+    s2_image_type: str = "rgb"
+    s2_image_mode: str = "raw"
+    s2_combine_mode: str = "none"
+    s2_source_view: str = "lookdown"  # 'lookdown' | 'fpv' — which image is fed to get_s2_extra in the else branch
+    depth_adapter_mode: str = "repeat"  # 'repeat' (no params) | 'conv' (learnable 1x1) — only used for 1ch depth images
+
+    # ---- smoke test ----
+    max_steps: int = -1  # -1 = unset (train num_train_epochs as usual); >0 = stop after N steps (also disables mid-train eval/save/load-best, which a run this short can't satisfy)
+    eval_max_episodes: Optional[int] = None  # None = unset (eval full split as usual); >0 = cap episodes for a quick eval-rollout smoke test
 
     # ---- data / model paths ----
     vln_datasets: str = "r2r_125cm_0_30%30,r2r_60cm_15_15%30"
@@ -105,9 +123,12 @@ class Params:
     # ---- derived ----
     @property
     def trainer(self) -> str:
-        """Trainer entry script. BEV swaps in the provider trainer (base file untouched)."""
+        """Trainer entry script. BEV / unified image provider swap in their own
+        provider trainer (base file untouched); at most one is active per run."""
         if self.bev:
             return "internnav/trainer/internvla_n1_bev_provider_trainer.py"
+        if self.image_provider:
+            return "internnav/trainer/internvla_n1_unified_provider_trainer.py"
         return "internnav/trainer/internvla_n1_trainer.py"
 
     @property
@@ -138,7 +159,32 @@ class Params:
             ]
             if self.debug_dir:
                 bev_argv += ["--debug_dir", self.debug_dir]
-        argv = bev_argv + [
+        image_argv = []
+        if self.image_provider:
+            image_argv = [
+                "--s1_image_view", self.s1_image_view,
+                "--s1_image_type", self.s1_image_type,
+                "--s1_image_mode", self.s1_image_mode,
+                "--s1_combine_mode", self.s1_combine_mode,
+                "--bev_depth_source", self.bev_depth_source,
+                "--bev_z_min", str(self.bev_z_min),
+                "--bev_z_max", str(self.bev_z_max),
+                "--depth_adapter_mode", self.depth_adapter_mode,
+            ]
+            if self.debug_dir:
+                image_argv += ["--debug_dir", self.debug_dir]
+        # S2 training image injection is a DataArguments concern (dataset-level,
+        # not model-class-level) — passed regardless of which trainer script runs.
+        s2_argv = []
+        if self.s2_combine_mode != "none":
+            s2_argv = [
+                "--s2_image_view", self.s2_image_view,
+                "--s2_image_type", self.s2_image_type,
+                "--s2_image_mode", self.s2_image_mode,
+                "--s2_combine_mode", self.s2_combine_mode,
+            ]
+        smoke = self.max_steps > 0
+        argv = bev_argv + image_argv + s2_argv + [
             "--deepspeed", self.deepspeed,
             "--model_name_or_path", self.system2_ckpt,
             "--vln_dataset_use", self.vln_datasets,
@@ -165,14 +211,14 @@ class Params:
             "--max_pixels", str(self.max_pixels),
             "--min_pixels", str(self.min_pixels),
             "--val_ratio", str(self.val_ratio),
-            "--eval_strategy", "steps",
+            "--eval_strategy", "no" if smoke else "steps",
             "--eval_steps", str(self.val_interval_steps),
-            "--save_strategy", "steps",
+            "--save_strategy", "no" if smoke else "steps",
             "--save_steps", str(self.val_interval_steps),
             "--save_total_limit", str(self.save_total_limit),
             "--metric_for_best_model", "eval_loss",
             "--greater_is_better", "False",
-            "--load_best_model_at_end", "True",
+            "--load_best_model_at_end", b(not smoke),
             "--learning_rate", _fmt_num(self.lr),
             "--weight_decay", _fmt_num(self.weight_decay),
             "--warmup_ratio", _fmt_num(self.warmup_ratio),
@@ -184,8 +230,10 @@ class Params:
             "--gradient_checkpointing", b(self.gradient_checkpointing),
             "--dataloader_num_workers", str(self.dataloader_num_workers),
             "--run_name", run_name,
-            "--report_to", "wandb",
+            "--report_to", "none" if smoke else "wandb",
         ]
+        if smoke:
+            argv += ["--max_steps", str(self.max_steps)]
         return argv
 
 
@@ -303,6 +351,31 @@ def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
             "bev_z_min": p.bev_z_min,
             "bev_z_max": p.bev_z_max,
             "debug_dir": p.debug_dir or os.environ.get("BEV_DEBUG_DIR"),
+            "bev_s2_always": p.bev_s2_always,
+        })
+    elif p.image_provider:
+        import internnav.habitat_extensions.vln.habitat_vln_evaluator_unified  # noqa: F401
+        eval_type = "habitat_vln_unified"
+        output_path = output_path + "_image_provider"
+        model_settings.update({
+            "visual_provider": "unified_image",
+            "s1_image_view": p.s1_image_view,
+            "s1_image_type": p.s1_image_type,
+            "s1_image_mode": p.s1_image_mode,
+            "s1_combine_mode": p.s1_combine_mode,
+            "s2_image_view": p.s2_image_view,
+            "s2_image_type": p.s2_image_type,
+            "s2_image_mode": p.s2_image_mode,
+            "s2_combine_mode": p.s2_combine_mode,
+            "s2_source_view": p.s2_source_view,
+            "bev_cam_pitch_deg": p.bev_cam_pitch_deg,
+            "bev_depth_scale": p.bev_depth_scale,
+            "bev_depth_source": p.bev_depth_source,
+            "bev_dav2_max_depth": p.bev_dav2_max_depth,
+            "bev_z_min": p.bev_z_min,
+            "bev_z_max": p.bev_z_max,
+            "depth_adapter_mode": p.depth_adapter_mode,
+            "debug_dir": p.debug_dir or os.environ.get("BEV_DEBUG_DIR"),
         })
 
     return EvalCfg(
@@ -320,6 +393,7 @@ def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
             "save_video": False,
             "epoch": 0,
             "max_steps_per_episode": 500,
+            "max_episodes": p.eval_max_episodes or (int(os.environ["EVAL_MAX_EPISODES"]) if os.environ.get("EVAL_MAX_EPISODES") else None),
             "port": "2333",
             "dist_url": "env://",
             "use_wandb": m["use_wandb"],

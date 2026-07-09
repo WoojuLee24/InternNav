@@ -65,11 +65,38 @@
 - 새 클래스를 기존 코드에 연결할 때는, 기존 코드에서 조건 분기로 새 클래스를 import하는 대신 **factory 함수나 registry 패턴**으로 등록해서 기존 코드 수정을 최소화한다.
   - 예: `ENCODER_REGISTRY = {"base": BaseEncoder, "depth": DepthAwareEncoder}` 후 config의 `encoder_type` 값으로 선택.
 
-### 4. 검증
+### 4. 확실하지 않으면 질문
+- 확실하지 않은 상태에서 개발하지 말고 user에게 질문해서 구체화한 후 개발할 것
+
+### 5. Training과 evaluation은 일치해야 됨
+- 입력, 출력 데이터 format이 일치해야 됨
+- 예외적인 경우: 
+
+### 5. 검증
 
 - 변경 후에는 반드시 명령어를 실행해 **기존 기능(default 경로)이 이전과 동일하게 동작하는지**, **신규 기능이 의도대로 동작하는지** 둘 다 확인한다.
 - 기존 테스트가 있다면 새 코드 작성 전/후 모두 통과하는지 확인한다.
 - 개발 목표와 관련된 코드는 시각화해서 저장해서 디버깅해라. 
+
+### 6. 분기(if/elif) 작성: 값이 유한하면 exhaustive if/elif/else + assert로 명시 (exhaustiveness check / assert_never 패턴)
+
+- 변수가 가질 수 있는 값이 이미 검증되어 있다면, 남은 경우를 fallthrough/암묵적 else로 처리하지 말고 **모든 값을 `if/elif/.../else`로 나열**하고 마지막 `else`는 `assert False, f"unreachable {var}={var!r}"`로 막는다.
+- 이유: 가독성. 어떤 값이 어떤 분기로 가는지 코드만 보고 바로 알 수 있어야 한다.
+```python
+if self.s1_combine == 'replace':
+    ...
+elif self.s1_combine == 'concat':
+    ...
+else:
+    assert False, f"unreachable s1_combine={self.s1_combine!r}"
+```
+
+### 7. 상속을 코드 재사용 목적으로 썼다면, `isinstance`로 동작을 게이팅하지 않는다
+
+- 클래스 A가 클래스 B를 상속하는 이유가 "B의 메서드를 `super()`로 재사용하기 위해서"일 뿐, A가 B의 모든 인스턴스를 의미론적으로 대표하지 않는다면(A가 B보다 더 넓은 범위를 표현한다면), 다른 코드에서 `isinstance(obj, B)`로 "이 객체가 B의 동작을 해야 하는가"를 판단하면 안 된다. A의 인스턴스는 상속 관계 때문에 `isinstance(obj, B)`가 **항상 True**가 되어버려서, 실제로 B의 동작(예: B 전용 디버그 저장)이 필요 없는 A 인스턴스에도 그 동작이 걸린다.
+  - 실제로 겪은 사례: `UnifiedImageProvider`가 코드 재사용을 위해 `BEVImageProvider`를 상속했는데, `UnifiedImageProvider`는 BEV를 전혀 안 쓰는 조합(`s1_view='fpv'`)도 표현한다. `habitat_vln_evaluator_unified.py`가 "BEV 디버그 이미지를 저장할지"를 `isinstance(self.provider, BEVImageProvider)`로 판단했는데, 이 provider는 항상 `UnifiedImageProvider`라서 이 체크는 상수 True였고, `s1_view='fpv'`(디버그 스텝 카운터가 증가 안 하는 경로)에서도 디버그 저장이 호출되어 매 스텝 같은 파일명으로 덮어써지는 버그가 있었다.
+  - 해결: `isinstance(obj, B)` 대신 **실제 동작을 결정하는 config/상태 값**(예: `obj.s1_view == 'bev'`)으로 직접 체크한다. 이 패턴은 이미 `internvla_n1_unified_provider.py`(학습 코드)와 `internnav/dataset/internvla_n1_lerobot_dataset.py`(데이터셋 코드)에 정확하게 적용되어 있었음 — evaluator만 예외적으로 틀린 패턴을 쓰고 있었다.
+  - 더 근본적인 해결: 애초에 A가 B보다 의미론적으로 넓은 범위를 표현한다면(A의 일부 인스턴스만 B 역할을 함), A는 B를 상속하지 말고 필요한 로직만 A 안에 직접 작성하거나 B의 하위 로직을 호출하는 방식으로 가져온다. "코드 재사용" 하나만으로 상속 여부를 정하지 말 것 — `isinstance`/타입 계층이 실제 동작을 정확히 반영하는지도 같이 판단해야 한다.
 
 
 ## Command

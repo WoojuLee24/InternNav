@@ -147,17 +147,16 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
             self._save_eval_tdmap_debug()
         return images_dp, depths_dp
 
-    def _save_eval_tdmap_debug(self):
-        """Save Habitat topdown camera GT image at the last provider debug step.
+    def _save_eval_tdmap_debug(self, step=None, file_stem='step'):
+        """Save Habitat topdown camera GT image at the given step index.
 
-        Saved as step_XXXXXX_6_gt_cam.jpg. The topdown RGB sensor was injected
-        into the Habitat sim at init (only when debug_dir is set).
-        Falls back to TopDownMap crop if the camera sensor is not available.
+        step=None → uses S1 counter (self.provider._debug_step - 1).
+        file_stem controls the filename prefix ('step' for S1, 's2_step' for S2).
         """
         try:
             from habitat.tasks.nav.nav import TopDownMap as _TopDownMap
 
-            s         = self.provider._debug_step - 1  # get_s1_input already incremented
+            s         = (self.provider._debug_step - 1) if step is None else step
             debug_dir = self.provider.debug_dir
             os.makedirs(debug_dir, exist_ok=True)
 
@@ -234,17 +233,18 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                 return im
 
             # agent-frame topdown camera (no rotation, no arrow)
-            cv2.imwrite(f"{debug_dir}/step_{s:06d}_b00_5_gt_cam.jpg", img_bgr)
+            cv2.imwrite(f"{debug_dir}/{file_stem}_{s:06d}_b00_5_gt_cam.jpg", img_bgr)
             # world-aligned topdown + FWD arrow — matches train _w5_gt_topdown_world.jpg
-            cv2.imwrite(f"{debug_dir}/step_{s:06d}_w5_gt_topdown_world.jpg",
+            cv2.imwrite(f"{debug_dir}/{file_stem}_{s:06d}_w5_gt_topdown_world.jpg",
                         _draw_agent(_rotate_world(img_bgr)))
 
-            # Save world-aligned copies of _3_bev and _4_gt_bev (originals kept as robot frame)
-            for src_suffix, dst_suffix in [('_3_bev.jpg', '_w3_bev_world.jpg'),
-                                           ('_4_gt_bev.jpg', '_w4_gt_bev_world.jpg')]:
-                bev_img = cv2.imread(f"{debug_dir}/step_{s:06d}{src_suffix}")
-                if bev_img is not None:
-                    cv2.imwrite(f"{debug_dir}/step_{s:06d}{dst_suffix}", _rotate_world(bev_img))
+            # S1 only: save world-aligned copies of _3_bev and _4_gt_bev
+            if file_stem == 'step':
+                for src_suffix, dst_suffix in [('_3_bev.jpg', '_w3_bev_world.jpg'),
+                                               ('_4_gt_bev.jpg', '_w4_gt_bev_world.jpg')]:
+                    bev_img = cv2.imread(f"{debug_dir}/step_{s:06d}{src_suffix}")
+                    if bev_img is not None:
+                        cv2.imwrite(f"{debug_dir}/step_{s:06d}{dst_suffix}", _rotate_world(bev_img))
         except Exception:
             import traceback; traceback.print_exc()
 
@@ -388,6 +388,8 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                         s2_extra = self.provider.get_s2_extra(
                             look_down_rgb_np, look_down_depth_m, is_lookdown=True
                         )
+                        if s2_extra and isinstance(self.provider, BEVImageProvider) and self.provider.debug_dir:
+                            self._save_eval_tdmap_debug(step=self.provider._s2_debug_step - 1, file_stem='s2_step')
                         if s2_extra and s2_mode == 'bev':
                             input_images += s2_extra
                             input_img_id = -len(s2_extra)
@@ -416,14 +418,16 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                         input_images = [rgb_list[i] for i in history_id] + cur_images
                         input_img_id = 0
 
+
                     # === BEV: one <image> token per image of this turn ===
+                    s2_image_label = getattr(self.provider, 's2_image_label', "the bird's-eye view of your surroundings")
                     if s2_extra and s2_mode == 'bev':
-                        prompt = random.choice(self.conjunctions) + "the bird's-eye view of your surroundings:"
+                        prompt = random.choice(self.conjunctions) + f"{s2_image_label}:"
                         prompt += ('\n' + DEFAULT_IMAGE_TOKEN) * len(s2_extra)
                     else:
                         prompt = random.choice(self.conjunctions) + DEFAULT_IMAGE_TOKEN
                         if s2_extra:
-                            prompt += " This is the bird's-eye view of your surroundings: "
+                            prompt += f" This is {s2_image_label}: "
                             prompt += ('\n' + DEFAULT_IMAGE_TOKEN) * len(s2_extra)
                     sources[0]["value"] += f" {prompt}."
                     prompt_instruction = copy.deepcopy(sources[0]["value"])

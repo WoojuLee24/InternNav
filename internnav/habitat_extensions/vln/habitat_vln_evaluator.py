@@ -299,6 +299,7 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             )
         cfg.env.env_settings['habitat_config'] = self.config
         cfg.env.env_settings['output_path'] = self.output_path
+        cfg.env.env_settings['max_episodes'] = getattr(args, 'max_episodes', None)
 
         # init agent and env
         super().__init__(cfg, init_agent=False)

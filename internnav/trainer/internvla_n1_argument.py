@@ -52,6 +52,13 @@ class DataArguments:
     train_max_samples: int = field(default=0, metadata={"help": "Max number of training samples. 0 = unlimited."})
     stop_weight: int = field(default=5, metadata={"help": "Oversampling multiplier for stop samples. Only used when pixel_goal_only=False."})
 
+    # ---- S2 unified image input (independent of S1's bev_*/s1_*; GT depth only) ----
+    s2_image_view: str = field(default="fpv", metadata={"help": "fpv|bev"})
+    s2_image_type: str = field(default="rgb", metadata={"help": "rgb|depth|panorama (panorama not implemented)"})
+    s2_image_mode: str = field(default="raw", metadata={"help": "value-processing mode; vocabulary depends on (view,type)"})
+    s2_combine_mode: str = field(default="none", metadata={"help": "none|replace|concat"})
+    s2_depth_source: str = field(default="gt", metadata={"help": "gt only for now — estimated depth needs model inference inside dataloader workers, out of scope"})
+
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):

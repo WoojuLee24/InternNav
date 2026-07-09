@@ -55,6 +55,40 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
     def get_model(self):
         return self.model
 
+    def _encode_s1_memory_tokens(self, images_dp: torch.Tensor) -> torch.Tensor:
+        """images_dp: [bsz, slot, H, W, 3] (slot=2 today's [goal, cur]; slot=3 when a BEV
+        image is appended as a 3rd slot for s1_combine_mode='concat') -> memory_tokens:
+        [bsz, 32, hidden]. Extracted from forward()/generate_traj()'s previously-duplicated
+        inline nextdit_async image-encoding block (permute/normalize/rgb_model/
+        memory_encoder/rgb_resampler) — logic unchanged, just shared so both call sites
+        automatically support an extra slot without re-implementing this block twice.
+        Callers are responsible for casting rgb_model's own dtype beforehand if needed
+        (generate_traj does `rgb_model.to(dtype)`; forward() doesn't need to)."""
+        bsz = images_dp.size(0)
+        images_dp = images_dp.permute(0, 1, 4, 2, 3)
+        rgb_model = self.get_model().rgb_model
+        images_dp_norm = (images_dp - self._resnet_mean.to(images_dp.device)) / self._resnet_std.to(images_dp.device)
+        images_dp_feat = (
+            rgb_model.get_intermediate_layers(images_dp_norm.flatten(0, 1).to(next(rgb_model.parameters()).dtype))[0]
+            .unflatten(dim=0, sizes=(bsz, -1))
+        )
+        memory_input = images_dp_feat.flatten(1, 2)  # [bsz, slot*256, 384]
+        memory_pos_len = self.get_model().memory_encoder.memory_pos.shape[0]
+        if memory_input.shape[1] != memory_pos_len:
+            raise RuntimeError(
+                f"S1 image encoding produced {memory_input.shape[1]} tokens ({images_dp.shape[1]} image "
+                f"slots) but this checkpoint's MemoryEncoder was built for max_len={memory_pos_len}. This "
+                "means the checkpoint being evaluated was NOT trained with the same s1_image_view/"
+                "s1_combine_mode as this run's config — e.g. evaluating a checkpoint trained without "
+                "s1_combine_mode='concat' (2 slots -> memory_pos=512) against a concat eval config (3 "
+                "slots -> needs memory_pos=768) hits this. Train a checkpoint with s1_combine_mode='concat' "
+                "first (then eval it, e.g. via --model-path pointing at that checkpoint), or evaluate this "
+                "checkpoint with its original s1_combine_mode ('replace'/'none') instead."
+            )
+        memory_feat = self.get_model().memory_encoder(memory_input)
+        memory_feat = torch.cat([memory_input, memory_feat], dim=-1)
+        return self.get_model().rgb_resampler(memory_feat)
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -79,6 +113,7 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
         traj_depths: Optional[torch.Tensor] = None,
         video_frame_num: Optional[torch.Tensor] = None,
         traj_poses: Optional[torch.Tensor] = None,
+        traj_bev_images: Optional[torch.Tensor] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         r"""
             labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -235,21 +270,11 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
                 if 'async' in self.get_system1_type():
                     cur_images = traj_images.flatten(0, 1)
                     pix_goal_images = traj_images[:, 0:1].repeat(1, traj_images.size(1), 1, 1, 1).flatten(0, 1)
-                    bsz = cur_images.size(0)
-                    images_dp = torch.stack([pix_goal_images, cur_images], dim=1).permute(0, 1, 4, 2, 3)
-                    images_dp_norm = (images_dp - self._resnet_mean.to(images_dp.device)) / self._resnet_std.to(images_dp.device)
-
-                    images_dp_feat = (
-                        self.get_model()
-                        .rgb_model.get_intermediate_layers(images_dp_norm.flatten(0, 1).to(next(self.get_model().rgb_model.parameters()).dtype))[0]
-                        .unflatten(dim=0, sizes=(bsz, -1))
-                    )
-
-                    memory_feat = self.get_model().memory_encoder(
-                        images_dp_feat.flatten(1, 2)
-                    )  # [bs*select_size,512,384]
-                    memory_feat = torch.cat([images_dp_feat.flatten(1, 2), memory_feat], dim=-1)
-                    memory_tokens = self.get_model().rgb_resampler(memory_feat)
+                    slots = [pix_goal_images, cur_images]
+                    if traj_bev_images is not None:
+                        slots.append(traj_bev_images.flatten(0, 1))
+                    images_dp = torch.stack(slots, dim=1)
+                    memory_tokens = self._encode_s1_memory_tokens(images_dp)
 
                     traj_hidden_states = self.get_model().cond_projector(traj_hidden_states)
                     latents = torch.cat([memory_tokens, traj_hidden_states], dim=1)
@@ -355,6 +380,7 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
         guidance_scale: float = 1.0,
         num_inference_steps: int = 10,
         num_sample_trajs: int = 32,
+        bev_images: Optional[torch.Tensor] = None,
     ):
         if 'nextdit' in self.get_system1_type():
             scheduler = FlowMatchEulerDiscreteScheduler()
@@ -364,19 +390,9 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
             traj_latents = self.get_model().cond_projector(traj_latents)
             if 'async' in self.get_system1_type():
                 with torch.no_grad():
-                    images_dp = images_dp.permute(0, 1, 4, 2, 3)
-                    images_dp_norm = (images_dp - self._resnet_mean) / self._resnet_std
                     self.get_model().rgb_model.to(dtype)
-                    images_dp_feat = (
-                        self.get_model()
-                        .rgb_model.get_intermediate_layers(images_dp_norm.flatten(0, 1).to(dtype))[0]
-                        .unflatten(dim=0, sizes=(1, -1))
-                    )
-                    memory_feat = self.get_model().memory_encoder(
-                        images_dp_feat.flatten(1, 2)
-                    )  # [bs*select_size,512,384]
-                    memory_feat = torch.cat([images_dp_feat.flatten(1, 2), memory_feat], dim=-1)
-                    memory_tokens = self.get_model().rgb_resampler(memory_feat)
+                    stacked_images_dp = images_dp if bev_images is None else torch.cat([images_dp, bev_images], dim=1)
+                    memory_tokens = self._encode_s1_memory_tokens(stacked_images_dp)
                 hidden_states = torch.cat([memory_tokens, traj_latents], dim=1)
             else:
                 hidden_states = traj_latents

@@ -131,6 +131,8 @@ class S1VisualInput:
     images: Optional[torch.Tensor] = None    # [B, T, H, W, 3] float [0, 1] — replaces images_dp
     features: Optional[torch.Tensor] = None  # [B, N, C] — Phase 2: DINOv2 bypass tokens
     depths: Optional[torch.Tensor] = None    # [B, T, H, W, 1] metres — replaces depths_dp
+    extra_images: Optional[torch.Tensor] = None  # [B, T, H, W, 3] — ADDITIONAL image (e.g. BEV) to
+                                                  # append as a new slot; does NOT replace images/depths.
 
 
 class BEVProcessor:
@@ -314,6 +316,7 @@ class BEVProcessor:
         depth: Optional[np.ndarray] = None,
         depth_in_meters: bool = False,
         cam_pitch_deg: Optional[float] = None,
+        image_type: str = 'rgb',
     ) -> Image.Image:
         """Single frame → BEV PIL image for the S2 (LLM) prompt.
 
@@ -321,6 +324,8 @@ class BEVProcessor:
             rgb  : [H, W, 3] uint8 (or float [0, 1]).
             depth: [H, W] (or [H, W, 1]) raw sensor depth or metres.
                    Optional when depth_source=='dav2'.
+            image_type: 'rgb' (coloured BEV, default) | 'occ'|'occ.binary'|'occ.prob'|
+                        'occ.dist'|'occ.dist.sep' (occupancy grid — same variants for_s1 supports).
         """
         rgb_t = torch.from_numpy(np.ascontiguousarray(rgb)).unsqueeze(0)
         if depth is not None:
@@ -330,7 +335,14 @@ class BEVProcessor:
             depth_t = torch.from_numpy(np.ascontiguousarray(depth)).unsqueeze(0)
         else:
             depth_t = None
-        bev = self.bev_chw(rgb_t, depth_t, depth_in_meters=depth_in_meters, cam_pitch_deg=cam_pitch_deg)
+        if image_type == 'rgb':
+            bev = self.bev_chw(rgb_t, depth_t, depth_in_meters=depth_in_meters, cam_pitch_deg=cam_pitch_deg)
+        else:
+            # _bev_batch's occ branch assumes depth is already metric (unlike bev_chw,
+            # which applies depth_scale itself) — scale raw sensor depth up-front to match.
+            if depth_t is not None and not depth_in_meters and self.depth_source not in ('dav2', 'udv2'):
+                depth_t = depth_t * self.depth_scale
+            bev = self._bev_batch(rgb_t, depth_t, cam_pitch_deg, image_type)
         bev_np = (bev[0].permute(1, 2, 0).clamp(0, 1).cpu().float().numpy() * 255).astype(np.uint8)
         return Image.fromarray(bev_np)
 
@@ -507,6 +519,7 @@ class BEVImageProvider(VisualInputProvider):
         self.image_type = image_type
         self.debug_dir = debug_dir
         self._debug_step = 0
+        self._s2_debug_step = 0
 
     # ------------------------------------------------------------------ debug
 
@@ -663,6 +676,20 @@ class BEVImageProvider(VisualInputProvider):
                         gt_bev = depth_rgb_to_bev(gt_d.unsqueeze(0), fpv_s, **bev_kwargs, z_filter=False)[0]  # [3, S, S]
                     save_image(gt_bev, f"{prefix}_4_gt_bev.jpg")
 
+            # T=1 (current frame) — only for the eval re-call pattern, which always
+            # stacks exactly 2 frames (images_dp = [pix_goal, cur], see
+            # habitat_vln_evaluator_bev.py/_unified.py). Training passes T=num_history
+            # (e.g. 8) history frames, not a [goal, cur] pair — checking `== 2` (not
+            # `> 1`) keeps this branch from misfiring during training and saving a
+            # meaningless "_cur" file for what is really just history frame 1.
+            if rgb.shape[1] == 2:
+                save_image(rgb[b, 1], f"{prefix}_1_fpv_cur.jpg")
+                save_image(bev[b, 1], f"{prefix}_3_bev_{depth_src}_cur.jpg")
+                if depth is not None:
+                    gt_d1      = depth[b, 1, ..., 0]
+                    depth_vis1 = (gt_d1 / gt_d1.max().clamp(min=0.1)).clamp(0, 1)
+                    save_image(depth_vis1, f"{prefix}_2_gt_depth_cur.jpg")
+
     # ------------------------------------------------------------------ API
 
     def get_s1_input(self, rgb, depth, cam_pitch_deg=None, cam_height=None) -> S1VisualInput:
@@ -686,14 +713,19 @@ class BEVImageProvider(VisualInputProvider):
 
         if self.s1_mode == 'bev':
             return S1VisualInput(images=bev)
-        # 'fpv_bev': [fpv_goal, fpv_cur, bev_goal, bev_cur] along T (fpv_concat_gt
-        # convention). NOTE: T doubles — requires a checkpoint trained with the
-        # matching fpv_concat mode.
-        images = torch.cat([rgb, bev], dim=1)
-        depths = torch.cat([depth, depth], dim=1)  # BEV frames reuse the FPV depth
-        return S1VisualInput(images=images, depths=depths)
+        elif self.s1_mode == 'fpv_bev':
+            # [fpv_goal, fpv_cur, bev_goal, bev_cur] along T (fpv_concat_gt convention).
+            # NOTE: T doubles — requires a checkpoint trained with the matching fpv_concat mode.
+            images = torch.cat([rgb, bev], dim=1)
+            depths = torch.cat([depth, depth], dim=1)  # BEV frames reuse the FPV depth
+            return S1VisualInput(images=images, depths=depths)
+        else:
+            assert False, f"unreachable s1_mode={self.s1_mode!r} (validated in __init__ to be 'bev'|'fpv_bev' here; 'fpv' already returned above)"
 
-    def save_train_tdmap_debug(self, tdmap: torch.Tensor, world_heading: Optional[float] = None, batch_idx: int = 0) -> None:
+    def save_train_tdmap_debug(
+        self, tdmap: torch.Tensor, world_heading: Optional[float] = None, batch_idx: int = 0,
+        prefix: Optional[str] = None,
+    ) -> None:
         """Save tdmap + world-aligned BEV for training debug. Call AFTER get_s1_input.
 
         Agent-frame (order: bev → gt_bev → gt_topdown):
@@ -716,12 +748,13 @@ class BEVImageProvider(VisualInputProvider):
             import numpy as np
             from internnav.model.utils.depth_rgb_to_bev_torch import save_image
 
-            s         = self._debug_step - 1
             debug_dir = self.debug_dir
             S         = self.processor.bev_size
             bev_range = self.processor.bev_range
             os.makedirs(debug_dir, exist_ok=True)
-            prefix = f"step_{s:06d}_b{batch_idx:02d}"
+            if prefix is None:
+                s = self._debug_step - 1
+                prefix = f"step_{s:06d}_b{batch_idx:02d}"
 
             td_np = (tdmap.clamp(0, 1).cpu().float().numpy() * 255).astype(np.uint8)  # [H,W,3] uint8
 
@@ -765,14 +798,28 @@ class BEVImageProvider(VisualInputProvider):
         except Exception:
             import traceback; traceback.print_exc()
 
-    def get_s2_extra(self, rgb, depth, is_lookdown: bool = False) -> List[Image.Image]:
+    def get_s2_extra(self, rgb, depth, is_lookdown: bool = False, image_type: Optional[str] = None) -> List[Image.Image]:
         if self.s2_mode == 'fpv' or not is_lookdown:
             return []
+        img_type = image_type if image_type is not None else self.image_type
         bev = self.processor.for_s2(
             rgb, depth,
             depth_in_meters=self.s2_depth_in_meters,
             cam_pitch_deg=self.s2_pitch_deg,
+            image_type=img_type,
         )
+        if self.debug_dir:
+            try:
+                os.makedirs(self.debug_dir, exist_ok=True)
+                prefix = f"{self.debug_dir}/s2_step_{self._s2_debug_step:06d}"
+                # matches get_s1_input's _1_fpv.jpg / _N_bev_{src}.jpg naming (_save_s1_debug
+                # above) so the source frame and derived BEV image are directly comparable.
+                Image.fromarray(np.asarray(rgb).astype(np.uint8)).save(f"{prefix}_1_fpv.jpg")
+                type_sfx = '' if img_type == 'rgb' else f'_{img_type}'
+                bev.save(f"{prefix}_2_bev{type_sfx}_{self.processor.depth_source}.jpg")
+            except Exception:
+                import traceback; traceback.print_exc()
+            self._s2_debug_step += 1
         return [bev]
 
 
@@ -818,8 +865,14 @@ def create_visual_provider(config, device: str = 'cuda:0') -> VisualInputProvide
     ptype = _cfg_get(config, 'visual_provider', 'fpv')
     if ptype == 'fpv':
         return FPVProvider()
+    if ptype == 'unified_image':
+        # Generalizes bev_image with independent per-system view/type/mode/combine
+        # axes (fpv|bev x rgb|depth|panorama). See unified_image_provider.py.
+        from internnav.model.utils.unified_image_provider import create_unified_provider
+
+        return create_unified_provider(config, device=device)
     if ptype not in ('bev_image', 'bev_feature'):
-        raise ValueError(f"Unknown visual_provider '{ptype}' (expected fpv | bev_image | bev_feature)")
+        raise ValueError(f"Unknown visual_provider '{ptype}' (expected fpv | bev_image | bev_feature | unified_image)")
 
     processor = BEVProcessor(
         fx=_cfg_get(config, 'bev_fx', 585.0),
@@ -847,7 +900,7 @@ def create_visual_provider(config, device: str = 'cuda:0') -> VisualInputProvide
     # mode keys win; legacy booleans (bev_s1/bev_s2) map to default-mode/'fpv'
     s1_mode = _cfg_get(config, 'bev_s1_mode', 'bev' if _cfg_get(config, 'bev_s1', True) else 'fpv')
     s2_mode = _cfg_get(config, 'bev_s2_mode', 'fpv_bev' if _cfg_get(config, 'bev_s2', True) else 'fpv')
-    return BEVImageProvider(
+    provider = BEVImageProvider(
         processor,
         s1_mode=s1_mode,
         s2_mode=s2_mode,
@@ -857,3 +910,5 @@ def create_visual_provider(config, device: str = 'cuda:0') -> VisualInputProvide
         image_type=_cfg_get(config, 'bev_image_type', 'rgb'),
         debug_dir=_cfg_get(config, 'debug_dir', None),
     )
+    provider.s2_always = _cfg_get(config, 'bev_s2_always', False)  # ponytail: dynamic attr, skip __init__ change
+    return provider

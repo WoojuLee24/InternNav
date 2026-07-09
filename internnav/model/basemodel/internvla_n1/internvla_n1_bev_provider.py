@@ -227,6 +227,7 @@ class InternVLAN1BEVProviderForCausalLM(InternVLAN1ForCausalLM):
         traj_poses: Optional[torch.Tensor] = None,
         traj_tdmaps: Optional[torch.Tensor] = None,
         traj_world_headings: Optional[torch.Tensor] = None,
+        traj_bev_images: Optional[torch.Tensor] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
 
         s1_mode = getattr(self.config, 'bev_s1_mode', 'fpv')
@@ -276,4 +277,5 @@ class InternVLAN1BEVProviderForCausalLM(InternVLAN1ForCausalLM):
             traj_depths=traj_depths,
             video_frame_num=video_frame_num,
             traj_poses=traj_poses,
+            traj_bev_images=traj_bev_images,
         )
