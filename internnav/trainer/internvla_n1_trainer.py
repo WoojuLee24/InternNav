@@ -264,12 +264,14 @@ def train(attn_implementation="flash_attention_2"):
         trainer.train(resume_from_checkpoint=True)
     else:
         trainer.train()
-    trainer.save_state()
-    data_args.image_processor.save_pretrained(training_args.output_dir)
 
-    model.config.use_cache = True
+    if training_args.max_steps <= 0:  # smoke tests (max_steps>0) skip the final save entirely
+        trainer.save_state()
+        data_args.image_processor.save_pretrained(training_args.output_dir)
 
-    safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
+        model.config.use_cache = True
+
+        safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
 
 
 if __name__ == "__main__":

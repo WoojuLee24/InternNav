@@ -34,6 +34,7 @@ class HabitatEnv(base.Env):
 
         self.rank = env_config.env_settings.get('rank', 0)
         self.world_size = env_config.env_settings.get('world_size', 1)
+        self.max_episodes = env_config.env_settings.get('max_episodes')
         self._current_episode_index: int = 0
         self._last_obs: Optional[Dict[str, Any]] = None
 
@@ -80,7 +81,7 @@ class HabitatEnv(base.Env):
                     continue
                 all_episodes.append(episode)
 
-        return all_episodes
+        return all_episodes[: self.max_episodes] if self.max_episodes else all_episodes
 
     def reset(self):
         # no more episodes

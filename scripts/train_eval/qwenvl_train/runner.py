@@ -208,6 +208,7 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
              machine: str = "h200", nproc: int = 8, master_port: int = 2333,
              in_process: bool = False, debugpy: str = None,
              debug_dir: Optional[str] = None,
+             eval_max_episodes: Optional[int] = None,
              wandb_run_id: Optional[str] = None,
              wandb_new_run: bool = False) -> int:
     log_dir = os.path.join(output_dir, "logs")
@@ -256,6 +257,8 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
         env["DEBUGPY"] = debugpy  # habitat_vln_evaluator.py checks DEBUGPY=='eval' after model load
     if debug_dir:
         env["BEV_DEBUG_DIR"] = debug_dir  # read by default_config.make_eval_cfg at import time
+    if eval_max_episodes:
+        env["EVAL_MAX_EPISODES"] = str(eval_max_episodes)  # read by default_config.make_eval_cfg at import time
     eval_argv = [
         "--config", config_path, "--quiet",
         "--model_path", model_path, "--wandb_run_name", run_name,
@@ -289,7 +292,15 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
     running both in one process re-uses an already-initialized dist/CUDA state.
     """
     run_name = f"{exp_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    if not do_train and model_path:
+    if p.debug_dir and (p.max_steps > 0 or not do_train):
+        # smoke-style run (training smoke via max_steps>0, or an eval-only debug
+        # run): skip checkpoints_root / the (possibly shared) model_path dir
+        # entirely, write straight into the debug-image dir the caller asked for
+        # (training saves nothing when max_steps>0 -- see internvla_n1_trainer.py;
+        # eval-only runs would otherwise collide with other combos sharing the
+        # same checkpoint's progress.json).
+        output_dir = os.path.abspath(p.debug_dir)
+    elif not do_train and model_path:
         output_dir = os.path.abspath(model_path)
     else:
         output_dir = os.path.join(checkpoints_root, run_name)
@@ -321,7 +332,7 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
     os.makedirs(output_dir, exist_ok=True)
     run_eval(config_path, best, run_name, output_dir, machine=machine,
              nproc=p.nproc_per_node, in_process=in_process, debugpy=debugpy,
-             debug_dir=p.debug_dir,
+             debug_dir=p.debug_dir, eval_max_episodes=p.eval_max_episodes,
              wandb_run_id=wandb_run_id, wandb_new_run=wandb_new_run)
 
 
@@ -370,6 +381,9 @@ def main_cli() -> None:
     ap.add_argument("--data-root", default=None, help="override dataset root")
     ap.add_argument("--nproc", type=int, default=None,
                     help="GPUs per node for train+eval torchrun (e.g. 1 for a single 5090)")
+    ap.add_argument("--max-steps", type=int, default=None,
+                    help="smoke-test override: stop training after N steps (disables mid-train eval/save/load-best) "
+                         "and cap Habitat eval to N episodes instead of the full split")
     ap.add_argument("--checkpoints-root", default="/home/irteam/data-vol2/checkpoints")
     ap.add_argument("--print-train-argv", action="store_true", help="print resolved train flags and exit")
     # --- VSCode debugging ---
@@ -387,11 +401,12 @@ def main_cli() -> None:
                     help="force a fresh wandb run for this eval (does NOT overwrite wandb_run_id.txt)")
     args = ap.parse_args()
 
-    try:
-        import wandb
-        wandb.login(relogin=False)  # prompts once if not logged in; saves to ~/.netrc for subprocesses
-    except Exception as e:
-        print(f"[Warning] wandb login failed: {e}. Metrics will not be logged to wandb.")
+    if not (args.max_steps or args.debugpy):  # smoke tests / debug runs skip wandb entirely
+        try:
+            import wandb
+            wandb.login(relogin=False)  # prompts once if not logged in; saves to ~/.netrc for subprocesses
+        except Exception as e:
+            print(f"[Warning] wandb login failed: {e}. Metrics will not be logged to wandb.")
 
     # Set TRAIN_EVAL_TARGET before _load_config so that make_eval_cfg in the config
     # module builds the correct eval config (e.g. h1 → Isaac Sim, not Habitat).
@@ -429,10 +444,22 @@ def main_cli() -> None:
         params = replace(params, data_root=args.data_root)
     if args.nproc:
         params = replace(params, nproc_per_node=args.nproc)
+    if args.max_steps:  # one smoke-test knob: caps train steps AND eval episodes to the same N
+        params = replace(params, max_steps=args.max_steps, eval_max_episodes=args.max_steps)
     if in_process:
         params = replace(params, nproc_per_node=1)  # single process
+    if args.debug_dir:  # standalone --debug-dir (no --debugpy needed)
+        debug_dir = args.debug_dir
+        if not args.debugpy:
+            # --no-train -> eval-only run; --no-eval -> train-only run. (--debugpy
+            # already splits train/eval below, off its own target, so skip here.)
+            if args.no_train:
+                debug_dir = os.path.join(debug_dir, 'eval')
+            elif args.no_eval:
+                debug_dir = os.path.join(debug_dir, 'train')
+        params = replace(params, debug_dir=debug_dir)
     if args.debugpy:
-        base_dir = args.debug_dir or 'output/bev_debug'
+        base_dir = params.debug_dir or 'output/bev_debug'
         if args.debugpy == 'trainer':
             debug_dir = os.path.join(base_dir, 'train')
         elif args.debugpy == 'eval':

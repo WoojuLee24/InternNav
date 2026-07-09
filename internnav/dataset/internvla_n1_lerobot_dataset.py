@@ -1010,6 +1010,33 @@ class NavPixelGoalDataset(Dataset):
         self.data_args = data_args
         self.tokenizer = tokenizer
 
+        # ---- S2 unified image input (independent of S1; GT depth only) ----
+        self.s2_combine_mode = getattr(data_args, 's2_combine_mode', 'none')
+        self._s2_provider = None
+        if self.s2_combine_mode != 'none':
+            if getattr(data_args, 's2_depth_source', 'gt') != 'gt':
+                raise ValueError(
+                    "S2 training image injection only supports s2_depth_source='gt' "
+                    "— estimated depth requires model inference inside Dataset.__getitem__ "
+                    "dataloader workers, which is out of scope for now."
+                )
+            from internnav.model.utils.unified_image_provider import UnifiedImageProvider
+            from internnav.model.utils.visual_input_provider import BEVProcessor
+
+            processor = BEVProcessor(
+                fx=388.19, fy=388.19, cx=319.5, cy=239.5, device='cpu',
+                cam_height=1.25, cam_pitch_deg=0.0, depth_source='gt',
+            )
+            self._s2_provider = UnifiedImageProvider(
+                processor,
+                s2_view=getattr(data_args, 's2_image_view', 'fpv'),
+                s2_type=getattr(data_args, 's2_image_type', 'rgb'),
+                s2_image_mode=getattr(data_args, 's2_image_mode', 'raw'),
+                s2_combine=self.s2_combine_mode,
+                s2_depth_in_meters=True,
+                debug_dir=getattr(data_args, 'debug_dir', None),
+            )
+
     def __len__(self):
         return len(self.list_data_dict)
 
@@ -1065,6 +1092,7 @@ class NavPixelGoalDataset(Dataset):
                 video, f"observation.images.rgb.{height}cm_{pitch_1}deg", f"episode_{ep_id:06d}_{id}.jpg"
             )
             image = Image.open(image_file).convert('RGB')
+            fpv_image_raw = image  # pristine pitch_1 frame; `image` gets reassigned/augmented below
             lookdown_image = Image.open(image_file.replace(f'_{pitch_1}deg', f'_{pitch_2}deg')).convert('RGB')
 
             depth_image = Image.open(
@@ -1087,6 +1115,34 @@ class NavPixelGoalDataset(Dataset):
                     grid_thws.append(grid_thw)
                     traj_images.append(lookdown_image)
                     traj_depths.append(depth_image)
+                    if self.s2_combine_mode != 'none':
+                        # Source/pitch mirror habitat_vln_evaluator_unified.py's eval-time selection:
+                        # 'bev_ld' = lookdown (pitch_2) camera; everything else ('bev', 'fpv') = the
+                        # same pitch_1 FPV camera used for S1's current-frame image.
+                        if self._s2_provider.s2_view == 'bev_ld':
+                            # depth_image was already resized to 224x224 above (preprocess_depth_image_v2);
+                            # match lookdown_image to it — for_s2()/bev_chw() assume rgb and depth share H,W.
+                            s2_rgb_np = np.asarray(lookdown_image.resize(resize_shape, Image.BILINEAR))
+                            s2_depth_image = depth_image
+                            s2_cam_pitch_deg = float(pitch_2)
+                        else:
+                            fpv_depth_image = Image.open(
+                                image_file.replace('rgb', 'depth').replace('.jpg', '.png')
+                            )
+                            fpv_depth_image, fpv_resize_shape = self.preprocess_depth_image_v2(
+                                fpv_depth_image, do_depth_scale=True, depth_scale=1000,
+                                target_height=224, target_width=224,
+                            )
+                            s2_rgb_np = np.asarray(fpv_image_raw.resize(fpv_resize_shape, Image.BILINEAR))
+                            s2_depth_image = torch.as_tensor(np.ascontiguousarray(fpv_depth_image)).float()
+                            s2_cam_pitch_deg = float(pitch_1)
+                        extra_imgs = self._s2_provider.get_s2_extra(
+                            s2_rgb_np, s2_depth_image, is_lookdown=True, cam_pitch_deg=s2_cam_pitch_deg,
+                        )
+                        for extra_img in extra_imgs:
+                            extra_tensor, extra_grid_thw = self.process_image_unified(extra_img)
+                            images.append(extra_tensor)
+                            grid_thws.append(extra_grid_thw)
             elif id > start_frame_id:
                 traj_images.append(lookdown_image)
                 traj_depths.append(depth_image)
@@ -1117,10 +1173,13 @@ class NavPixelGoalDataset(Dataset):
             chat_sources[0][0]['value'] = chat_sources[0][0]['value'].replace('<instruction>', instruction)
 
         if pose is not None:
+            human_turn = f'{random.choice(self.conjunctions)}<image>.'
+            if self.s2_combine_mode != 'none':
+                human_turn += f' This is {self._s2_provider.s2_image_label}: <image>.'
             chat_sources[0].extend(
                 [
                     {'from': 'gpt', 'value': self.idx2actions[5]},
-                    {'from': 'human', 'value': f'{random.choice(self.conjunctions)}<image>.'},
+                    {'from': 'human', 'value': human_turn},
                     {'from': 'gpt', 'value': f'{action[0]} {action[1]}'},
                 ]
             )
@@ -1211,6 +1270,19 @@ class NavPixelGoalDataset(Dataset):
                         world_headings.append(0.0)
                 data_dict["traj_tdmaps"] = torch.from_numpy(np.stack(tdmaps).astype(np.float32) / 255.0)
                 data_dict["traj_world_headings"] = torch.tensor(world_headings, dtype=torch.float32)
+
+                # sampled_ids[0] == start_frame_id, the same frame get_s2_extra() just
+                # injected above — share its step number so the GT topdown lines up with
+                # the S2 bev/depth debug pair for scale/orientation comparison.
+                if (self.s2_combine_mode != 'none' and pose is not None
+                        and self._s2_provider is not None
+                        and getattr(self._s2_provider, 's2_view', None) in ('bev', 'bev_ld')):
+                    s2_step = self._s2_provider._s2_debug_step - 1
+                    if s2_step >= 0:
+                        self._s2_provider.save_train_tdmap_debug(
+                            data_dict["traj_tdmaps"][0], float(data_dict["traj_world_headings"][0]),
+                            prefix=f"s2_step_{s2_step:06d}",
+                        )
         return data_dict
 
 

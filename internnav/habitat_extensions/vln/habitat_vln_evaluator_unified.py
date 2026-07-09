@@ -1,26 +1,16 @@
-"""Habitat VLN evaluator with pluggable BEV visual input.
+"""Habitat VLN evaluator for UnifiedImageProvider (fpv + bev-or-depth S2).
 
 Subclass of ``HabitatVLNEvaluator`` — habitat_vln_evaluator.py is NOT modified.
-Selected via config ``eval_type='habitat_vln_bev'``; with
-``visual_provider='fpv'`` (default) behaviour is identical to the parent.
+Selected via config ``eval_type='habitat_vln_unified'`` with
+``visual_provider='unified_image'``.
 
-``_run_eval_dual_system`` is a copy of the parent method with BEV injection
-points marked ``# === BEV ===``:
-  - episode start  : provider.reset()
-  - S2 look-down   : provider.get_s2_extra() BEV image(s) replace
-                     (bev_s2_mode='bev') or follow (bev_s2_mode='fpv_bev') the
-                     look-down FPV frame; <image> tokens stay aligned
-  - S1 NavDP       : provider.get_s1_input() may replace images_dp
-                     (bev_s1_mode='bev', depths stay FPV — rgb_gt training
-                     convention) or concat BEV along T (bev_s1_mode='fpv_bev',
-                     fpv_concat_gt convention; depths duplicated)
+``_run_eval_dual_system`` is derived from HabitatVLNEvaluatorBEV with the key
+change that S2 BEV is provided every step (not only on LOOKDOWN turns), matching
+the training setup where dual cameras (pitch_1 FPV + pitch_2 lookdown) are
+available for every decision frame.
 
-Habitat-specific geometry: the frames S1/S2 consume here are look-down frames
-(2 × LOOKDOWN = 2 × 30° tilt), so the per-system pitch defaults to
-``bev_cam_pitch_deg + 60``; override with bev_s1_pitch_deg / bev_s2_pitch_deg.
-
-NOTE: this module must be imported for the registry entry to exist — the BEV
-config files do this with ``import internnav.habitat_extensions.vln.habitat_vln_evaluator_bev``.
+NOTE: this module must be imported for the registry entry to exist — config files
+do this with ``import internnav.habitat_extensions.vln.habitat_vln_evaluator_unified``.
 """
 
 import copy
@@ -56,25 +46,16 @@ from internnav.habitat_extensions.vln.habitat_vln_evaluator import (  # noqa: F4
     action_code,
 )
 from internnav.habitat_extensions.vln.utils import preprocess_depth_image_v2
-from internnav.model.utils.visual_input_provider import (
-    BEVImageProvider,
-    create_visual_provider,
-)
+from internnav.model.utils.unified_image_provider import _OCC_MODE_MAP
+from internnav.model.utils.visual_input_provider import create_visual_provider
 from internnav.model.utils.vln_utils import split_and_clean, traj_to_actions
 
-# Evaluator.register() does not return the class, so the module-level name
-# ``HabitatVLNEvaluator`` is None — fetch the parent from the registry instead.
 _HabitatVLNEvaluator = Evaluator.evaluators['habitat_vln']
-
-# Each habitat LOOKDOWN action tilts the camera 30° down; the dual-system loop
-# always issues it twice before S2/S1 consume the frame.
 _LOOKDOWN_PITCH_OFFSET_DEG = 60.0
 
 
-class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
+class HabitatVLNEvaluatorUnified(_HabitatVLNEvaluator):
     def __init__(self, cfg: EvalCfg):
-        # Inject a downward-looking topdown camera into the Habitat config BEFORE
-        # the parent creates the env, so obs['topdown_rgb'] is available for debug.
         debug_dir = (cfg.agent.model_settings or {}).get('debug_dir')
         bev_range  = (cfg.agent.model_settings or {}).get('bev_range', 5.0)
         self._has_topdown_cam = False
@@ -110,7 +91,6 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
         else:
             super().__init__(cfg)
 
-        # --- build provider; auto-fill intrinsics from the habitat sensor ---
         settings = dict(cfg.agent.model_settings)
         sensor = self.sim_sensors_config.depth_sensor
         base_pitch = settings.get('bev_cam_pitch_deg', 0.0)
@@ -122,37 +102,52 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
         settings.setdefault('bev_ref_height', sensor.height)
         settings.setdefault('bev_cam_height', float(self._camera_height))
         settings.setdefault('bev_s1_pitch_deg', base_pitch + _LOOKDOWN_PITCH_OFFSET_DEG)
-        settings.setdefault('bev_s2_pitch_deg', base_pitch + _LOOKDOWN_PITCH_OFFSET_DEG)
+        # S2 source frame depends on s2_image_view (:394-397 below — 'bev_ld'=lookdown,
+        # 'bev'/other=FPV) — pitch must match the ACTUAL camera angle of that source or
+        # the depth->world projection (depth_rgb_to_bev_torch._build_R_c2w) is wrong.
+        s2_image_view = settings.get('s2_image_view', 'fpv')
+        if s2_image_view == 'bev_ld':
+            settings.setdefault('bev_s2_pitch_deg', base_pitch + _LOOKDOWN_PITCH_OFFSET_DEG)
+        else:
+            settings.setdefault('bev_s2_pitch_deg', base_pitch)
         self.provider = create_visual_provider(settings, device=str(self.device))
-        if isinstance(self.provider, BEVImageProvider):
-            # this evaluator always hands metric depth to get_s2_extra
-            self.provider.s2_depth_in_meters = True
-            # debug_dir is already passed via create_visual_provider() from settings
-        self._tdm_mpp = None  # cached on first successful metrics call
-        # Log resolved BEV modes (parent __init__ already logged resize/num_history).
+        self.provider.s2_depth_in_meters = True
+        self._tdm_mpp = None
+        self.s2_source_view = settings.get('s2_image_view', 'fpv')
         print(
-            f"[ablation][bev] bev_s1_mode={settings.get('bev_s1_mode', 'fpv')} "
-            f"bev_s2_mode={settings.get('bev_s2_mode', 'fpv')}",
+            f"[unified] s1_view={settings.get('s1_image_view', 'fpv')} "
+            f"s2_view={settings.get('s2_image_view', 'fpv')} "
+            f"s2_combine={settings.get('s2_combine_mode', 'none')} "
+            f"s2_source={self.s2_source_view}",
             flush=True,
         )
 
     # ------------------------------------------------------------------ S1
 
     def _apply_s1_provider(self, images_dp: torch.Tensor, depths_dp: torch.Tensor):
-        """Let the provider replace the NavDP visual input (FPV → no-op)."""
         s1v = self.provider.get_s1_input(images_dp, depths_dp)
         images_dp = s1v.images if s1v.images is not None else images_dp
         depths_dp = s1v.depths if s1v.depths is not None else depths_dp
-        if isinstance(self.provider, BEVImageProvider) and self.provider.debug_dir:
+        # extra_images (s1_combine_mode='concat'): BEV computed for both [goal, cur]
+        # slots — keep only "cur" (index -1); the goal-frame BEV is discarded, same
+        # acceptance already implicit in 'replace' mode substituting both slots.
+        bev_images = s1v.extra_images[:, -1:] if s1v.extra_images is not None else None
+        # 'replace' substitutes images_dp with BEV; 'concat' returns it via extra_images
+        # instead (see above) — both compute a BEV through _save_s1_debug (bumping
+        # provider._debug_step), so both need the matching world-frame tdmap overlay.
+        if self.provider.s1_view == 'bev' and self.provider.s1_combine in ('replace', 'concat') and self.provider.debug_dir:
             self._save_eval_tdmap_debug()
-        return images_dp, depths_dp
+        return images_dp, depths_dp, bev_images
+
+    # ------------------------------------------------------------------ S2
+
+    def _apply_s2_provider(self, rgb_np, depth_m, file_stem='s2_step'):
+        s2_extra = self.provider.get_s2_extra(rgb_np, depth_m, is_lookdown=True)
+        if s2_extra and self.provider.s2_view in ('bev', 'bev_ld') and self.provider.debug_dir:
+            self._save_eval_tdmap_debug(step=self.provider._s2_debug_step - 1, file_stem=file_stem)
+        return s2_extra
 
     def _save_eval_tdmap_debug(self, step=None, file_stem='step'):
-        """Save Habitat topdown camera GT image at the given step index.
-
-        step=None → uses S1 counter (self.provider._debug_step - 1).
-        file_stem controls the filename prefix ('step' for S1, 's2_step' for S2).
-        """
         try:
             from habitat.tasks.nav.nav import TopDownMap as _TopDownMap
 
@@ -171,9 +166,8 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
             rot_deg   = math.degrees(math.pi + agent_angle)
 
             if self._has_topdown_cam:
-                # Render current state from the downward-looking camera
                 sim_obs = self.env._env.sim.get_sensor_observations()
-                cam_rgb = sim_obs.get('topdown_rgb')  # (500, 500, 3) uint8
+                cam_rgb = sim_obs.get('topdown_rgb')
                 if cam_rgb is None:
                     return
                 img_bgr = cv2.cvtColor(
@@ -181,7 +175,6 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                     cv2.COLOR_RGB2BGR,
                 )
             else:
-                # Fallback: TopDownMap crop
                 info = self.env.get_metrics()
                 if info is None:
                     return
@@ -214,7 +207,6 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                     cv2.COLOR_RGB2BGR,
                 )
 
-            # Rotate gt_cam to world frame and draw FWD arrow
             def _rotate_world(im):
                 if abs(rot_deg % 360) > 0.5:
                     M = cv2.getRotationMatrix2D((im.shape[1] / 2, im.shape[0] / 2), rot_deg, 1.0)
@@ -232,45 +224,60 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                 cv2.circle(im, (cx, cy_px), 8, (255, 255, 255), 1, cv2.LINE_AA)
                 return im
 
-            # agent-frame topdown camera (no rotation, no arrow)
-            cv2.imwrite(f"{debug_dir}/{file_stem}_{s:06d}_b00_5_gt_cam.jpg", img_bgr)
-            # world-aligned topdown + FWD arrow — matches train _w5_gt_topdown_world.jpg
-            cv2.imwrite(f"{debug_dir}/{file_stem}_{s:06d}_w5_gt_topdown_world.jpg",
+            # tdmap content only depends on current sim state, not on which loop branch
+            # triggered the save — so S1 uses 'step', ALL S2 branches (LOOKDOWN-turn or
+            # every-loop) unify under 's2_step' to match get_s2_extra's own file prefix.
+            depth_src = self.provider.processor.depth_source
+            if file_stem == 'step':
+                # S1 BEV debug filenames (UnifiedImageProvider._save_s1_debug, unified_image_provider.py)
+                prefix = 'step'
+                bev_prefix = f"step_{s:06d}_b00"
+                pairs = [(f'_3_bev_{depth_src}.jpg', f'_w3_bev_world_{depth_src}.jpg')]
+            elif file_stem in ('s2_el', 's2_ld', 's2_step'):
+                # S2 BEV debug filenames (UnifiedImageProvider.get_s2_extra, unified_image_provider.py)
+                prefix = 's2_step'
+                type_sfx = (f'_{_OCC_MODE_MAP.get(self.provider.s2_image_mode, "rgb")}'
+                            if self.provider.s2_type == 'depth' else '')
+                bev_prefix = f"s2_step_{s:06d}"
+                pairs = [(f'_2_bev{type_sfx}_{depth_src}.jpg', f'_w2_bev{type_sfx}_world_{depth_src}.jpg')]
+            else:
+                assert False, f"unreachable file_stem={file_stem!r}"
+
+            cv2.imwrite(f"{debug_dir}/{prefix}_{s:06d}_b00_5_gt_cam.jpg", img_bgr)
+            cv2.imwrite(f"{debug_dir}/{prefix}_{s:06d}_w5_gt_topdown_world.jpg",
                         _draw_agent(_rotate_world(img_bgr)))
 
-            # S1 only: save world-aligned copies of _3_bev and _4_gt_bev
-            if file_stem == 'step':
-                for src_suffix, dst_suffix in [('_3_bev.jpg', '_w3_bev_world.jpg'),
-                                               ('_4_gt_bev.jpg', '_w4_gt_bev_world.jpg')]:
-                    bev_img = cv2.imread(f"{debug_dir}/step_{s:06d}{src_suffix}")
-                    if bev_img is not None:
-                        cv2.imwrite(f"{debug_dir}/step_{s:06d}{dst_suffix}", _rotate_world(bev_img))
+            for src_suffix, dst_suffix in pairs:
+                bev_img = cv2.imread(f"{debug_dir}/{bev_prefix}{src_suffix}")
+                if bev_img is not None:
+                    cv2.imwrite(f"{debug_dir}/{bev_prefix}{dst_suffix}", _rotate_world(bev_img))
         except Exception:
             import traceback; traceback.print_exc()
 
     # ------------------------------------------------------------------ loop
 
     def _run_eval_dual_system(self) -> tuple:  # noqa: C901
-        """Copy of HabitatVLNEvaluator._run_eval_dual_system + BEV injection."""
+        """HabitatVLNEvaluatorBEV._run_eval_dual_system with always-S2.
+
+        Key difference from BEV evaluator: S2 BEV is provided every step
+        (else branch), not only on LOOKDOWN turns, matching training where
+        dual cameras give S2 at every decision frame.
+        """
         self.model.eval()
         _diag_env_once()
         _diag_vram("eval_start")
         _install_step_monitor(self.env)
 
-        # resume from previous results
         sucs, spls, oss, nes, ndtw = self.resume_from_output_path()
 
-        # Episode loop is now driven by env.reset() + env.is_running
         process_bar = tqdm.tqdm(total=len(self.env.episodes), desc=f"Eval Epoch {self.epoch} Rank {self.rank}")
 
         while self.env.is_running:
 
-            # ------------ 1. Start of episode ------------
             observations = self.env.reset()
             if not self.env.is_running or observations is None:
                 break
 
-            # === BEV: clear per-episode provider state ===
             self.provider.reset()
 
             episode = self.env.get_current_episode()
@@ -279,7 +286,6 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
             episode_instruction = episode.instruction.instruction_text
             print("episode start", episode_instruction)
 
-            # save first frame per rank to validate sim quality
             os.makedirs(os.path.join(self.output_path, f'check_sim_{self.epoch}'), exist_ok=True)
             Image.fromarray(observations['rgb']).save(
                 os.path.join(self.output_path, f'check_sim_{self.epoch}', f'rgb_{self.rank}.jpg')
@@ -312,7 +318,6 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
             flag = False
             pixel_goal = None
 
-            # ---------- 2. Episode step loop -----------
             while (not done) and (step_id <= self.max_steps_per_episode):
                 draw_pixel_goal = False
                 rgb = observations["rgb"]
@@ -335,7 +340,6 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                 if action == action_code.LOOKDOWN:
                     look_down_image = image
                     save_raw_image = look_down_image.copy()
-                    # === BEV: keep the look-down frame pair for the provider (depth in metres) ===
                     look_down_rgb_np = rgb
                     look_down_depth_m = depth / 1000.0
                     look_down_depth, resize_shape = preprocess_depth_image_v2(
@@ -350,6 +354,8 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                 else:
                     image = image.resize((self.model_args.resize_w, self.model_args.resize_h))
                     rgb_list.append(image)
+                    fpv_rgb_np = rgb          # FPV source: save before depth gets overwritten
+                    fpv_depth_m = depth / 1000.0
 
                     down_observations, _, _, _ = self.env.step(action_code.LOOKDOWN)
                     down_observations, _, _, _ = self.env.step(action_code.LOOKDOWN)
@@ -359,7 +365,6 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                     depth = filter_depth(depth.reshape(depth.shape[:2]), blur_type=None)
                     depth = depth * (self._max_depth - self._min_depth) + self._min_depth
                     depth = depth * 1000
-                    # === BEV: keep the look-down frame pair for the provider (depth in metres) ===
                     look_down_rgb_np = down_observations["rgb"]
                     look_down_depth_m = depth / 1000.0
                     look_down_depth, resize_shape = preprocess_depth_image_v2(
@@ -378,24 +383,24 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                     _diag_gl_reset(f"after_obs_gather step={step_id}")
 
                 if len(action_seq) == 0 and pixel_goal is None:
-                    s2_extra = []  # === BEV ===
-                    s2_mode = getattr(self.provider, 's2_mode', 'fpv_bev')  # === BEV ===
+                    s2_extra = []
+                    s2_combine = self.provider.s2_combine  # 'none' | 'replace' | 'concat'
                     if action == action_code.LOOKDOWN:
-                        # last action is look down
                         sources = [{"from": "human", "value": ""}, {"from": "gpt", "value": ""}]
-                        # === BEV: BEV image(s) of the look-down frame either
-                        # replace ('bev') or follow ('fpv_bev') the FPV frame ===
-                        s2_extra = self.provider.get_s2_extra(
-                            look_down_rgb_np, look_down_depth_m, is_lookdown=True
-                        )
-                        if s2_extra and isinstance(self.provider, BEVImageProvider) and self.provider.debug_dir:
-                            self._save_eval_tdmap_debug(step=self.provider._s2_debug_step - 1, file_stem='s2_step')
-                        if s2_extra and s2_mode == 'bev':
+                        s2_extra = self._apply_s2_provider(look_down_rgb_np, look_down_depth_m, file_stem='s2_ld')
+                        if not s2_extra:
+                            input_images += [look_down_image]
+                            input_img_id = -1
+                        elif s2_combine == 'replace':
+                            # BEV replaces the look-down FPV frame entirely
                             input_images += s2_extra
                             input_img_id = -len(s2_extra)
-                        else:
+                        elif s2_combine == 'concat':
+                            # BEV follows the look-down FPV frame (both kept)
                             input_images += [look_down_image] + s2_extra
                             input_img_id = -(1 + len(s2_extra))
+                        else:
+                            assert False, f"unreachable s2_combine={s2_combine!r} (s2_extra non-empty implies combine != 'none')"
                         messages.append(
                             {'role': 'assistant', 'content': [{'type': 'text', 'text': llm_outputs}]}  # noqa: F405
                         )
@@ -418,10 +423,24 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                         input_images = [rgb_list[i] for i in history_id] + cur_images
                         input_img_id = 0
 
+                        # === S2: always — source selected by s2_image_view ('bev_ld'=lookdown, 'bev'=FPV) ===
+                        if self.s2_source_view == 'bev_ld':
+                            s2_src_rgb, s2_src_depth = look_down_rgb_np, look_down_depth_m
+                        else:
+                            s2_src_rgb, s2_src_depth = fpv_rgb_np, fpv_depth_m
+                        s2_extra = self._apply_s2_provider(s2_src_rgb, s2_src_depth, file_stem='s2_el')
+                        if s2_extra:
+                            if s2_combine == 'replace':
+                                # BEV replaces current FPV: rebuild without cur_images to match token count
+                                input_images = [rgb_list[i] for i in history_id] + s2_extra
+                            elif s2_combine == 'concat':
+                                # BEV supplements current FPV: keep cur, append BEV
+                                input_images = input_images + s2_extra
+                            else:
+                                assert False, f"unreachable s2_combine={s2_combine!r} (s2_extra non-empty implies combine != 'none')"
 
-                    # === BEV: one <image> token per image of this turn ===
                     s2_image_label = getattr(self.provider, 's2_image_label', "the bird's-eye view of your surroundings")
-                    if s2_extra and s2_mode == 'bev':
+                    if s2_extra and s2_combine == 'replace':
                         prompt = random.choice(self.conjunctions) + f"{s2_image_label}:"
                         prompt += ('\n' + DEFAULT_IMAGE_TOKEN) * len(s2_extra)
                     else:
@@ -447,8 +466,6 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
 
                     inputs = self.processor(text=[text], images=input_images, return_tensors="pt").to(self.model.device)
 
-                    # FPV image [384, 384], depth [384, 384]; BEV ??
-                    # look_down_images [640, 480], look_down_depths_m [640, 480]
                     with torch.no_grad():
                         output_ids = self.model.generate(
                             **inputs,
@@ -468,14 +485,13 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                     )
                     print('step_id:', step_id, 'output text:', llm_outputs)
 
-                    if bool(re.search(r'\d', llm_outputs)):  # output pixel goal
+                    if bool(re.search(r'\d', llm_outputs)):
                         forward_action = 0
                         coord = [int(c) for c in re.findall(r'\d+', llm_outputs)]
 
                         pixel_goal = [int(coord[1]), int(coord[0])]
                         draw_pixel_goal = True
 
-                        # look down --> horizontal
                         self.env.step(action_code.LOOKUP)
                         self.env.step(action_code.LOOKUP)
 
@@ -486,7 +502,6 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                         with torch.no_grad():
                             traj_latents = self.model.generate_latents(output_ids, pixel_values, image_grid_thw)
 
-                        # === FPV: images_dp: [B=1, T=2, H=224, W=224, 3], depths_dp: [B=1, T=2, H=224, W=224]
                         self.provider.set_goal(look_down_rgb_np, look_down_depth_m)
 
                         image_dp = torch.tensor(np.array(look_down_image.resize((224, 224)))).to(torch.bfloat16) / 255
@@ -496,12 +511,10 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                         pix_goal_depth = copy.copy(depth_dp)
                         depths_dp = torch.stack([pix_goal_depth, depth_dp]).unsqueeze(0).to(self.device)
 
-                        # === BEV: provider may replace the NavDP visual input ===
-                        # images_dp: [B=1, T=2, H=224, W=224, 3], depths_dp: [B=1, T=2, H=224, W=224]
-                        images_dp, depths_dp = self._apply_s1_provider(images_dp, depths_dp)
+                        images_dp, depths_dp, bev_images = self._apply_s1_provider(images_dp, depths_dp)
 
                         with torch.no_grad():
-                            dp_actions = self.model.generate_traj(traj_latents, images_dp, depths_dp)
+                            dp_actions = self.model.generate_traj(traj_latents, images_dp, depths_dp, bev_images=bev_images)
 
                         action_list = traj_to_actions(dp_actions)
                         if len(action_list) < MAX_STEPS:
@@ -531,7 +544,6 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                     action_seq.pop(0)
                 elif pixel_goal is not None:
                     if len(local_actions) == 0:
-                        # navdp
                         local_actions = []
                         image_dp = torch.tensor(np.array(look_down_image.resize((224, 224)))).to(torch.bfloat16) / 255
 
@@ -540,11 +552,10 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
 
                         depths_dp = torch.stack([pix_goal_depth, depth_dp]).unsqueeze(0).to(self.device)
 
-                        # === BEV: provider may replace the NavDP visual input ===
-                        images_dp, depths_dp = self._apply_s1_provider(images_dp, depths_dp)
+                        images_dp, depths_dp, bev_images = self._apply_s1_provider(images_dp, depths_dp)
 
                         with torch.no_grad():
-                            dp_actions = self.model.generate_traj(traj_latents, images_dp, depths_dp)
+                            dp_actions = self.model.generate_traj(traj_latents, images_dp, depths_dp, bev_images=bev_images)
 
                         action_list = traj_to_actions(dp_actions)
                         if len(action_list) < MAX_STEPS:
@@ -616,7 +627,6 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                     messages = []
                     flag = False
 
-            # ---------- 3. End of episode -----------
             process_bar.update(1)
 
             metrics = self.env.get_metrics()
@@ -658,7 +668,6 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
                 with open(os.path.join(self.output_path, 'progress.json'), 'a') as f:
                     f.write(json.dumps(result) + "\n")
 
-            # save video
             if self.save_video and metrics['success'] == 1.0:
                 images_to_video(
                     vis_frames,
@@ -682,6 +691,4 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
         )
 
 
-# Evaluator.register's decorator returns None, so register without decorating
-# to keep the class name importable.
-Evaluator.register('habitat_vln_bev')(HabitatVLNEvaluatorBEV)
+Evaluator.register('habitat_vln_unified')(HabitatVLNEvaluatorUnified)
