@@ -272,11 +272,14 @@ TRAIN_MACHINE = {
 }
 
 # --------------------------------------------------------------------------- #
-# Machine-specific Habitat infra (mirrors the two existing reference configs).
+# Machine-specific eval infra (mirrors the existing reference configs), keyed by
+# the same --machine values as build_eval_cfg (h200/5090 = Habitat, h1 = Isaac Sim).
 # num_history / resize_* / predict_step_num are NOT here — they come from the
 # training Params so train and eval stay in lockstep. Only the host/runtime
-# settings differ per machine.
-HABITAT_MACHINE = {
+# settings differ per machine. build_habitat_eval_cfg() consumes the full dict
+# (h200/5090 only); build_h1_eval_cfg() and runner.py's checkpoint fallback only
+# read "model_path", so the "h1" entry only needs that key.
+EVAL_MACHINE = {
     # scripts/eval/configs/habitat_dual_system_mini_h200_cfg.py (H200, 8-GPU)
     "h200": {
         "model_path": "/home/irteam/git/InternNav/checkpoints/InternVLA-N1-w-NavDP",
@@ -298,6 +301,10 @@ HABITAT_MACHINE = {
         "extra_eval": {"wandb_run_name": "habitat_dual_system_mini_single"},
         "debug_dir": "./logs/5090_debug",  # visualization output dir for the BEV evaluator (also used by the BEV trainer when bev=True)
     },
+    # Isaac Sim / VLN-PE (run manually); see build_h1_eval_cfg
+    "h1": {
+        "model_path": "/ws/src/InternNav/checkpoints/InternVLA-N1-DualVLN",
+    },
 }
 
 
@@ -312,9 +319,9 @@ def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
     baseline value 32 it equals the evaluator's hard-coded default, so behavior is
     identical to the reference configs that omit the key.
     """
-    if machine not in HABITAT_MACHINE:
+    if machine not in ("h200", "5090"):
         raise ValueError(f"unknown habitat machine: {machine!r} (expected 'h200' or '5090')")
-    m = HABITAT_MACHINE[machine]
+    m = EVAL_MACHINE[machine]
 
     from internnav.configs.agent import AgentCfg
     from internnav.configs.evaluator import EnvCfg, EvalCfg
@@ -403,7 +410,7 @@ def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
     )
 
 
-def build_h1_eval_cfg(p: Params, model_path: str = "/ws/src/InternNav/checkpoints/InternVLA-N1-w-NavDP"):
+def build_h1_eval_cfg(p: Params, model_path: str = EVAL_MACHINE["h1"]["model_path"]):
     """h1 (Isaac Sim / InternUtopia, VLN-PE) eval config, params synced from `p`.
 
     Based on scripts/eval/configs/h1_internvla_n1_async_cfg.py. Requires the Isaac
@@ -412,36 +419,98 @@ def build_h1_eval_cfg(p: Params, model_path: str = "/ws/src/InternNav/checkpoint
     from internnav.configs.agent import AgentCfg
     from internnav.configs.evaluator import EnvCfg, EvalCfg, EvalDatasetCfg, SceneCfg, TaskCfg
 
+    model_name = "internvla_n1"
+    model_settings = {
+        "env_num": 1,
+        "sim_num": 1,
+        "model_path": model_path,  # overridden by eval.py --model_path
+        "camera_intrinsic": [[585.0, 0.0, 320.0], [0.0, 585.0, 240.0], [0.0, 0.0, 1.0]],
+        "width": 640,
+        "height": 480,
+        "hfov": 79,
+        "resize_w": p.resize_w,
+        "resize_h": p.resize_h,
+        "max_new_tokens": 1024,
+        "num_frames": 32,
+        "num_history": p.num_history,
+        "num_future_steps": p.num_future_steps,
+        "device": "cuda:0",
+        "predict_step_nums": p.predict_step_num,
+        "continuous_traj": True,
+        "infer_mode": "partial_async",
+        "vis_debug": False,
+        "vis_debug_path": "./logs/test_n1/vis_debug",
+    }
+
+    if p.image_provider:
+        if p.s2_image_view == 'bev_ld':
+            # Unlike habitat_vln_evaluator_unified.py (which physically re-points the
+            # camera down and computes a genuine lookdown-pitch BEV — see its
+            # _LOOKDOWN_PITCH_OFFSET_DEG), the h1/Isaac path has no lookdown camera:
+            # internvla_n1_agent.py's look_down turn sends a no-op action ([-1]) and
+            # reuses the same forward-facing rgb/depth, and internutopia_env.py has no
+            # camera-pitch control at all. So 'bev_ld' here would silently compute the
+            # exact same BEV as 'bev' (same frame, same fixed rig pitch) while claiming
+            # to be a lookdown view. Fail loudly instead until h1 gets a real lookdown
+            # camera; use s2_image_view='bev' in the meantime.
+            raise ValueError(
+                "s2_image_view='bev_ld' is not supported on the h1/Isaac path: there is "
+                "no lookdown camera implemented for h1 (see internvla_n1_agent.py's "
+                "look_down handling and internutopia_env.py). Use s2_image_view='bev' "
+                "instead, or run this config on habitat where lookdown is implemented."
+            )
+        # Mirrors build_habitat_eval_cfg's `elif p.image_provider:` branch. Importing
+        # the agent module registers Agent 'internvla_n1_unified' (import side effect).
+        import internnav.agent.internvla_n1_agent_unified  # noqa: F401
+
+        model_name = "internvla_n1_unified"
+        model_settings.update({
+            "visual_provider": "unified_image",
+            "s1_image_view": p.s1_image_view,
+            "s1_image_type": p.s1_image_type,
+            "s1_image_mode": p.s1_image_mode,
+            "s1_combine_mode": p.s1_combine_mode,
+            "s2_image_view": p.s2_image_view,
+            "s2_image_type": p.s2_image_type,
+            "s2_image_mode": p.s2_image_mode,
+            "s2_combine_mode": p.s2_combine_mode,
+            "bev_depth_source": p.bev_depth_source,
+            "bev_dav2_max_depth": p.bev_dav2_max_depth,
+            "bev_z_min": p.bev_z_min,
+            "bev_z_max": p.bev_z_max,
+            "depth_adapter_mode": p.depth_adapter_mode,
+            # H1 camera hardware constants (fixed rig, NOT train-synced Params —
+            # h1_internvla_n1_async_bev_cfg.py's values, reused unchanged):
+            "bev_cam_height": 1.25,
+            "bev_cam_pitch_deg": 30.0,
+            "bev_fx": 585.0,
+            "bev_fy": 585.0,
+            "bev_cx": 320.0,
+            "bev_cy": 240.0,
+            "bev_ref_width": 640,
+            "bev_ref_height": 480,
+            "bev_depth_scale": 10.0,  # S2 obs depth [0,1] x 10 = metres; S1 depth already metric
+            "debug_dir": p.debug_dir or os.environ.get("BEV_DEBUG_DIR"),
+        })
+
     return EvalCfg(
         agent=AgentCfg(
             server_port=8023,
-            model_name="internvla_n1",
+            model_name=model_name,
             ckpt_path="",
-            model_settings={
-                "env_num": 1,
-                "sim_num": 1,
-                "model_path": model_path,  # overridden by eval.py --model_path
-                "camera_intrinsic": [[585.0, 0.0, 320.0], [0.0, 585.0, 240.0], [0.0, 0.0, 1.0]],
-                "width": 640,
-                "height": 480,
-                "hfov": 79,
-                "resize_w": p.resize_w,
-                "resize_h": p.resize_h,
-                "max_new_tokens": 1024,
-                "num_frames": 32,
-                "num_history": p.num_history,
-                "num_future_steps": p.num_future_steps,
-                "device": "cuda:0",
-                "predict_step_nums": p.predict_step_num,
-                "continuous_traj": True,
-                "infer_mode": "partial_async",
-                "vis_debug": False,
-                "vis_debug_path": "./logs/test_n1/vis_debug",
-            },
+            model_settings=model_settings,
         ),
         env=EnvCfg(
             env_type="internutopia",
-            env_settings={"use_fabric": False, "headless": False},
+            env_settings={
+                "use_fabric": False,
+                "headless": False,
+                # smoke-test cap (mirrors build_habitat_eval_cfg's eval_settings["max_episodes"]);
+                # None => unset => today's full-split behavior, unchanged.
+                "max_episodes": p.eval_max_episodes or (
+                    int(os.environ["EVAL_MAX_EPISODES"]) if os.environ.get("EVAL_MAX_EPISODES") else None
+                ),
+            },
         ),
         task=TaskCfg(
             task_name="test_n1",

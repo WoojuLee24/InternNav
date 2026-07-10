@@ -320,8 +320,8 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
     if p.node_rank != 0:
         return
 
-    habitat_machine = getattr(sys.modules.get("default_config"), "HABITAT_MACHINE", {})
-    default_model_path = habitat_machine.get(machine, {}).get("model_path")
+    eval_machine = getattr(sys.modules.get("default_config"), "EVAL_MACHINE", {})
+    default_model_path = eval_machine.get(machine, {}).get("model_path")
     best = model_path or find_best_checkpoint(output_dir) or default_model_path
     if not best:
         print("[eval] No best checkpoint found, skipping eval.")
@@ -454,7 +454,7 @@ def main_cli() -> None:
             # --no-train -> eval-only run; --no-eval -> train-only run. (--debugpy
             # already splits train/eval below, off its own target, so skip here.)
             if args.no_train:
-                debug_dir = os.path.join(debug_dir, 'eval')
+                debug_dir = os.path.join(debug_dir, 'eval_isaac' if args.machine == 'h1' else 'eval')
             elif args.no_eval:
                 debug_dir = os.path.join(debug_dir, 'train')
         params = replace(params, debug_dir=debug_dir)
