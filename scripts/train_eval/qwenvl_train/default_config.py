@@ -49,8 +49,8 @@ class Params:
     # ---- train-only ----
     sample_step: int = 4
     lr: float = 1e-4
-    batch_size: int = 4
-    grad_accum_steps: int = 4
+    batch_size: int = 16
+    grad_accum_steps: int = 1
     max_pixels: int = 313600
     min_pixels: int = 3136
     val_ratio: float = 0.1
