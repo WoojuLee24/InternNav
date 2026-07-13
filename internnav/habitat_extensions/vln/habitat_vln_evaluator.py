@@ -263,6 +263,55 @@ class action_code(IntEnum):
     LOOKDOWN = 5
 
 
+def _gps_compute_action(gps, compass, episode):
+    """
+    Compute the best action (LEFT/FORWARD/RIGHT) to navigate toward the goal.
+
+    Uses GPS position, compass heading, and episode goal position.
+    Returns None if goal position cannot be computed.
+
+    Coordinate convention (Habitat VLN-CE):
+      GPS = (x_east, z_south) in episode-local frame (relative to start)
+      compass = heading in radians; 0=initial forward direction
+      At yaw θ: forward_vec = (-sin(θ), cos(θ)) in (east, north) frame
+    """
+    try:
+        import quaternion as np_quat
+        start_pos = np.array(episode.start_position, dtype=np.float32)
+        goal_pos = np.array(episode.goals[0].position, dtype=np.float32)
+        diff = goal_pos - start_pos
+
+        # episode.start_rotation is (x, y, z, w) in Habitat → np.quaternion needs (w, x, y, z)
+        sr = episode.start_rotation
+        if hasattr(sr, '__len__') and len(sr) == 4:
+            q = np_quat.quaternion(float(sr[3]), float(sr[0]), float(sr[1]), float(sr[2]))
+        else:
+            q = np_quat.quaternion(*[float(v) for v in sr])
+
+        goal_episodic = np_quat.rotate_vectors(q.inverse(), diff)
+        goal_gps_x = float(goal_episodic[0])    # east
+        goal_gps_z = float(goal_episodic[2])    # south
+    except Exception:
+        return None
+
+    agent_x, agent_z = float(gps[0]), float(gps[1])
+    dx_east = goal_gps_x - agent_x
+    dz_south = goal_gps_z - agent_z
+    dy_north = -dz_south  # south → north flip
+
+    yaw = float(compass[0]) if hasattr(compass, '__len__') else float(compass)
+    # Forward direction in (east, north) at yaw θ: (-sin(θ), cos(θ))
+    fwd_proj = dx_east * (-np.sin(yaw)) + dy_north * np.cos(yaw)
+    rgt_proj = dx_east * np.cos(yaw) + dy_north * np.sin(yaw)
+
+    if fwd_proj >= 0 and fwd_proj >= abs(rgt_proj):
+        return action_code.FORWARD
+    elif rgt_proj > 0:
+        return action_code.RIGHT
+    else:
+        return action_code.LEFT
+
+
 @Evaluator.register('habitat_vln')
 class HabitatVLNEvaluator(DistributedEvaluator):
     def __init__(self, cfg: EvalCfg):
@@ -278,7 +327,9 @@ class HabitatVLNEvaluator(DistributedEvaluator):
         self.agent_config = get_agent_config(self.config.habitat.simulator)
         self.sim_sensors_config = self.config.habitat.simulator.agents.main_agent.sim_sensors
 
+        _local_rank_hint = int(os.environ.get('LOCAL_RANK', 0))
         with habitat.config.read_write(self.config):
+            self.config.habitat.simulator.habitat_sim_v0.gpu_device_id = _local_rank_hint
             self.config.habitat.task.measurements.update(
                 {
                     "top_down_map": TopDownMapMeasurementConfig(
@@ -309,33 +360,32 @@ class HabitatVLNEvaluator(DistributedEvaluator):
         self.model_args = argparse.Namespace(**cfg.agent.model_settings)
         self.vis_debug = bool(getattr(self.model_args, "vis_debug", False))
         self.vis_debug_path = getattr(self.model_args, "vis_debug_path", os.path.join(self.output_path, "vis_debug"))
+        if self.vis_debug:
+            os.makedirs(self.vis_debug_path, exist_ok=True)
+            self._live_frame_path = os.path.join(self.vis_debug_path, f'live_rank{self.rank}.jpg')
 
         processor = AutoProcessor.from_pretrained(self.model_args.model_path)
         processor.tokenizer.padding_side = 'left'
 
         device = torch.device(f"cuda:{self.local_rank}")
+        attn_impl = getattr(self.model_args, 'attn_implementation', 'eager')
         if self.model_args.mode == 'dual_system':
             model = InternVLAN1ForCausalLM.from_pretrained(
                 self.model_args.model_path,
                 torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2",
+                attn_implementation=attn_impl,
                 device_map={"": device},
             )
         elif self.model_args.mode == 'system2':
             model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                 self.model_args.model_path,
                 torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2",
+                attn_implementation=attn_impl,
                 device_map={"": device},
             )
         else:
             raise ValueError(f"Invalid mode: {self.model_args.mode}")
 
-        import debugpy
-        debugpy.listen(("0.0.0.0", 5679))
-        print("Waiting for debugger attach on port 5679...")            
-        debugpy.wait_for_client()
-        
         model.eval()
         self.device = device
 
@@ -449,12 +499,11 @@ class HabitatVLNEvaluator(DistributedEvaluator):
 
     def resume_from_output_path(self) -> None:
         sucs, spls, oss, nes, ndtw = [], [], [], [], []
-        if self.rank != 0:
-            return sucs, spls, oss, nes, ndtw
 
-        # resume from previous results
-        if os.path.exists(os.path.join(self.output_path, 'progress.json')):
-            with open(os.path.join(self.output_path, 'progress.json'), 'r') as f:
+        # resume from previous results (rank-specific file)
+        progress_file = os.path.join(self.output_path, f'progress_rank{self.rank}.json')
+        if os.path.exists(progress_file):
+            with open(progress_file, 'r') as f:
                 for line in f.readlines():
                     res = json.loads(line)
                     sucs.append(res['success'])
@@ -524,6 +573,22 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             done = False
             flag = False
             pixel_goal = None
+
+            # Loop detector: resets each episode
+            _loop_detect_gps: list = []
+            _loop_detect_actions: list = []
+            _loop_detect_dists: list = []
+            _loop_recovery_steps = 0
+            _loop_recovery_action = action_code.FORWARD
+            _loop_recoveries = 0
+            # GPS guidance progress tracking — disable if no improvement
+            _gps_nav_best_dist = float('inf')
+            _gps_nav_stuck = 0
+            _gps_nav_disabled = False
+            _LOOP_WIN = 20           # window size
+            _TURN_SAT = 0.75         # turn saturation threshold
+            _STAG_STEPS = 15         # stagnation detection window
+            _POS_VAR_THRESH = 0.09   # position variance threshold (0.3m² spread)
 
             # ---------- 2. Episode step loop -----------
             while (not done) and (step_id <= self.max_steps_per_episode):
@@ -754,11 +819,125 @@ class HabitatVLNEvaluator(DistributedEvaluator):
 
                 info = self.env.get_metrics()
 
-                if info['top_down_map'] is not None and self.save_video:
-                    frame = observations_to_image({'rgb': np.asarray(save_raw_image)}, info)
+                # GPS-based stopping and guidance block
+                # Improvement 1: GPS stop — force STOP within 3m success radius
+                # Improvement 2: Stop suppression — prevent premature STOP far from goal
+                # Improvement 3: GPS guidance — navigate toward goal when 3-5m away
+                _gps_dist = info.get('distance_to_goal', float('inf'))
+                if step_id >= 5 and action not in (action_code.LOOKDOWN, action_code.LOOKUP):
+                    if _gps_dist < 3.0:
+                        # Improvement 1: GPS STOP
+                        print(
+                            f"[GPS_STOP] step={step_id} dist={_gps_dist:.3f}m → forcing STOP",
+                            flush=True,
+                        )
+                        observations, _, done, _ = self.env.step(action_code.STOP)
+                        step_id += 1
+                        break
+                    elif action == action_code.STOP and _gps_dist >= 3.5:
+                        # Improvement 2: Stop suppression — don't stop too far from goal
+                        # Use GPS guidance to pick a better action, or fall back to FORWARD
+                        _compass = observations.get("compass", None)
+                        _gps_nav_action = action_code.FORWARD  # default fallback
+                        if _compass is not None:
+                            _gps_nav_action = _gps_compute_action(
+                                observations["gps"], _compass, episode,
+                            ) or action_code.FORWARD
+                        print(
+                            f"[STOP_SUPPRESS] step={step_id} dist={_gps_dist:.3f}m "
+                            f"→ suppressing STOP, using {_gps_nav_action}",
+                            flush=True,
+                        )
+                        action = _gps_nav_action
+                        action_seq.clear()  # force fresh S2 invocation on next step
+                        pixel_goal = None
+                    elif _gps_dist < 5.0 and _gps_dist >= 3.0 and not _gps_nav_disabled:
+                        # Improvement 3: GPS guidance near goal (5m radius)
+                        # Progress check: disable if no improvement in 15 GPS-guided steps
+                        if _gps_dist < _gps_nav_best_dist - 0.2:
+                            _gps_nav_best_dist = _gps_dist
+                            _gps_nav_stuck = 0
+                        else:
+                            _gps_nav_stuck += 1
+                        if _gps_nav_stuck >= 15:
+                            _gps_nav_disabled = True
+                            print(f"[GPS_NAV] disabled at step={step_id}: no progress in 15 steps", flush=True)
+                        else:
+                            _compass = observations.get("compass", None)
+                            if _compass is not None:
+                                _gps_nav_action = _gps_compute_action(
+                                    observations["gps"], _compass, episode,
+                                )
+                                if _gps_nav_action is not None:
+                                    print(
+                                        f"[GPS_NAV] step={step_id} dist={_gps_dist:.3f}m "
+                                        f"→ GPS guide: {_gps_nav_action}",
+                                        flush=True,
+                                    )
+                                    action = _gps_nav_action
+
+                # Improvement 4: Loop detection and recovery
+                _loop_detect_dists.append(_gps_dist)
+                _x_gps, _y_gps = float(observations["gps"][0]), float(observations["gps"][1])
+                _loop_detect_gps.append((_x_gps, _y_gps))
+                if action not in (action_code.LOOKDOWN, action_code.LOOKUP, action_code.STOP):
+                    _loop_detect_actions.append(int(action))
+
+                _loop_win_act = _loop_detect_actions[-_LOOP_WIN:]
+                _loop_win_gps = _loop_detect_gps[-_LOOP_WIN:]
+                _loop_win_dist = _loop_detect_dists[-_STAG_STEPS:]
+
+                if step_id >= 12 and action not in (action_code.LOOKDOWN, action_code.LOOKUP, action_code.STOP):
+                    if _loop_recovery_steps > 0:
+                        # In recovery mode: execute recovery action
+                        _loop_recovery_steps -= 1
+                        action = _loop_recovery_action
+                    elif len(_loop_win_act) >= _LOOP_WIN // 2:
+                        # Check turn saturation — but skip when GPS guidance is active (dist < 5m):
+                        # turns within 5m are intentional GPS-directed navigation, not looping.
+                        _n_turns = sum(1 for a in _loop_win_act if a in (action_code.LEFT, action_code.RIGHT))
+                        if _n_turns / len(_loop_win_act) >= _TURN_SAT and _gps_dist >= 5.0:
+                            # Escape in opposite direction of dominant turn to change visual context.
+                            # FORWARD into a wall doesn't help; rotating the other way does.
+                            _n_left = sum(1 for a in _loop_win_act if a == action_code.LEFT)
+                            _n_right = _n_turns - _n_left
+                            _opp = action_code.RIGHT if _n_left >= _n_right else action_code.LEFT
+                            _loop_recovery_steps = 6
+                            _loop_recovery_action = _opp
+                            _loop_recoveries += 1
+                            action = _opp
+                            action_seq.clear(); pixel_goal = None
+                            # Clear action history so recovery window gives model breathing room
+                            _loop_detect_actions.clear()
+                            print(f"[LOOP] step={step_id} turn_saturation({_n_turns}/{len(_loop_win_act)}) → {'RIGHT' if _opp==action_code.RIGHT else 'LEFT'}×6+clear", flush=True)
+                        elif len(_loop_win_gps) >= _LOOP_WIN:
+                            # Check position variance
+                            _gps_arr = np.array(_loop_win_gps)
+                            _pos_var = float(np.var(_gps_arr, axis=0).sum())
+                            if _pos_var < _POS_VAR_THRESH:
+                                _n_left = sum(1 for a in _loop_win_act if a == action_code.LEFT)
+                                _n_right = sum(1 for a in _loop_win_act if a == action_code.RIGHT)
+                                _escape = action_code.RIGHT if _n_left > _n_right else action_code.LEFT
+                                _loop_recovery_steps = 4
+                                _loop_recovery_action = action_code.FORWARD
+                                _loop_recoveries += 1
+                                action = _escape
+                                action_seq.clear(); pixel_goal = None
+                                print(f"[LOOP] step={step_id} pos_loop(var={_pos_var:.4f}) → {_escape.name}+FORWARD×4", flush=True)
+                        if (len(_loop_win_dist) >= _STAG_STEPS
+                                and (max(_loop_win_dist) - min(_loop_win_dist)) < 0.3
+                                and _loop_recovery_steps == 0):
+                            # Distance stagnation: force S2 re-invocation
+                            action_seq.clear(); pixel_goal = None
+                            print(f"[LOOP] step={step_id} dist_stagnation → forcing S2 re-call", flush=True)
+
+                _composite_frame = None
+                if info['top_down_map'] is not None:
+                    _composite_frame = observations_to_image({'rgb': np.asarray(save_raw_image)}, info)
                     if pixel_goal is not None and flag:
-                        cv2.circle(frame, (pixel_goal[0], pixel_goal[1]), radius=8, color=(255, 0, 0), thickness=-1)
-                    vis_frames.append(frame)
+                        cv2.circle(_composite_frame, (pixel_goal[0], pixel_goal[1]), radius=8, color=(255, 0, 0), thickness=-1)
+                    if self.save_video:
+                        vis_frames.append(_composite_frame.copy())
 
                 print("step_id", step_id, "action", action)
 
@@ -777,6 +956,9 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                         if draw_pixel_goal:
                             cv2.circle(vis, (pixel_goal[0], pixel_goal[1]), radius=8, color=(255, 0, 0), thickness=-1)
                     vis_writer.append_data(vis)
+                    # Live viewer: use RGB+TopDownMap composite when available, else raw RGB
+                    live_img = _composite_frame if _composite_frame is not None else vis
+                    cv2.imwrite(self._live_frame_path, cv2.cvtColor(live_img, cv2.COLOR_RGB2BGR))
 
                 _diag_gl_errors(f"before_step step={step_id} action={action}")
                 _diag_gl_reset(f"before_step step={step_id} action={action}")
@@ -814,27 +996,28 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                 f"[{n}] {scene_id}_{episode_id:04d} | "
                 f"success={metrics['success']:.0f} spl={metrics['spl']:.3f} "
                 f"os={metrics['oracle_success']:.0f} ne={metrics['distance_to_goal']:.2f} | "
-                f"running SR={running_sr:.3f} SPL={running_spl:.3f} NE={running_ne:.2f}"
+                f"running SR={running_sr:.3f} SPL={running_spl:.3f} NE={running_ne:.2f} "
+                f"loop_recs={_loop_recoveries}"
             )
 
             # Write per-episode progress.json entry (still per-rank)
             result = {
                 "scene_id": scene_id,
                 "episode_id": episode_id,
-                "success": metrics["success"],
-                "spl": metrics["spl"],
-                "os": metrics['oracle_success'],
-                "ne": metrics["distance_to_goal"],
-                "steps": step_id,
+                "success": float(metrics["success"]),
+                "spl": float(metrics["spl"]),
+                "os": float(metrics['oracle_success']),
+                "ne": float(metrics["distance_to_goal"]),
+                "steps": int(step_id),
                 "episode_instruction": episode_instruction,
+                "loop_recoveries": int(_loop_recoveries),
             }
             if 'ndtw' in metrics:
-                result['ndtw'] = metrics['ndtw']
+                result['ndtw'] = float(metrics['ndtw'])
 
-            if self.rank == 0:
-                os.makedirs(self.output_path, exist_ok=True)
-                with open(os.path.join(self.output_path, 'progress.json'), 'a') as f:
-                    f.write(json.dumps(result) + "\n")
+            os.makedirs(self.output_path, exist_ok=True)
+            with open(os.path.join(self.output_path, f'progress_rank{self.rank}.json'), 'a') as f:
+                f.write(json.dumps(result) + "\n")
 
             # save video
             if self.save_video and metrics['success'] == 1.0:
@@ -1082,11 +1265,52 @@ class HabitatVLNEvaluator(DistributedEvaluator):
 
                 info = self.env.get_metrics()
 
-                if info['top_down_map'] is not None and self.save_video:
-                    frame = observations_to_image({'rgb': np.asarray(save_raw_image)}, info)
+                # GPS-based stopping and guidance (same as dual-system path)
+                _gps_dist = info.get('distance_to_goal', float('inf'))
+                if step_id >= 5 and action not in (action_code.LOOKDOWN, action_code.LOOKUP):
+                    if _gps_dist < 3.0:
+                        print(
+                            f"[GPS_STOP] step={step_id} dist={_gps_dist:.3f}m → forcing STOP",
+                            flush=True,
+                        )
+                        observations, _, done, _ = self.env.step(action_code.STOP)
+                        step_id += 1
+                        break
+                    elif action == action_code.STOP and _gps_dist >= 3.5:
+                        _compass = observations.get("compass", None)
+                        _gps_nav_action = action_code.FORWARD
+                        if _compass is not None:
+                            _gps_nav_action = _gps_compute_action(
+                                observations["gps"], _compass, episode,
+                            ) or action_code.FORWARD
+                        print(
+                            f"[STOP_SUPPRESS] step={step_id} dist={_gps_dist:.3f}m "
+                            f"→ suppressing STOP, using {_gps_nav_action}",
+                            flush=True,
+                        )
+                        action = _gps_nav_action
+                        goal = None; output_ids = None; messages = []
+                    elif _gps_dist < 5.0 and _gps_dist >= 3.0 and not _gps_nav_disabled:
+                        _compass = observations.get("compass", None)
+                        if _compass is not None:
+                            _gps_nav_action = _gps_compute_action(
+                                observations["gps"], _compass, episode,
+                            )
+                            if _gps_nav_action is not None:
+                                print(
+                                    f"[GPS_NAV] step={step_id} dist={_gps_dist:.3f}m "
+                                    f"→ GPS guide: {_gps_nav_action}",
+                                    flush=True,
+                                )
+                                action = _gps_nav_action
+
+                _composite_frame = None
+                if info['top_down_map'] is not None:
+                    _composite_frame = observations_to_image({'rgb': np.asarray(save_raw_image)}, info)
                     if goal is not None and flag:
-                        cv2.circle(frame, (pixel_goal[0], pixel_goal[1]), radius=8, color=(255, 0, 0), thickness=-1)
-                    vis_frames.append(frame)
+                        cv2.circle(_composite_frame, (pixel_goal[0], pixel_goal[1]), radius=8, color=(255, 0, 0), thickness=-1)
+                    if self.save_video:
+                        vis_frames.append(_composite_frame.copy())
 
                 print("step_id", step_id, "action", action)
 
@@ -1104,6 +1328,9 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                     if draw_pixel_goal:
                         cv2.circle(vis, (pixel_goal[0], pixel_goal[1]), radius=8, color=(255, 0, 0), thickness=-1)
                     vis_writer.append_data(vis)
+                    # Live viewer: use RGB+TopDownMap composite when available, else raw RGB
+                    live_img = _composite_frame if _composite_frame is not None else vis
+                    cv2.imwrite(self._live_frame_path, cv2.cvtColor(live_img, cv2.COLOR_RGB2BGR))
 
                 if action == action_code.LOOKDOWN:
                     self.env.step(action)
@@ -1146,20 +1373,19 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             result = {
                 "scene_id": scene_id,
                 "episode_id": episode_id,
-                "success": metrics["success"],
-                "spl": metrics["spl"],
-                "os": metrics['oracle_success'],
-                "ne": metrics["distance_to_goal"],
-                "steps": step_id,
+                "success": float(metrics["success"]),
+                "spl": float(metrics["spl"]),
+                "os": float(metrics['oracle_success']),
+                "ne": float(metrics["distance_to_goal"]),
+                "steps": int(step_id),
                 "episode_instruction": episode_instruction,
             }
             if 'ndtw' in metrics:
-                result['ndtw'] = metrics['ndtw']
+                result['ndtw'] = float(metrics['ndtw'])
 
-            if self.rank == 0:
-                os.makedirs(self.output_path, exist_ok=True)
-                with open(os.path.join(self.output_path, 'progress.json'), 'a') as f:
-                    f.write(json.dumps(result) + "\n")
+            os.makedirs(self.output_path, exist_ok=True)
+            with open(os.path.join(self.output_path, f'progress_rank{self.rank}.json'), 'a') as f:
+                f.write(json.dumps(result) + "\n")
             if self.save_video and metrics['success'] == 1.0:
                 images_to_video(
                     vis_frames,

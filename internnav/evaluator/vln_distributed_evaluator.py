@@ -64,6 +64,18 @@ class VLNDistributedEvaluator(DistributedEvaluator):
         self.save_to_json = config.eval_settings['save_to_json']
         self.vis_output = config.eval_settings['vis_output']
         self.show_rgb = config.eval_settings.get('show_rgb', False)
+
+        # GPS stop + loop detection state (per env)
+        _n = self.env_num * self.proc_num
+        self._env_goal_pos = [None] * _n      # (x, y) goal in world coords
+        self._env_gps_history = [[] for _ in range(_n)]  # position history per env
+        self._env_dist_history = [[] for _ in range(_n)]  # distance history per env
+        self._GPS_STOP_DIST = 3.0             # force stop within 3m of goal
+        self._GPS_NAV_DIST = 8.0              # GPS guidance range
+        self._LOOP_WIN = 50                   # steps for loop detection window
+        self._LOOP_POS_VAR = 1.0             # GPS variance threshold (m^2)
+        self._STAG_STEPS = 30                 # steps for stagnation detection
+        self._STAG_MIN_IMPROVE = 0.5          # min distance improvement (m)
         self.visualize_util = VisualizeUtil(self.task_name, fps=6)
 
         end_time = time()
@@ -125,6 +137,136 @@ class VLNDistributedEvaluator(DistributedEvaluator):
                 move = f"move_by_{'discrete' if not flash else 'flash'}"
                 transformed_actions.append({'h1': {move: a}})  # discrete e.g. [3]
         return transformed_actions
+
+    def _set_env_goal(self, env_id, reset_info):
+        """Update goal position for env_id from reset_info.data['reference_path']."""
+        try:
+            if reset_info is not None and 'reference_path' in reset_info.data:
+                rp = reset_info.data['reference_path']
+                goal_xyz = rp[-1]  # last waypoint in world coords
+                self._env_goal_pos[env_id] = np.array([goal_xyz[0], goal_xyz[1]])
+            else:
+                self._env_goal_pos[env_id] = None
+        except Exception:
+            self._env_goal_pos[env_id] = None
+        self._env_gps_history[env_id] = []
+        self._env_dist_history[env_id] = []
+
+    def _gps_compute_action_vlnpe(self, cur_xy, goal_xy, heading_rad):
+        """Compute optimal discrete action toward goal using GPS (VLN-PE world frame).
+
+        VLN-PE uses world-frame coords. Returns: 1=FORWARD, 2=LEFT, 3=RIGHT.
+        """
+        dx = float(goal_xy[0] - cur_xy[0])
+        dy = float(goal_xy[1] - cur_xy[1])
+        if heading_rad is None:
+            return 1
+        theta = float(heading_rad)
+        fwd = dx * (-np.sin(theta)) + dy * np.cos(theta)
+        rgt = dx * np.cos(theta)    + dy * np.sin(theta)
+        if fwd >= 0 and fwd >= abs(rgt):
+            return 1
+        elif rgt > 0:
+            return 3
+        else:
+            return 2
+
+    def _apply_gps_and_loop_improvements(self, obs, action, reset_infos):
+        """
+        Apply GPS and loop improvements to VLN-PE actions.
+
+        Priority (matches NavPipeline in ChronoNav/scripts/vln_pe/improvements/nav_pipeline.py):
+          1. GPS STOP: dist < GPS_STOP_DIST → inject stop
+          2. Stop suppressor: model STOP but dist >= 3.5m → GPS guidance instead
+          3. GPS guidance + GPS-priority guard: dist < GPS_NAV_DIST → best direction
+             (turn_saturation loop check SKIPPED when GPS active — prevents deadlock)
+          4. Position loop detection (only when dist >= GPS_NAV_DIST)
+          5. Distance stagnation (only when dist >= GPS_NAV_DIST)
+        """
+        n_envs = len(obs)
+        action = list(action)
+        for env_id in range(n_envs):
+            if self.runner_status[env_id] != runner_status_code.NORMAL:
+                continue
+            ob = obs[env_id]
+            if ob is None or 'globalgps' not in ob:
+                continue
+            goal_xy = self._env_goal_pos[env_id]
+            if goal_xy is None:
+                continue
+
+            gps = ob['globalgps']
+            cur_xy = np.array([float(gps[0]), float(gps[1])])
+            dist = float(np.linalg.norm(cur_xy - goal_xy))
+            heading = ob.get('heading', None)
+
+            # Update histories
+            self._env_gps_history[env_id].append(cur_xy.tolist())
+            self._env_dist_history[env_id].append(dist)
+            if len(self._env_gps_history[env_id]) > self._LOOP_WIN:
+                self._env_gps_history[env_id] = self._env_gps_history[env_id][-self._LOOP_WIN:]
+            if len(self._env_dist_history[env_id]) > self._STAG_STEPS + 2:
+                self._env_dist_history[env_id] = self._env_dist_history[env_id][-(self._STAG_STEPS + 2):]
+
+            # Extract current action code
+            cur_act_dict = action[env_id]
+            cur_act_code = None
+            if isinstance(cur_act_dict, dict) and 'h1' in cur_act_dict:
+                h1 = cur_act_dict['h1']
+                if 'stop' in h1:
+                    cur_act_code = 0
+                elif 'move_by_flash' in h1:
+                    v = h1['move_by_flash']
+                    cur_act_code = v[0] if isinstance(v, (list, tuple)) else int(v)
+
+            # ① GPS STOP within success radius
+            if dist < self._GPS_STOP_DIST:
+                log.info(f'[GPS_STOP] env={env_id} dist={dist:.3f}m → injecting stop')
+                action[env_id] = {'h1': {'stop': []}}
+                continue
+
+            # ② Stop suppressor: model stopped too early
+            if cur_act_code == 0 and dist >= 3.5:
+                gps_act = self._gps_compute_action_vlnpe(cur_xy, goal_xy, heading)
+                log.info(f'[STOP_SUPPRESS] env={env_id} dist={dist:.3f}m → gps_act={gps_act}')
+                action[env_id] = {'h1': {'move_by_flash': [gps_act]}}
+                continue
+
+            # ③ GPS guidance + GPS-priority guard (skip loop check within GPS range)
+            if dist < self._GPS_NAV_DIST:
+                gps_act = self._gps_compute_action_vlnpe(cur_xy, goal_xy, heading)
+                log.info(f'[GPS_NAV] env={env_id} dist={dist:.3f}m → gps_act={gps_act}')
+                action[env_id] = {'h1': {'move_by_flash': [gps_act]}}
+                continue  # GPS priority: skip loop/stagnation checks below
+
+            # ④ Position loop detection (only outside GPS range)
+            gps_hist = self._env_gps_history[env_id]
+            if len(gps_hist) >= self._LOOP_WIN:
+                arr = np.array(gps_hist[-self._LOOP_WIN:])
+                pos_var = float(np.var(arr, axis=0).sum())
+                if pos_var < self._LOOP_POS_VAR:
+                    log.info(f'[LOOP_DETECT] env={env_id} pos_var={pos_var:.4f} → resetting agent')
+                    try:
+                        self.agent.reset([env_id])
+                    except Exception:
+                        pass
+                    self._env_gps_history[env_id] = []
+                    self._env_dist_history[env_id] = []
+
+            # ⑤ Distance stagnation (only outside GPS range)
+            dist_hist = self._env_dist_history[env_id]
+            if len(dist_hist) >= self._STAG_STEPS:
+                recent = dist_hist[-self._STAG_STEPS:]
+                dist_improvement = max(recent) - min(recent)
+                if dist_improvement < self._STAG_MIN_IMPROVE:
+                    log.info(f'[STAGNATION] env={env_id} dist_improve={dist_improvement:.3f}m → resetting agent')
+                    try:
+                        self.agent.reset([env_id])
+                    except Exception:
+                        pass
+                    self._env_dist_history[env_id] = []
+
+        return np.array(action)
 
     def get_action(self, obs, action):
         start_time = time()
@@ -251,6 +393,10 @@ class VLNDistributedEvaluator(DistributedEvaluator):
         for reset_info in new_reset_infos:
             if reset_info is None:
                 continue
+            # update GPS goal position for new episode
+            env_idx = reset_env_ids[new_reset_infos.index(reset_info)] if hasattr(new_reset_infos, 'index') else None
+            if env_idx is not None:
+                self._set_env_goal(env_idx, reset_info)
             # start new trace log
             progress_log_multi_util.trace_start(
                 trajectory_id=self.now_path_key(reset_info),
@@ -269,6 +415,9 @@ class VLNDistributedEvaluator(DistributedEvaluator):
     def eval(self):
         print('--- VlnMultiEvaluator start ---')
         obs, reset_info = self.env.reset()
+        # Initialize GPS goal positions for all envs
+        for env_id, info in enumerate(reset_info):
+            self._set_env_goal(env_id, info)
         for info in reset_info:
             if info is None:
                 continue
@@ -295,6 +444,8 @@ class VLNDistributedEvaluator(DistributedEvaluator):
         while self.env.is_running():
             # get action from agent
             obs, action = self.get_action(obs, action)
+            # apply GPS stop and loop detection improvements
+            action = self._apply_gps_and_loop_improvements(obs, action, reset_info)
             # step env
             obs, terminated = self.env_step(action)
             # terminate ops
