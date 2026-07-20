@@ -181,6 +181,23 @@ remote_exists() {
 
 auth_remote() {
   local remote="$1"
+  local ns
+  ns="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace 2>/dev/null || echo "<namespace>")"
+  local pod
+  pod="$(hostname 2>/dev/null || echo "<pod-name>")"
+  cat >&2 <<EOF_AUTH_HINT
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[STEP 1] 로컬 머신의 새 터미널에서 포트 포워딩 실행:
+  kubectl port-forward ${pod} 53682:53682 -n ${ns}
+
+[STEP 2] 아래 URL이 출력되면 로컬 브라우저에서 접속:
+  http://127.0.0.1:53682/auth?state=...
+
+[STEP 3] Google 로그인 후 rclone 권한 허용
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EOF_AUTH_HINT
   if remote_exists "$remote"; then
     log "reconnecting existing remote: $remote (interactive OAuth)"
     "$RCLONE_BIN" config reconnect "${remote}:"
