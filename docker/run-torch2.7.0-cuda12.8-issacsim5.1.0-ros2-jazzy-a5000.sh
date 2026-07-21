@@ -1,7 +1,7 @@
 #!/bin/bash
 
 xhost +local:root
-docker run --name internnav --entrypoint bash -it --gpus '"device=0"' --cpus="12" --memory="60g" --shm-size="16gb" -e "ACCEPT_EULA=Y" --rm --network=host \
+docker run --name internnav --entrypoint bash -it --gpus '"device=0"' --runtime=nvidia --cpus="12" --memory="60g" --shm-size="16gb" -e "ACCEPT_EULA=Y" --rm --network=host \
    -e "PRIVACY_CONSENT=Y" \
    -e DISPLAY \
    -v $HOME/.Xauthority:/root/.Xauthority \

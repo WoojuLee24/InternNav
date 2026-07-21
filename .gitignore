@@ -2,6 +2,8 @@
 queue.txt
 # kube credentials
 kube/internnav-kubeconfig.yaml
+# rclone self-installed binary
+kube/.tools/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

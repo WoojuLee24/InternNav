@@ -8,6 +8,7 @@ docker run --name internnav-habitat \
     -it --rm \
     --network=host \
     --gpus all \
+    --runtime=nvidia \
     -v $HOME/.Xauthority:/root/.Xauthority \
     -v ~/docker/isaac-sim/cache/kit:/isaac-sim/kit/cache:rw \
     -v ~/docker/isaac-sim/cache/ov:/root/.cache/ov:rw \

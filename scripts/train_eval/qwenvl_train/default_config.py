@@ -107,6 +107,9 @@ class Params:
     max_steps: int = -1  # -1 = unset (train num_train_epochs as usual); >0 = stop after N steps (also disables mid-train eval/save/load-best, which a run this short can't satisfy)
     eval_max_episodes: Optional[int] = None  # None = unset (eval full split as usual); >0 = cap episodes for a quick eval-rollout smoke test
 
+    # ---- Isaac Sim (h1 eval only) ----
+    headless: bool = False  # True -> no Isaac Sim GUI window (unchanged default: GUI shown)
+
     # ---- data / model paths ----
     vln_datasets: str = "r2r_125cm_0_30%30,r2r_60cm_15_15%30"
     data_root: str = "/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce"
@@ -504,7 +507,11 @@ def build_h1_eval_cfg(p: Params, model_path: str = EVAL_MACHINE["h1"]["model_pat
             env_type="internutopia",
             env_settings={
                 "use_fabric": False,
-                "headless": False,
+                # eval.py runs as a fresh subprocess that re-imports this experiment config
+                # from scratch, so a runner.py --headless flag (set on a different process's
+                # Params object) can't reach p.headless here directly — same env-var relay
+                # runner.py already uses for EVAL_MAX_EPISODES/BEV_DEBUG_DIR below.
+                "headless": p.headless or os.environ.get("EVAL_HEADLESS") == "1",
                 # smoke-test cap (mirrors build_habitat_eval_cfg's eval_settings["max_episodes"]);
                 # None => unset => today's full-split behavior, unchanged.
                 "max_episodes": p.eval_max_episodes or (

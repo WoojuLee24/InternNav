@@ -4,7 +4,7 @@
    # -v /home/universe/gd_project/modules/gd_vln/workspace/src/InternUtopia:/workspace/InternUtopia \
 
 xhost +local:root
-docker run --name internnav-torch2.9.0-cuda13.0-issacsim5.1.0-ros2-jazzy-5090 --shm-size 32g --entrypoint bash -it --gpus all -e "ACCEPT_EULA=Y" --rm --network=host \
+docker run --name internnav-torch2.9.0-cuda13.0-issacsim5.1.0-ros2-jazzy-5090 --shm-size 32g --entrypoint bash -it --gpus all --runtime=nvidia -e "ACCEPT_EULA=Y" --rm --network=host \
    -e "PRIVACY_CONSENT=Y" \
    -e DISPLAY \
    -v $HOME/.Xauthority:/home/irteam/.Xauthority \
