@@ -60,7 +60,8 @@ class Params:
     max_grad_norm: float = 1.0
     lr_scheduler_type: str = "cosine_with_min_lr"
     lr_scheduler_min_lr: float = 1e-05
-    save_total_limit: int = 2
+    save_total_limit: int = 1
+    save_only_model: bool = True  # skip DeepSpeed optimizer states (~32G/ckpt); set False to enable training resume
     logging_steps: int = 1
     model_max_length: int = 8192
     dataloader_num_workers: int = 4
@@ -219,6 +220,7 @@ class Params:
             "--save_strategy", "no" if smoke else "steps",
             "--save_steps", str(self.val_interval_steps),
             "--save_total_limit", str(self.save_total_limit),
+            "--save_only_model", "True" if self.save_only_model else "False",
             "--metric_for_best_model", "eval_loss",
             "--greater_is_better", "False",
             "--load_best_model_at_end", b(not smoke),
