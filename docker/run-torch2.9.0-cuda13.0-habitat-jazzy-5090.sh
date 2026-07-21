@@ -8,6 +8,7 @@ docker run --name internnav-torch2.9.0-cuda13.0-habitat-jazzy-5090 \
     -it --rm \
     --network=host \
     --gpus all \
+    --runtime=nvidia \
     -v $HOME/.Xauthority:/root/.Xauthority \
     -v /home/universe/gd_project/modules/gd_vln/workspace:/ws:rw \
     -v /home/universe/gd_project/modules/gd_vln/workspace:/gd_vln:rw \

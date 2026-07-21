@@ -169,6 +169,27 @@ def _prep_ckpt_aux_files(output_dir: str, ckpt: str, system2_ckpt: str) -> None:
             pass
 
 
+def _backfill_chat_template(ckpt: str, system2_ckpt: str) -> None:
+    """eval-only (--no-train) runs never call _prep_ckpt_aux_files, so a checkpoint
+    that was trained via a train-only run (--no-eval) and evaluated later never gets
+    chat_template.json — processor.apply_chat_template() then fails every step.
+    chat_template.json is a fixed file (identical across every checkpoint in this repo;
+    the actual per-mode prompt text lives in code, not this file), so backfilling it
+    from system2_ckpt is always safe.
+    """
+    import shutil
+
+    dst = os.path.join(ckpt, "chat_template.json")
+    if os.path.exists(dst):
+        return
+    src = os.path.join(system2_ckpt, "chat_template.json")
+    try:
+        shutil.copy(src, dst)
+        print(f"[eval] backfilled missing chat_template.json into {ckpt}", flush=True)
+    except Exception as e:
+        print(f"[eval] could not backfill chat_template.json from {src}: {e}", flush=True)
+
+
 _WANDB_RUN_ID_FILE = "wandb_run_id.txt"
 
 
@@ -209,6 +230,7 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
              in_process: bool = False, debugpy: str = None,
              debug_dir: Optional[str] = None,
              eval_max_episodes: Optional[int] = None,
+             headless: bool = False,
              wandb_run_id: Optional[str] = None,
              wandb_new_run: bool = False) -> int:
     log_dir = os.path.join(output_dir, "logs")
@@ -259,6 +281,11 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
         env["BEV_DEBUG_DIR"] = debug_dir  # read by default_config.make_eval_cfg at import time
     if eval_max_episodes:
         env["EVAL_MAX_EPISODES"] = str(eval_max_episodes)  # read by default_config.make_eval_cfg at import time
+    if headless:
+        # eval.py subprocess re-imports the experiment config fresh, so a --headless
+        # CLI flag set on runner.py's own Params object never reaches it directly —
+        # same env-var relay as BEV_DEBUG_DIR/EVAL_MAX_EPISODES above.
+        env["EVAL_HEADLESS"] = "1"
     eval_argv = [
         "--config", config_path, "--quiet",
         "--model_path", model_path, "--wandb_run_name", run_name,
@@ -329,10 +356,13 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
     print(f"[eval] machine={machine}  checkpoint={best}")
     if do_train:
         _prep_ckpt_aux_files(output_dir, best, p.system2_ckpt)
+    else:
+        _backfill_chat_template(best, p.system2_ckpt)
     os.makedirs(output_dir, exist_ok=True)
     run_eval(config_path, best, run_name, output_dir, machine=machine,
              nproc=p.nproc_per_node, in_process=in_process, debugpy=debugpy,
              debug_dir=p.debug_dir, eval_max_episodes=p.eval_max_episodes,
+             headless=p.headless,
              wandb_run_id=wandb_run_id, wandb_new_run=wandb_new_run)
 
 
@@ -385,6 +415,8 @@ def main_cli() -> None:
                     help="smoke-test override: stop training after N steps (disables mid-train eval/save/load-best) "
                          "and cap Habitat eval to N episodes instead of the full split")
     ap.add_argument("--checkpoints-root", default="/home/irteam/data-vol2/checkpoints")
+    ap.add_argument("--headless", action="store_true",
+                    help="h1/Isaac Sim eval only: run without the Isaac Sim GUI window")
     ap.add_argument("--print-train-argv", action="store_true", help="print resolved train flags and exit")
     # --- VSCode debugging ---
     ap.add_argument("--in-process", action="store_true",
@@ -444,6 +476,8 @@ def main_cli() -> None:
         params = replace(params, data_root=args.data_root)
     if args.nproc:
         params = replace(params, nproc_per_node=args.nproc)
+    if args.headless:
+        params = replace(params, headless=True)
     if args.max_steps:  # one smoke-test knob: caps train steps AND eval episodes to the same N
         params = replace(params, max_steps=args.max_steps, eval_max_episodes=args.max_steps)
     if in_process:
