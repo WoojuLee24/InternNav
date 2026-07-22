@@ -37,6 +37,9 @@ python scripts/train_eval/qwenvl_train/runner.py --config {config.py} --machine 
 ```bash
 python scripts/train_eval/qwenvl_train/runner.py --config {config.py} --machine h1 --no-train --debug-dir {log_dir} --model-path {}
 ```
+### additional arguments
+- `--headless`
+- `--flash-collision {"stop", "reset", "none"}`
 
 ### for debugging
 
