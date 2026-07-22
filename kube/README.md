@@ -70,6 +70,15 @@ kube/.tools/rclone-v1.74.3-linux-amd64/rclone config create gdrive drive scope=d
 
 pod에서 업로드하려면 pod 안에서도 동일하게 rclone 설치(`upload_checkpoints_rclone.sh` 최초 실행 시 자동 설치) + 인증이 필요합니다.
 
+### (선택) personal OAuth client 등록
+rclone 기본 공유 앱은 rate limit(`unauthorized_client` 에러 등)에 걸릴 수 있습니다. 개인 Google OAuth client를 등록하려면
+`keys.env.example`을 `keys.env`로 복사해 `RCLONE_GDRIVE_CLIENT_ID`/`RCLONE_GDRIVE_CLIENT_SECRET`을 채운 뒤:
+```bash
+source keys.env
+rclone config update gdrive client_id "$RCLONE_GDRIVE_CLIENT_ID" client_secret "$RCLONE_GDRIVE_CLIENT_SECRET"
+```
+> `keys.env`는 실제 secret을 담으므로 git에서 제외되어 있습니다 (repo root, `.gitignore` 참고).
+
 ### 2. 다운로드 (Drive → 로컬)
 ```bash
 bash kube/download_checkpoints_rclone.sh <local_path> <cloud_rel>

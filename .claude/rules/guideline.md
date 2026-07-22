@@ -70,6 +70,7 @@
 
 ### 5. Training과 evaluation은 일치해야 됨
 - 입력, 출력 데이터 format이 일치해야 됨
+- **train, eval(habitat), eval(isaac) 세 경로 모두 동일한 조건·파라미터로 모델에 동일한 입력 형식이 들어가야 한다.** 한쪽만 바꾸고 다른 쪽을 누락하면 train==eval 불변식이 깨짐.
 - 예외적인 경우: 
 
 ### 5. 검증
@@ -113,14 +114,16 @@ else:
 
 ## md 파일 작성/업데이트 위치
 - memory·계획·정리 등 md 파일을 작성하거나 update할 때는 **`InternNav/.claude/` 하위에 작성** (repo에 체크인되도록)
-  - 예: memory → `.claude/memory/`, 태스크 → `.claude/tasks/`, 이해 문서 → `.claude/understanding/`
+  - 진행 중인 태스크 추적 파일(auto-dev용, `<branch-name>.md`) → `.claude/tasks/`
+  - 완료된 결과 보고, 코드 이해/분석 문서 등 Claude가 작성하는 기록 전반 → `.claude/memory/` (`understanding_*.md`, `<날짜>_..._result.md` 등)
 - auto-memory(`/root/.claude/projects/...`)에만 쓰지 말고 항상 repo `.claude/` 쪽도 동기화
+- `.claude/memory/`는 Claude가 작성/관리하는 메모리. 사용자가 직접 쓰는 메모리는 `.claude/memory_user/`에 대응되게 둔다 — 세션 시작 시 참고할 컨텍스트가 필요하면 이 폴더도 확인한다.
 
 ## 결과 보고 및 정리: 명료하고 짧게 작성
 - 이전과 비교해서 어떤 점이 달라졌는지 
 - command 명령을 작성하고 각 argument의 의미
 - 시각화 및 디버깅 결과 보고
-- 결과 보고는 tasks/{task명}_result.md에 작성해라.
+- 결과 보고는 `.claude/memory/{task명}_result.md`에 작성해라.
 
 ## r2r_h1_replay 데이터 수집 (eval_r2r_h1_replay.py)
 ```bash
