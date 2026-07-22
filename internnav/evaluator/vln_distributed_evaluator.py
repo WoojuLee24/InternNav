@@ -230,9 +230,10 @@ class VLNDistributedEvaluator(DistributedEvaluator):
                 if self._wandb_active and result:
                     try:
                         import wandb
+                        collision_tag = self.eval_config.task.flash_collision or "none"
                         for split, metrics in result.items():
                             count = metrics.get("Count", 0)
-                            wandb.log({f"eval_{split}/samples": count}, step=count)
+                            wandb.log({f"eval_{split}_{collision_tag}/samples": count}, step=count)
                     except Exception as e:
                         print(f"[Warning] wandb step log failed: {e}")
                 self.runner_status[env_id] = runner_status_code.NOT_RESET
@@ -409,8 +410,9 @@ class VLNDistributedEvaluator(DistributedEvaluator):
         if self._wandb_active and self.result_logger.last_result:
             try:
                 import wandb
+                collision_tag = self.eval_config.task.flash_collision or "none"
                 for split, metrics in self.result_logger.last_result.items():
-                    wandb.log({f"test_{split}/{k}": v for k, v in metrics.items()})
+                    wandb.log({f"test_{split}_{collision_tag}/{k}": v for k, v in metrics.items()})
                 wandb.finish()
             except Exception as e:
                 print(f"[Warning] wandb logging failed: {e}")

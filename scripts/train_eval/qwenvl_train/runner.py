@@ -231,6 +231,7 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
              debug_dir: Optional[str] = None,
              eval_max_episodes: Optional[int] = None,
              headless: bool = False,
+             flash_collision: Optional[str] = None,
              wandb_run_id: Optional[str] = None,
              wandb_new_run: bool = False,
              use_wandb: bool = True) -> int:
@@ -296,6 +297,8 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
         # CLI flag set on runner.py's own Params object never reaches it directly —
         # same env-var relay as BEV_DEBUG_DIR/EVAL_MAX_EPISODES above.
         env["EVAL_HEADLESS"] = "1"
+    if flash_collision:
+        env["EVAL_FLASH_COLLISION"] = flash_collision  # same env-var relay; see default_config.build_h1_eval_cfg
     eval_argv = [
         "--config", config_path, "--quiet",
         "--model_path", model_path, "--wandb_run_name", run_name,
@@ -372,7 +375,7 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
     run_eval(config_path, best, run_name, output_dir, machine=machine,
              nproc=p.nproc_per_node, in_process=in_process, debugpy=debugpy,
              debug_dir=p.debug_dir, eval_max_episodes=p.eval_max_episodes,
-             headless=p.headless,
+             headless=p.headless, flash_collision=p.flash_collision,
              wandb_run_id=wandb_run_id, wandb_new_run=wandb_new_run,
              use_wandb=p.use_wandb)
 
@@ -428,6 +431,10 @@ def main_cli() -> None:
     ap.add_argument("--checkpoints-root", default="/home/irteam/data-vol2/checkpoints")
     ap.add_argument("--headless", action="store_true",
                     help="h1/Isaac Sim eval only: run without the Isaac Sim GUI window")
+    ap.add_argument("--flash-collision", choices=["stop", "reset", "none"], default=None,
+                    help="h1/Isaac Sim eval only: collision handling during flash-move "
+                         "('stop'=halt in place, 'reset'=episode failure, 'none'=no detection). "
+                         "Default: stop (config default, unchanged if omitted).")
     ap.add_argument("--print-train-argv", action="store_true", help="print resolved train flags and exit")
     # --- VSCode debugging ---
     ap.add_argument("--in-process", action="store_true",
@@ -489,6 +496,8 @@ def main_cli() -> None:
         params = replace(params, nproc_per_node=args.nproc)
     if args.headless:
         params = replace(params, headless=True)
+    if args.flash_collision:
+        params = replace(params, flash_collision=args.flash_collision)
     if args.max_steps:  # one smoke-test knob: caps train steps AND eval episodes to the same N
         params = replace(params, max_steps=args.max_steps, eval_max_episodes=args.max_steps)
     if in_process:

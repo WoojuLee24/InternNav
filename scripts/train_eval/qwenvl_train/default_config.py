@@ -113,6 +113,7 @@ class Params:
 
     # ---- Isaac Sim (h1 eval only) ----
     headless: bool = False  # True -> no Isaac Sim GUI window (unchanged default: GUI shown)
+    flash_collision: str = "stop"  # 'stop' | 'reset' | 'none' (-> None: no detection). Unchanged default: 'stop'.
 
     # ---- data / model paths ----
     vln_datasets: str = "r2r_125cm_0_30%30,r2r_60cm_15_15%30"
@@ -501,6 +502,12 @@ def build_h1_eval_cfg(p: Params, model_path: str = EVAL_MACHINE["h1"]["model_pat
             "debug_dir": p.debug_dir or os.environ.get("BEV_DEBUG_DIR"),
         })
 
+    # same env-var relay as EVAL_HEADLESS/EVAL_MAX_EPISODES above (eval.py subprocess
+    # re-imports this experiment config fresh, so a runner.py CLI flag set on a
+    # different process's Params object can't reach p.flash_collision here directly).
+    _flash_collision = os.environ.get("EVAL_FLASH_COLLISION") or p.flash_collision
+    _flash_collision = None if _flash_collision == "none" else _flash_collision
+
     return EvalCfg(
         agent=AgentCfg(
             server_port=8023,
@@ -534,7 +541,7 @@ def build_h1_eval_cfg(p: Params, model_path: str = EVAL_MACHINE["h1"]["model_pat
             robot_name="h1",
             robot_flash=True,
             robot_platform_size=0.3,
-            flash_collision="stop",
+            flash_collision=_flash_collision,
             robot_usd_path="/ws/src/InternNav/data/InternData-N1-v0.5-mini/Embodiments/vln-pe/h1/h1_internvla.usd",
             camera_resolution=[640, 480],
             camera_prim_path="torso_link/h1_1_25_down_30",
