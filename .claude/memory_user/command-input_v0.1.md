@@ -26,10 +26,11 @@ python scripts/train_eval/qwenvl_train/runner.py --config {config.py} --machine 
 python scripts/train_eval/qwenvl_train/runner.py --config {config.py} --machine {5090, h200} --no-train --debug-dir {log_dir}
 ```
 
-### for debugging
+### for debugging: disables use_wandb
 
-- `--max-steps 2`
-- `--debugpy eval`
+- `--max-steps 2 ` 
+- `--debugpy eval  `
+- `--debug-dir # visualizes bev_v0.1 and input_v0.1 images `
 
 ## eval (isaac-sim)
 
