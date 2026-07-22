@@ -1,5 +1,7 @@
 # queue
 queue.txt
+# personal secrets (rclone/github/huggingface keys) — see keys.env.example
+keys.env
 # kube credentials
 kube/internnav-kubeconfig.yaml
 # rclone self-installed binary
