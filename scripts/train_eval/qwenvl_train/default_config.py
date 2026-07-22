@@ -108,6 +108,9 @@ class Params:
     max_steps: int = -1  # -1 = unset (train num_train_epochs as usual); >0 = stop after N steps (also disables mid-train eval/save/load-best, which a run this short can't satisfy)
     eval_max_episodes: Optional[int] = None  # None = unset (eval full split as usual); >0 = cap episodes for a quick eval-rollout smoke test
 
+    # ---- wandb ----
+    use_wandb: bool = True  # False -> no wandb run created/resumed for this eval (runner.py sets this False for --max-steps/--debugpy smoke runs)
+
     # ---- Isaac Sim (h1 eval only) ----
     headless: bool = False  # True -> no Isaac Sim GUI window (unchanged default: GUI shown)
 
@@ -235,7 +238,7 @@ class Params:
             "--gradient_checkpointing", b(self.gradient_checkpointing),
             "--dataloader_num_workers", str(self.dataloader_num_workers),
             "--run_name", run_name,
-            "--report_to", "none" if smoke else "wandb",
+            "--report_to", "none" if (smoke or not self.use_wandb) else "wandb",
         ]
         if smoke:
             argv += ["--max_steps", str(self.max_steps)]
@@ -408,7 +411,7 @@ def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
             "max_episodes": p.eval_max_episodes or (int(os.environ["EVAL_MAX_EPISODES"]) if os.environ.get("EVAL_MAX_EPISODES") else None),
             "port": "2333",
             "dist_url": "env://",
-            "use_wandb": m["use_wandb"],
+            "use_wandb": m["use_wandb"] and p.use_wandb,
             "wandb_project": m["wandb_project"],
             **m["extra_eval"],
         },
@@ -551,6 +554,7 @@ def build_h1_eval_cfg(p: Params, model_path: str = EVAL_MACHINE["h1"]["model_pat
             "vis_output": False,
             "show_rgb": False,
             "use_agent_server": False,
+            "use_wandb": p.use_wandb,
         },
     )
 

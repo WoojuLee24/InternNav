@@ -232,46 +232,56 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
              eval_max_episodes: Optional[int] = None,
              headless: bool = False,
              wandb_run_id: Optional[str] = None,
-             wandb_new_run: bool = False) -> int:
+             wandb_new_run: bool = False,
+             use_wandb: bool = True) -> int:
     log_dir = os.path.join(output_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
-    id_file = os.path.join(output_dir, _WANDB_RUN_ID_FILE)
-    one_shot_run_id = None  # set for --wandb-new-run (not saved to txt)
 
-    if wandb_run_id:
-        # --wandb-run-id: explicit run to resume; persist so future evals reuse it
-        with open(id_file, "w") as f:
-            f.write(wandb_run_id)
-        print(f"[wandb] using specified run ID: {wandb_run_id}", flush=True)
-    elif wandb_new_run:
-        # --wandb-new-run: fresh run for this eval only; do NOT overwrite txt
-        ckpt_name = os.path.basename(output_dir.rstrip('/'))
-        new_run_name = f"new/{ckpt_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        try:
-            import wandb
-            if wandb.run is None:
-                run = wandb.init(project="huggingface", name=new_run_name, dir=output_dir)
-                print(f"[wandb] new run created (one-shot): {run.url}", flush=True)
-                wandb.finish()
-                one_shot_run_id = run.id
-        except Exception as e:
-            print(f"[wandb] init failed: {e}", flush=True)
-    elif not os.path.exists(id_file):
-        # old checkpoint without txt: create run and save for future evals
-        ckpt_name = os.path.basename(output_dir.rstrip('/'))
-        new_run_name = f"original/{ckpt_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        try:
-            import wandb
-            if wandb.run is None:
-                run = wandb.init(project="huggingface", name=new_run_name, dir=output_dir)
-                print(f"[wandb] new run created: {run.url}", flush=True)
-                wandb.finish()
-                with open(id_file, "w") as f:
-                    f.write(run.id)
-        except Exception as e:
-            print(f"[wandb] init failed: {e}", flush=True)
+    if not use_wandb:
+        # smoke-test / debug run: create/resume NO wandb run at all (not even the
+        # placeholder-run-for-its-ID below). WANDB_MODE=disabled also makes any
+        # wandb.init() the evaluator itself calls a local no-op, belt and suspenders.
+        env = dict(os.environ)
+        env["WANDB_MODE"] = "disabled"
+    else:
+        id_file = os.path.join(output_dir, _WANDB_RUN_ID_FILE)
+        one_shot_run_id = None  # set for --wandb-new-run (not saved to txt)
 
-    env = _wandb_resume_env(output_dir=output_dir, override_run_id=one_shot_run_id)
+        if wandb_run_id:
+            # --wandb-run-id: explicit run to resume; persist so future evals reuse it
+            with open(id_file, "w") as f:
+                f.write(wandb_run_id)
+            print(f"[wandb] using specified run ID: {wandb_run_id}", flush=True)
+        elif wandb_new_run:
+            # --wandb-new-run: fresh run for this eval only; do NOT overwrite txt
+            ckpt_name = os.path.basename(output_dir.rstrip('/'))
+            new_run_name = f"new/{ckpt_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            try:
+                import wandb
+                if wandb.run is None:
+                    run = wandb.init(project="huggingface", name=new_run_name, dir=output_dir)
+                    print(f"[wandb] new run created (one-shot): {run.url}", flush=True)
+                    wandb.finish()
+                    one_shot_run_id = run.id
+            except Exception as e:
+                print(f"[wandb] init failed: {e}", flush=True)
+        elif not os.path.exists(id_file):
+            # old checkpoint without txt: create run and save for future evals
+            ckpt_name = os.path.basename(output_dir.rstrip('/'))
+            new_run_name = f"original/{ckpt_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            try:
+                import wandb
+                if wandb.run is None:
+                    run = wandb.init(project="huggingface", name=new_run_name, dir=output_dir)
+                    print(f"[wandb] new run created: {run.url}", flush=True)
+                    wandb.finish()
+                    with open(id_file, "w") as f:
+                        f.write(run.id)
+            except Exception as e:
+                print(f"[wandb] init failed: {e}", flush=True)
+
+        env = _wandb_resume_env(output_dir=output_dir, override_run_id=one_shot_run_id)
+
     env["TRAIN_EVAL_TARGET"] = machine  # read by the experiment config.py
     env["EVAL_OUTPUT_DIR"] = os.path.abspath(log_dir)
     env["WANDB_DIR"] = output_dir
@@ -363,7 +373,8 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
              nproc=p.nproc_per_node, in_process=in_process, debugpy=debugpy,
              debug_dir=p.debug_dir, eval_max_episodes=p.eval_max_episodes,
              headless=p.headless,
-             wandb_run_id=wandb_run_id, wandb_new_run=wandb_new_run)
+             wandb_run_id=wandb_run_id, wandb_new_run=wandb_new_run,
+             use_wandb=p.use_wandb)
 
 
 # --------------------------------------------------------------------------- #
@@ -433,7 +444,7 @@ def main_cli() -> None:
                     help="force a fresh wandb run for this eval (does NOT overwrite wandb_run_id.txt)")
     args = ap.parse_args()
 
-    if not (args.max_steps or args.debugpy):  # smoke tests / debug runs skip wandb entirely
+    if not (args.max_steps or args.debugpy or args.debug_dir):  # smoke tests / debug runs skip wandb entirely
         try:
             import wandb
             wandb.login(relogin=False)  # prompts once if not logged in; saves to ~/.netrc for subprocesses
@@ -501,6 +512,10 @@ def main_cli() -> None:
         else:
             debug_dir = base_dir
         params = replace(params, debug_dir=debug_dir)
+    if args.max_steps or args.debugpy or args.debug_dir:
+        # smoke-test / debugger / debug-image runs: no online wandb run at all
+        # (matches the wandb.login() skip above) — see run_eval()'s use_wandb branch.
+        params = replace(params, use_wandb=False)
 
     if args.print_train_argv:
         print(" ".join(params.train_argv("<output_dir>", exp_name)))
