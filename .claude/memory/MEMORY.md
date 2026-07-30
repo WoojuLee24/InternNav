@@ -24,3 +24,4 @@
 - [image_base s1.fpv 스모크 테스트](260709_image_base_s1fpv_smoke_result.md)
 - [S1 concat 모드 구현](260709_s1_concat_bev_result.md) — BEV를 3번째 토큰 슬롯으로 추가
 - [bev_gt 컬러/방향 버그 수정 (2차)](260710_bev_gt_color_orientation_bug_result.md) — world-align 회전 버그 수정
+- [h1 eval hang 원인 조사](260724_h1_eval_hang_investigation_result.md) — env.step() 내부 Isaac stall, system memory 초과 아님(배제), watchdog 대응

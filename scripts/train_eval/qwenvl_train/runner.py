@@ -88,6 +88,139 @@ def _run_and_tee(cmd: List[str], log_path: Optional[str], env=None) -> int:
             fp.close()
 
 
+def _kill_group(proc, term_wait: int = 15) -> None:
+    """Kill the whole process group of `proc` (SIGTERM, then SIGKILL). `proc` must
+    have been started with start_new_session=True so it is its own group leader,
+    which lets us take down the eval's child tree (python.sh -> eval.py + Isaac)."""
+    import signal
+    import time
+
+    try:
+        pgid = os.getpgid(proc.pid)
+    except ProcessLookupError:
+        return
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    t0 = time.time()
+    while time.time() - t0 < term_wait:
+        if proc.poll() is not None:
+            return
+        time.sleep(1)
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def _wait_gpu_free(gpu: Optional[str], threshold_mb: int = 2000, max_wait: int = 300) -> None:
+    """Best-effort: block until GPU `gpu`'s used memory drops below threshold, so a
+    relaunch doesn't OOM against the just-killed process's still-freeing memory."""
+    import time
+
+    if not gpu:
+        time.sleep(10)
+        return
+    print(f"[watchdog] waiting for GPU {gpu} memory to free (<{threshold_mb} MiB)...", flush=True)
+    t0 = time.time()
+    while time.time() - t0 < max_wait:
+        try:
+            r = subprocess.run(
+                ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits", "-i", str(gpu)],
+                capture_output=True, text=True, timeout=15,
+            )
+            used = int(r.stdout.strip().splitlines()[0])
+            if used < threshold_mb:
+                print(f"[watchdog] GPU {gpu} free ({used} MiB).", flush=True)
+                return
+        except Exception:
+            pass
+        time.sleep(5)
+    print(f"[watchdog] GPU {gpu} still busy after {max_wait}s; relaunching anyway.", flush=True)
+
+
+def _run_with_watchdog(cmd: List[str], log_path: Optional[str], env, idle_limit: int,
+                       max_noprogress: int = 3, gpu: Optional[str] = None) -> int:
+    """Like _run_and_tee, but for the h1 (Isaac Sim) eval which intermittently HANGS
+    inside env.step() (no output, GPU idle, process alive). Streams the child's output
+    and, if nothing is emitted for `idle_limit` seconds, kills the process group and
+    relaunches the SAME cmd — the eval auto-resumes (lmdb skips finished episodes;
+    wandb resumes via <model_path>/wandb_run_id.txt). Gives up after `max_noprogress`
+    consecutive relaunches that complete no new episode (guards an unrecoverable loop,
+    e.g. a missing chat_template.json that makes S2 error every step).
+
+    Returns 0 on the eval's own clean exit; the last non-zero rc (or 1) on give-up.
+    """
+    import codecs
+    import select
+
+    def _completed() -> int:
+        if not log_path or not os.path.exists(log_path):
+            return 0
+        try:
+            with open(log_path, "rb") as f:
+                return f.read().count(b"finish: [trajectory_id")
+        except OSError:
+            return 0
+
+    fp = open(log_path, "w") if log_path else None  # fresh once; appended across relaunches below
+    os.umask(0o000)  # child dirs/files world-writable (matches _run_and_tee)
+    out = sys.stdout.buffer
+    noprogress = 0
+    attempt = 0
+    try:
+        while True:
+            attempt += 1
+            before = _completed()
+            print(f"[watchdog] launch #{attempt} (idle_limit={idle_limit}s): " + " ".join(cmd), flush=True)
+            proc = subprocess.Popen(
+                cmd, cwd=REPO_ROOT, env=env, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, start_new_session=True,  # own group => killable tree
+            )
+            dec = codecs.getincrementaldecoder("utf-8")("replace")
+            fd = proc.stdout.fileno()
+            hung = False
+            while True:
+                # select returns empty ONLY if no output arrived for the full idle_limit
+                # (a clean exit closes the pipe => fd is 'readable' => we detect EOF fast).
+                ready, _, _ = select.select([fd], [], [], idle_limit)
+                if not ready:
+                    print(f"\n[watchdog] HANG: no output for {idle_limit}s; killing eval.", flush=True)
+                    hung = True
+                    _kill_group(proc)
+                    break
+                chunk = os.read(fd, 4096)
+                if not chunk:
+                    break  # EOF -> process exiting
+                out.write(chunk)
+                out.flush()
+                if fp:
+                    fp.write(dec.decode(chunk).replace("\r\n", "\n").replace("\r", "\n"))
+                    fp.flush()
+            rc = proc.wait()
+
+            if not hung and rc == 0:
+                print("[watchdog] eval finished cleanly.", flush=True)
+                return 0
+
+            _wait_gpu_free(gpu)
+            after = _completed()
+            if after > before:
+                noprogress = 0
+                print(f"[watchdog] progress {before}->{after} episodes; relaunching (resume).", flush=True)
+            else:
+                noprogress += 1
+                why = "hang, no new episode" if hung else f"exit {rc}, no new episode"
+                print(f"[watchdog] no progress ({why}); strike {noprogress}/{max_noprogress}.", flush=True)
+                if noprogress >= max_noprogress:
+                    print(f"[watchdog] giving up after {noprogress} no-progress relaunches.", flush=True)
+                    return rc if rc != 0 else 1
+    finally:
+        if fp:
+            fp.close()
+
+
 def _run_in_process(script: str, argv: List[str], env_extra: Optional[dict] = None) -> int:
     """Run ``script`` (a ``__main__`` entry script) inside THIS Python process — no
     torchrun subprocess — so a VSCode debugger attached to runner.py hits breakpoints
@@ -234,8 +367,20 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
              flash_collision: Optional[str] = None,
              wandb_run_id: Optional[str] = None,
              wandb_new_run: bool = False,
-             use_wandb: bool = True) -> int:
-    log_dir = os.path.join(output_dir, "logs")
+             use_wandb: bool = True,
+             watchdog: bool = False,
+             watchdog_idle_min: int = 10) -> int:
+    # h1 (Isaac Sim) eval: give each collision mode its own logs dir so `none` and
+    # `stop` runs against the same --model-path don't share one lmdb/result/test log
+    # (the lmdb key is trajectory_id_episode_id, NOT tagged by collision mode, so a
+    # shared dir makes the second mode resume-skip everything and overwrites the
+    # first's result_h1.json). wandb_run_id.txt lives at output_dir (above log_dir),
+    # so it stays shared -> both modes still resume the SAME wandb run.
+    # Other machines (habitat h200/5090) keep the plain "logs" dir, unchanged.
+    if machine == "h1":
+        log_dir = os.path.join(output_dir, f"logs_{flash_collision or 'none'}")
+    else:
+        log_dir = os.path.join(output_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
 
     if not use_wandb:
@@ -308,14 +453,20 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
         # dropped so console logs are visible while stepping in the debugger.
         argv = [a for a in eval_argv if a != "--quiet"]
         return _run_in_process("scripts/eval/eval.py", argv, env_extra=env)
+    log_file = os.path.join(log_dir, f"test_{machine}.log")
     if machine == "h1":
         # Isaac Sim does not support torchrun; run as a single process.
         python = H1_PYTHON if os.path.exists(H1_PYTHON) else sys.executable
         cmd = [python, "scripts/eval/eval.py"] + eval_argv
-    else:
-        cmd = ["torchrun", f"--nproc_per_node={nproc}", f"--master_port={master_port}",
-               "scripts/eval/eval.py"] + eval_argv
-    return _run_and_tee(cmd, os.path.join(log_dir, f"test_{machine}.log"), env=env)
+        if watchdog:
+            # h1 eval can freeze inside Isaac Sim's env.step(); auto-detect the stall
+            # (no output for watchdog_idle_min minutes) and relaunch (resumes lmdb+wandb).
+            gpu = (os.environ.get("CUDA_VISIBLE_DEVICES") or "").split(",")[0] or None
+            return _run_with_watchdog(cmd, log_file, env, idle_limit=watchdog_idle_min * 60, gpu=gpu)
+        return _run_and_tee(cmd, log_file, env=env)
+    cmd = ["torchrun", f"--nproc_per_node={nproc}", f"--master_port={master_port}",
+           "scripts/eval/eval.py"] + eval_argv
+    return _run_and_tee(cmd, log_file, env=env)
 
 
 def train_and_eval(p: Params, exp_name: str, config_path: str, *,
@@ -324,7 +475,9 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
                    model_path: Optional[str] = None, in_process: bool = False,
                    debugpy: str = None,
                    wandb_run_id: Optional[str] = None,
-                   wandb_new_run: bool = False) -> None:
+                   wandb_new_run: bool = False,
+                   watchdog: bool = False,
+                   watchdog_idle_min: int = 10) -> None:
     """End-to-end driver. ``exp_name`` e.g. 'batch_size/b4_eff128_base'.
 
     ``in_process=True`` runs train/eval in THIS process (no torchrun) for VSCode
@@ -377,7 +530,7 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
              debug_dir=p.debug_dir, eval_max_episodes=p.eval_max_episodes,
              headless=p.headless, flash_collision=p.flash_collision,
              wandb_run_id=wandb_run_id, wandb_new_run=wandb_new_run,
-             use_wandb=p.use_wandb)
+             use_wandb=p.use_wandb, watchdog=watchdog, watchdog_idle_min=watchdog_idle_min)
 
 
 # --------------------------------------------------------------------------- #
@@ -449,6 +602,14 @@ def main_cli() -> None:
                     help="resume a specific wandb run ID (saved to wandb_run_id.txt for future evals)")
     ap.add_argument("--wandb-new-run", action="store_true",
                     help="force a fresh wandb run for this eval (does NOT overwrite wandb_run_id.txt)")
+    # --- watchdog (h1 / Isaac Sim eval only) ---
+    ap.add_argument("--watchdog", action="store_true",
+                    help="h1 eval only: if the eval freezes inside Isaac Sim's env.step() "
+                         "(no output for --watchdog-idle-min minutes), kill it and relaunch; "
+                         "the eval auto-resumes (lmdb skip-done + wandb run-id). Gives up after "
+                         "3 consecutive relaunches with no newly completed episode.")
+    ap.add_argument("--watchdog-idle-min", type=int, default=10,
+                    help="minutes of no eval output that count as a hang (default 10).")
     args = ap.parse_args()
 
     if not (args.max_steps or args.debugpy or args.debug_dir):  # smoke tests / debug runs skip wandb entirely
@@ -541,6 +702,8 @@ def main_cli() -> None:
         debugpy=args.debugpy,
         wandb_run_id=args.wandb_run_id,
         wandb_new_run=args.wandb_new_run,
+        watchdog=args.watchdog,
+        watchdog_idle_min=args.watchdog_idle_min,
     )
 
 
