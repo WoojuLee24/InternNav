@@ -36,8 +36,15 @@ python scripts/train_eval/qwenvl_train/runner.py --config {config.py} --machine 
 
 ```bash
 python scripts/train_eval/qwenvl_train/runner.py --config {config.py} --machine h1 --no-train --debug-dir {log_dir} --model-path {}
+
+# example
+python scripts/train_eval/qwenvl_train/runner.py  --config scripts/train_eval/qwenvl_train/image-base/base_s1.fpv_s2.fpv.py --machine h1 --no-train --model-path checkpoints/InternVLA-N1-DualVLN --headless --flash-collision none
+
 ```
+
+
 ### additional arguments
+- `--debug_dir` 
 - `--headless`
 - `--flash-collision {"stop", "reset", "none"}`
 
@@ -61,9 +68,12 @@ python scripts/train_eval/qwenvl_train/runner.py --config scripts/train_eval/qwe
 curl https://rclone.org/install.sh | sudo bash # rclone install 
 
 source keys.env # RCLONE_GDRIVE_CLIENT_ID / RCLONE_GDRIVE_CLIENT_SECRET 등 (gitignored, keys.env.example 참고)
+
+# script command
+kube/download_checkpoints_rclone.sh --auth gdrive
+# raw command
 rclone config update gdrive client_id "$RCLONE_GDRIVE_CLIENT_ID" client_secret "$RCLONE_GDRIVE_CLIENT_SECRET" # personal id setup
 
-kube/download_checkpoints_rclone.sh --auth gdrive
 
 ```
 
@@ -71,7 +81,9 @@ kube/download_checkpoints_rclone.sh --auth gdrive
 
 ```bash
 rclone lsd gdrive:InternNav/checkpoints       # 개인 드라이브
-rclone lsd gdrive:VLN-checkpoints --drive-shared-with-me    # 공유드라이브
+rclone lsd gdrive:VLN-checkpoints --drive-shared-with-me  # 공유드라이브
+
+rclone config update gdrive root_folder_id root # 위 드라이브 둘 중 하나라도 안보이면 rclone root 설정
 ```
 *(default: `InternNav/checkpoints`)*
 *unauthorized_client 발생 시 login에서 new token을 받아야 함*

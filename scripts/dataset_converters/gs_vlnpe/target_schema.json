@@ -1,0 +1,274 @@
+{
+  "source": {
+    "data_root": "data/InternData-N1-v0.5-mini/vln_n1/traj_data/matterport3d_d435i",
+    "scene": "17DRP5sb8fy",
+    "episode": 0,
+    "codebase_version": "v2.1"
+  },
+  "fps": {
+    "declared_in_info_json": 30,
+    "measured_from_rgb_video": {
+      "fps": 10.0,
+      "frame_count": 239
+    },
+    "measured_from_depth_video": {
+      "fps": 10.0,
+      "frame_count": 239
+    },
+    "note": "mp4는 손실 재인코딩본이며 fps가 info.json 선언값과 다를 수 있다; 실제 데이터 rate는 declared fps를 신뢰한다."
+  },
+  "frame_counts": {
+    "parquet_rows": 239,
+    "rgb_image_files": 239,
+    "depth_image_files": 239,
+    "consistent": true,
+    "effective_length_used": 239
+  },
+  "parquet_schema": {
+    "index": {
+      "dtype": "int64",
+      "shape": "scalar"
+    },
+    "observation.camera_intrinsic": {
+      "dtype": "float32",
+      "shape": [
+        3,
+        3
+      ],
+      "constant_across_episode": true,
+      "max_abs_diff": 0.0,
+      "row0_value": [
+        [
+          355.81463623046875,
+          0.0,
+          240.0
+        ],
+        [
+          0.0,
+          351.68701171875,
+          135.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    "observation.camera_extrinsic": {
+      "dtype": "float32",
+      "shape": [
+        4,
+        4
+      ],
+      "constant_across_episode": true,
+      "constant_across_dataset": false,
+      "max_abs_diff": 0.0,
+      "row0_value": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          -0.0
+        ],
+        [
+          0.0,
+          0.10576844215393066,
+          -0.9943907856941223,
+          0.0
+        ],
+        [
+          -0.0,
+          0.9943907856941223,
+          0.10576844215393066,
+          0.7003968954086304
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "note": "에피소드 내에서는 상수지만 **에피소드마다 다르다**(robot_params 필드 참고). translation z = 로봇 키 h_b, 회전 = 카메라 하향 pitch — NavDP가 랜덤화하는 로봇 파라미터 2개를 담고 있다. `geometry_utils.decompose_camera_extrinsic`/`compose_camera_extrinsic`으로 다룰 것. per-frame world pose는 `action`이고 이 필드는 재투영에 쓰지 않는다. 바닥 높이는 floor_z = cam_z - h_b로 얻는다."
+    },
+    "action": {
+      "dtype": "float32",
+      "shape": [
+        4,
+        4
+      ],
+      "constant_across_episode": false,
+      "per_frame": true,
+      "note": "매 프레임 카메라 pose(camera-to-world). 정확한 convention은 pose_convention 필드 참고."
+    }
+  },
+  "image_streams": {
+    "rgb": {
+      "path_pattern": "videos/chunk-000/observation.images.rgb/episode_{episode:06d}_{frame:03d}.jpg",
+      "dtype": "uint8",
+      "shape": [
+        270,
+        480,
+        3
+      ]
+    },
+    "depth": {
+      "path_pattern": "videos/chunk-000/observation.images.depth/episode_{episode:06d}_{frame:03d}.png",
+      "dtype": "uint16",
+      "shape": [
+        270,
+        480
+      ],
+      "units": "0.1mm (raw uint16 / 10000 = meters)",
+      "scale_to_meters": 0.0001,
+      "invalid_raw_values": [
+        0,
+        65535
+      ]
+    },
+    "rgb_video": {
+      "path_pattern": "videos/chunk-000/observation.video.rgb/episode_{episode:06d}.mp4",
+      "note": "시각화 전용 손실 재인코딩본(해상도 패딩됨) — 메트릭 용도로 사용 금지, rgb 원본은 observation.images.rgb 사용."
+    },
+    "depth_video": {
+      "path_pattern": "videos/chunk-000/observation.video.depth/episode_{episode:06d}.mp4",
+      "note": "8bit 손실 시각화본 — 재투영/메트릭 depth에 사용 금지, 실제 depth는 observation.images.depth 사용."
+    }
+  },
+  "robot_params": {
+    "source": "observation.camera_extrinsic (per-episode)",
+    "episodes_scanned": 52,
+    "undecomposable_episodes": [],
+    "h_b_m": {
+      "min": 0.2594524919986725,
+      "max": 1.4738391637802124,
+      "mean": 0.8854681035647025,
+      "std": 0.3659138439678092,
+      "paper_range": [
+        0.25,
+        1.25
+      ]
+    },
+    "pitch_down_deg": {
+      "min": -2.5044780613825424e-06,
+      "max": 29.99999725896547,
+      "mean": 19.802050914932316,
+      "paper_range": [
+        0.0,
+        30.0
+      ]
+    },
+    "floor_z": {
+      "median": -0.01393580436706543,
+      "std": 2.3870703194430504e-08,
+      "constant": true,
+      "derivation": "cam_z - h_b"
+    },
+    "note": "NavDP가 랜덤화하는 로봇 파라미터(논문 §3 Robot Model). 03은 h_b로 h_obs를 정하고, 04는 이 분포에서 샘플링해 카메라를 배치하며, 05는 compose_camera_extrinsic으로 같은 규약으로 기록한다. h_b 상한은 실측(≈1.5)이 논문 표기(1.25)보다 크다."
+  },
+  "pose_convention": {
+    "candidates_tested": [
+      "cam2world_gl",
+      "cam2world",
+      "world2cam"
+    ],
+    "frame_pairs_tested": [
+      [
+        0,
+        15
+      ],
+      [
+        56,
+        71
+      ],
+      [
+        112,
+        127
+      ],
+      [
+        167,
+        182
+      ],
+      [
+        223,
+        238
+      ]
+    ],
+    "per_candidate": {
+      "cam2world_gl": {
+        "mean_abs_photometric_error": 2.0762266397476195,
+        "mean_valid_pixel_fraction": 0.45910339506172837,
+        "per_pair_errors": [
+          4.283529281616211,
+          1.2993344068527222,
+          0.8650962114334106,
+          2.2027928829193115,
+          1.7303804159164429
+        ],
+        "mesh_surface_distance_m": {
+          "median": 2.9164765260146454e-05,
+          "p90": 7.80219546815519e-05,
+          "passed": true
+        }
+      },
+      "cam2world": {
+        "mean_abs_photometric_error": 41.605706787109376,
+        "mean_valid_pixel_fraction": 0.7958009259259259,
+        "per_pair_errors": [
+          33.07943344116211,
+          41.68341827392578,
+          48.903751373291016,
+          45.958858489990234,
+          38.403072357177734
+        ],
+        "mesh_surface_distance_m": {
+          "median": 0.41868037520507434,
+          "p90": 0.9082633538680134,
+          "passed": false
+        }
+      },
+      "world2cam": {
+        "mean_abs_photometric_error": 46.75351257324219,
+        "mean_valid_pixel_fraction": 0.5515586419753087,
+        "per_pair_errors": [
+          49.585716247558594,
+          46.79222869873047,
+          42.243350982666016,
+          48.34917068481445,
+          46.797096252441406
+        ],
+        "mesh_surface_distance_m": {
+          "median": 0.9574073139446821,
+          "p90": 2.352604113021179,
+          "passed": false
+        }
+      }
+    },
+    "detected_convention": "cam2world_gl",
+    "confidence_margin": 0.9999303412173406,
+    "decided_by": "scene_mesh_surface_distance",
+    "mesh_anchor": {
+      "mesh_path": "data/scene_data/mp3d_n1/17DRP5sb8fy/matterport_mesh/bed1a77d92d64f5cbbaaae4feed64ec1/bed1a77d92d64f5cbbaaae4feed64ec1.obj",
+      "tolerance_m": 0.001,
+      "per_candidate_median_m": {
+        "cam2world_gl": 2.9164765260146454e-05,
+        "cam2world": 0.41868037520507434,
+        "world2cam": 0.9574073139446821
+      },
+      "per_frame_median_m": {
+        "0": 2.5901558924776807e-05,
+        "79": 2.8485489849799845e-05,
+        "158": 2.3359460916528134e-05,
+        "238": 4.067194628901551e-05
+      }
+    },
+    "evidence_note": "action[t]는 per-frame 카메라 pose이고, camera_extrinsic(상수)은 고정 마운트 오프셋이라 재투영에서 제외한다. **축 컨벤션**: action[t]의 회전은 OpenGL/USD 카메라 프레임(x=right, y=up, z=backward) 기준이라, OpenCV(x=right, y=down, z=forward)로 unproject한 점에 쓰려면 `action[t] @ CAM_CV_TO_GL`이 필요하다(= convention \"cam2world_gl\", `geometry_utils.action_to_c2w`). 이 flip을 빼면 씬 mesh 표면까지 0.27m 어긋난다. relative transform은 `geometry_utils.compute_relative_transform`(inv(t1) @ t0 순서)을 사용. **판별 근거**: photometric error는 상대 지표라 축 컨벤션 오류를 상쇄해 버린다(좁은 baseline에서 정답/오답이 err 1.93 vs 1.91로 구분 불가) — 그래서 정답지 mesh를 절대 앵커로 삼아 확정했다(mesh_anchor 필드)."
+  },
+  "notes": [
+    "depth 재투영은 프레임별 PNG(observation.images.depth)만 사용한다; video 스트림(mp4)은 손실 시각화본이라 메트릭 계산에서 제외한다.",
+    "FPV warp 방향: rgb(t1)을 depth(t0) 기반 좌표로 backward-warp(bilinear)해 rgb(t0)와 비교했다 (forward-splat 대신 — 홀/z-buffer 로직 불필요, 동일한 판별 근거).",
+    "BEV 교차검증: t0/t1을 각자 독립적으로 절대 world 프레임에 unproject해 같은 grid에 올려 겹치는 영역을 비교 (`geometry_utils.check_alignment_bev`). FPV는 상대 pose만 쓰므로 축 컨벤션 오류를 상쇄하지만 BEV는 절대 pose를 쓰므로 그대로 드러난다 — 두 검증은 서로 대체 불가.",
+    "world 프레임은 씬 mesh(data/scene_data/mp3d_n1/<scene>/matterport_mesh/*.obj)의 좌표계와 정확히 같다(표면거리 median 0.00003 m). 02/03이 mesh 좌표계에서 만든 경로와 04가 기록할 pose가 같은 프레임이라는 뜻 — 별도 정합(registration) 불필요."
+  ]
+}
