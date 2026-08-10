@@ -117,6 +117,7 @@ from esdf_utils import (  # noqa: E402
     world_to_cell,
 )
 from geometry_utils import action_to_c2w, decompose_camera_extrinsic, save_jpg  # noqa: E402
+import dataset_utils  # noqa: E402
 from viz_utils import (  # noqa: E402
     FLOOR_COLOR, GT_COLOR, OURS_COLOR, blink_widget_html, floorplan_canvas,
     reference_button_html, save_gallery,
@@ -160,6 +161,8 @@ RANDOM_MAX_RESAMPLE_TRIES = 30
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--scene', default=DEFAULT_SCENE)
+    parser.add_argument('--dataset', default='vln_n1', choices=['vln_n1', 'vln_pe'],
+                        help='GT 궤적 데이터셋. vln_pe면 esdf/paths/log에 _vlnpe 태그 사용')
     parser.add_argument('--mode', default='reproduce', choices=['reproduce', 'random'],
                         help='reproduce는 GT에서 h_b/pitch/start/goal을 전부 복사한다. random은 C2에서 구현.')
     parser.add_argument('--num_episodes', type=int, default=20)
@@ -191,24 +194,27 @@ def build_argparser() -> argparse.ArgumentParser:
                         help='스무딩 전 waypoint를 솎아낼 호길이 간격. A* 전점을 통과시키면(0) GT보다 '
                              '3배 많이 회전한다 — 0.8에서 GT 스무드니스와 일치. 0이면 솎지 않는다.')
     parser.add_argument('--smooth_step', type=float, default=0.05)
-    parser.add_argument('--data_root', default=DEFAULT_DATA_ROOT)
+    parser.add_argument('--data_root', default=None, help='생략 시 --dataset의 기본 경로')
     parser.add_argument('--esdf_dir', default=None, help='기본값은 <out_dir>/esdf')
     parser.add_argument('--out_dir', default=DEFAULT_OUT_DIR)
     parser.add_argument('--log_dir', default=DEFAULT_LOG_DIR)
     parser.add_argument('--seed', type=int, default=0, help='--mode random 전용 시드 (reproduce는 무시)')
+    parser.add_argument('--floor_tol_m', type=float, default=0.3,
+                        help='에피소드의 바닥 높이가 씬 floor_z와 이만큼 이상 다르면 그 에피소드는 '
+                             '자기 바닥 높이로 장애물 밴드를 만든다(다층 씬 대응). 실측: vln_n1과 '
+                             'vln_pe 씬1은 에피소드별 floor_z가 씬 값과 0.00~0.02 m 차라 이 경로를 '
+                             '타지 않아 기존 동작과 동일하고, vln_pe s8pcmisQ38h는 -3.25~+2.95 m로 '
+                             '층이 갈려 이게 없으면 다른 층 맵으로 계획하게 된다(실측으로 발견).')
     return parser
 
 
-def load_gt_episode(data_root: str, scene: str, episode: int):
-    """(카메라 궤적 (T,3) world, h_b, pitch_down)"""
-    path = Path(data_root) / scene / 'data' / 'chunk-000' / f'episode_{episode:06d}.parquet'
-    table = pq.read_table(path, columns=['observation.camera_extrinsic', 'action'])
-    extrinsic = np.asarray(table['observation.camera_extrinsic'].to_pylist()[0],
-                           dtype=np.float64).reshape(4, 4)
-    actions = np.stack([np.asarray(a, dtype=np.float64).reshape(4, 4) for a in table['action'].to_pylist()])
-    h_b, pitch = decompose_camera_extrinsic(extrinsic)
-    cam_xyz = np.stack([action_to_c2w(a, 'cam2world_gl')[:3, 3] for a in actions])
-    return cam_xyz, h_b, pitch
+def load_gt_episode(data_root: str, scene: str, episode: int, dataset: str = 'vln_n1'):
+    """(로봇 몸통 궤적 (T,3) world, h_b, pitch_down, floor_z) — dataset_utils.load_gt_episode의
+    body_xyz를 쓴다(vln_pe 카메라는 몸통보다 0.2m 앞이라 회전 시 가짜 경로가 생김 — 그쪽 주석 참고).
+    floor_z는 **카메라 높이 기준**으로 계산된 값을 그대로 받는다 — body_xyz의 z(토르소, 바닥 위
+    0.95 m)에서 h_b(카메라 높이 1.66 m)를 빼면 바닥이 0.7 m 아래로 잡힌다(실측으로 겪은 버그)."""
+    ep = dataset_utils.load_gt_episode(data_root, scene, episode, dataset)
+    return ep['body_xyz'], ep['h_b'], ep['pitch_deg'], ep['floor_z']
 
 
 # ---------------------------------------------------------------------------
@@ -619,7 +625,7 @@ def build_summary(args, stats, episodes) -> str:
 def load_esdf(args):
     """reproduce/random 공용 — `esdf/<scene>.npz`를 읽고 `args`에 파생 필드를 채운다."""
     esdf_dir = Path(args.esdf_dir or (Path(args.out_dir) / 'esdf'))
-    npz_path = esdf_dir / f'{args.scene}.npz'
+    npz_path = esdf_dir / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}.npz'
     if not npz_path.is_file():
         print(f'  [ERROR] {npz_path} 없음 — 02_build_freemap_esdf.py를 먼저 돌릴 것')
         return None
@@ -748,13 +754,13 @@ def main_random(args) -> int:
             'check_trajectory': e['planned']['check_trajectory'],
         } for e in episodes],
     }
-    json_path = paths_dir / f'{args.scene}_random.json'
+    json_path = paths_dir / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}_random.json'
     with open(json_path, 'w') as f:
         json.dump(out, f, indent=2, ensure_ascii=False)
     print(f'  paths -> {json_path}')
 
     # --- 리포트 ---
-    log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}_random'
+    log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}_random'
     navigable = truncate_navigable(episodes[0]['planned']['esdf'], args.r_b) & compute_scan_coverage_mask(occupancy)
     states = render_states_random(navigable, origin, args.cell_m, episodes, log_dir)
     body = ('<h3>무작위 생성 경로 (C2, 같은 grid)</h3>'
@@ -775,7 +781,9 @@ def main_random(args) -> int:
 
 def main() -> int:
     args = build_argparser().parse_args()
-    print(f'[{SCRIPT_NAME}] scene={args.scene} mode={args.mode} smooth={args.smooth} '
+    if args.data_root is None:
+        args.data_root = dataset_utils.default_data_root(args.dataset)
+    print(f'[{SCRIPT_NAME}] scene={args.scene} dataset={args.dataset} mode={args.mode} smooth={args.smooth} '
           f'refine={args.refine_mode}/{args.refine_radius} astar_cell={args.astar_cell_m}')
 
     if args.mode == 'random':
@@ -789,9 +797,21 @@ def main() -> int:
     n_avail = len(sorted((Path(args.data_root) / args.scene / 'data' / 'chunk-000').glob('*.parquet')))
     episodes, failures = [], {}
     for ep in range(min(args.num_episodes, n_avail)):
-        gt_xyz, h_b, pitch = load_gt_episode(args.data_root, args.scene, ep)
+        gt_xyz, h_b, pitch, ep_floor = load_gt_episode(args.data_root, args.scene, ep, args.dataset)
+        if len(gt_xyz) < 5:
+            # vln_pe s8pcmisQ38h에 2프레임짜리 퇴화 에피소드가 실재한다 — start~goal이 붙어
+            # 있어 재현 비교가 무의미하므로 거른다(vln_n1은 최소 36프레임이라 걸릴 일 없음).
+            failures[ep] = f'degenerate ({len(gt_xyz)} frames)'
+            print(f'    ep {ep:>3}: skip — degenerate ({len(gt_xyz)} frames)')
+            continue
         gt_xy = gt_xyz[:, :2]
-        planned = plan_episode(occupancy, origin, floor_z, h_b, gt_xy[0], gt_xy[-1], args)
+        # 다층 씬 대응 — 이 에피소드가 씬 대표 바닥과 다른 층에 있으면 자기 바닥을 쓴다.
+        if abs(ep_floor - floor_z) > args.floor_tol_m:
+            print(f'    ep {ep:>3}: 다른 층 감지 — floor_z {floor_z:+.2f} -> {ep_floor:+.2f} m 사용')
+            ep_floor_z = ep_floor
+        else:
+            ep_floor_z = floor_z
+        planned = plan_episode(occupancy, origin, ep_floor_z, h_b, gt_xy[0], gt_xy[-1], args)
         if planned['status'] != 'ok':
             failures[ep] = planned['status']
             print(f'    ep {ep:>3}: {planned["status"]}  (h_b={h_b:.3f})')
@@ -915,13 +935,13 @@ def main() -> int:
             'gt_compare': e['compare'],
         } for e in episodes],
     }
-    json_path = paths_dir / f'{args.scene}.json'
+    json_path = paths_dir / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}.json'
     with open(json_path, 'w') as f:
         json.dump(out, f, indent=2, ensure_ascii=False)
     print(f'  paths -> {json_path}')
 
     # --- 리포트 ---
-    log_dir = Path(args.log_dir) / SCRIPT_NAME / args.scene
+    log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}'
     navigable = truncate_navigable(episodes[0]['planned']['esdf'], args.r_b) & compute_scan_coverage_mask(occupancy)
     states = render_states(navigable, origin, args.cell_m, episodes, log_dir)
     worst = render_worst_episodes(navigable, origin, args.cell_m, episodes, log_dir)

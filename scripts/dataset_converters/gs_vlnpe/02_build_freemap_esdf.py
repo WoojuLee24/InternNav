@@ -88,6 +88,7 @@ from geometry_utils import (  # noqa: E402
     save_jpg,
 )
 from viz_utils import blink_widget_html, reference_button_html, save_gallery  # noqa: E402
+import dataset_utils  # noqa: E402
 
 DEFAULT_DATA_ROOT = 'data/InternData-N1-v0.5-mini/vln_n1/traj_data/matterport3d_d435i'
 DEFAULT_MESH_ROOT = 'data/scene_data/mp3d_n1'
@@ -103,9 +104,12 @@ FLOORPLAN_MIN_PX = 700
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--scene', default=DEFAULT_SCENE)
+    parser.add_argument('--dataset', default='vln_n1', choices=['vln_n1', 'vln_pe'],
+                        help='GT 궤적을 읽을 데이터셋. vln_pe면 출력(npz/json/log)에 _vlnpe 태그가 붙는다')
     parser.add_argument('--geometry', default='obj', choices=['obj', 'usd', 'both'],
                         help='occupancy를 만들 mesh. Stage 1은 obj(논문과 동일), Stage 2(Isaac)는 usd.')
-    parser.add_argument('--data_root', default=DEFAULT_DATA_ROOT)
+    parser.add_argument('--data_root', default=None,
+                        help='traj_data 루트. 생략 시 --dataset의 기본 경로')
     parser.add_argument('--mesh_root', default=DEFAULT_MESH_ROOT)
     parser.add_argument('--cell_m', type=float, default=VOXEL_SIZE_M)
     parser.add_argument('--h_nav', type=float, default=H_NAV_M,
@@ -138,20 +142,15 @@ def build_argparser() -> argparse.ArgumentParser:
 # GT 읽기
 # ---------------------------------------------------------------------------
 
-def load_gt_episode(data_root: str, scene: str, episode: int):
-    """(카메라 궤적 (T,3) world, h_b, pitch_down, floor_z)"""
-    path = Path(data_root) / scene / 'data' / 'chunk-000' / f'episode_{episode:06d}.parquet'
-    table = pq.read_table(path, columns=['observation.camera_extrinsic', 'action'])
-    extrinsic = np.asarray(table['observation.camera_extrinsic'].to_pylist()[0],
-                           dtype=np.float64).reshape(4, 4)
-    actions = np.stack([np.asarray(a, dtype=np.float64).reshape(4, 4) for a in table['action'].to_pylist()]) # camera pose w.r.t world coordinate
-    h_b, pitch = decompose_camera_extrinsic(extrinsic)
-    cam_xyz = np.stack([action_to_c2w(a, 'cam2world_gl')[:3, 3] for a in actions]) # camera xyz w.r.t world coordinate
-    return cam_xyz, h_b, pitch, float(np.median(cam_xyz[:, 2]) - h_b)
+def load_gt_episode(data_root: str, scene: str, episode: int, dataset: str = 'vln_n1'):
+    """(로봇 몸통 궤적 (T,3) world, h_b, pitch_down, floor_z) — dataset_utils.load_gt_episode의
+    body_xyz를 쓴다(vln_pe 카메라는 몸통보다 0.2m 앞이라 회전 시 가짜 경로가 생김 — 그쪽 주석 참고)."""
+    ep = dataset_utils.load_gt_episode(data_root, scene, episode, dataset)
+    return ep['body_xyz'], ep['h_b'], ep['pitch_deg'], ep['floor_z']
 
 
 def count_episodes(data_root: str, scene: str) -> int:
-    return len(sorted((Path(data_root) / scene / 'data' / 'chunk-000').glob('episode_*.parquet')))
+    return dataset_utils.count_episodes(data_root, scene)
 
 
 # ---------------------------------------------------------------------------
@@ -166,33 +165,50 @@ def check_gt_clearance(occupancy, origin, args, n_available: int) -> dict:
     episodes = list(range(min(args.num_check_episodes, n_available)))
     per_episode, medians, mins = {}, [], []
     for ep in episodes:
-        cam_xyz, h_b, _, floor_z = load_gt_episode(args.data_root, args.scene, ep)
+        cam_xyz, h_b, _, floor_z = load_gt_episode(args.data_root, args.scene, ep, args.dataset)
         h_nav = args.h_nav_ratio * h_b if args.h_nav_ratio else args.h_nav
         esdf = compute_esdf_2d(derive_obstacle_2d(occupancy, origin, floor_z, h_b,
                                                   args.cell_m, h_nav), args.cell_m)
         clearance = sample_esdf_at(esdf, cam_xyz[:, :2], origin, args.cell_m)
         med, mn = float(np.median(clearance)), float(clearance.min())
-        per_episode[ep] = {'h_b': h_b, 'floor_z': floor_z, 'median_m': med, 'min_m': mn}
+        zero_frac = float((clearance < 0.05).mean())
+        per_episode[ep] = {'h_b': h_b, 'floor_z': floor_z, 'median_m': med, 'min_m': mn,
+                           'zero_frac': zero_frac}
         medians.append(med)
         mins.append(mn)
-        print(f'    episode {ep:>3}: h_b={h_b:.3f}  clearance median={med:.3f} min={mn:.3f} m')
+        print(f'    episode {ep:>3}: h_b={h_b:.3f}  clearance median={med:.3f} min={mn:.3f} m '
+              f'zero_frac={zero_frac*100:.1f}%')
 
     overall_median = float(np.median(medians)) if medians else float('nan')
     worst_min = float(min(mins)) if mins else float('nan')
+    worst_zero_frac = float(max(v['zero_frac'] for v in per_episode.values())) if per_episode else float('nan')
     lo, hi = GT_CLEARANCE_MEDIAN_RANGE_M
     t_lo, t_hi = GT_CLEARANCE_TYPICAL_RANGE_M
     if medians and not (t_lo <= overall_median <= t_hi):
         print(f'    [WARN] clearance median {overall_median:.3f} m가 6개 씬 실측 범위 '
               f'{GT_CLEARANCE_TYPICAL_RANGE_M} 밖이다 (판정 기준은 {GT_CLEARANCE_MEDIAN_RANGE_M})')
+    if args.dataset == 'vln_pe':
+        # vln_n1용 범위 게이트는 vln_pe에 이전 불가 — 실측으로 확인한 두 가지 정당한 차이:
+        # ① H1은 h_b~1.66m라 장애물 밴드가 넓어 median 자체가 낮아진다(0.14~0.45 vs vln_n1
+        #    0.46~0.68), ② 물리 보행이라 13cm 문턱을 밟고 넘고, 꼭대기층 경사 천장/문틀 아래
+        #    (바닥+1.66m 안)를 지나며 zero clearance가 정상적으로 발생한다(씬2 다락 에피소드
+        #    실측 zero_frac 5~19%). 이 게이트의 본질 목적(좌표계/맵 파손 검출 — 파손이면 궤적
+        #    대부분이 벽 안=zero_frac 수십%%)에 맞는 약한 기준으로 판정한다.
+        passed = bool(medians) and overall_median > 0.10 and worst_zero_frac < 0.30
+    else:
+        passed = bool(medians) and lo < overall_median < hi and worst_min > GT_CLEARANCE_MIN_M
     return {
         'episodes_tested': episodes,
         'median_m': overall_median,
         'worst_min_m': worst_min,
+        'worst_zero_frac': worst_zero_frac,
         'median_range_m': list(GT_CLEARANCE_MEDIAN_RANGE_M),
         'typical_range_m': list(GT_CLEARANCE_TYPICAL_RANGE_M),
         'min_floor_m': GT_CLEARANCE_MIN_M,
+        'criterion': ('vln_pe: median>0.10 & max zero_frac<30%' if args.dataset == 'vln_pe'
+                      else f'vln_n1: median in {list(GT_CLEARANCE_MEDIAN_RANGE_M)} & min>{GT_CLEARANCE_MIN_M}'),
         'per_episode': per_episode,
-        'passed': bool(medians) and lo < overall_median < hi and worst_min > GT_CLEARANCE_MIN_M,
+        'passed': passed,
     }
 
 
@@ -296,6 +312,19 @@ def build_summary(scene, checks, meta) -> str:
     rows = ''.join(
         f'<tr><td>ep {ep}</td><td>{v["h_b"]:.3f}</td><td>{v["median_m"]:.3f}</td>'
         f'<td>{v["min_m"]:.3f}</td></tr>' for ep, v in c['per_episode'].items())
+    if 'skipped' in p:
+        ply_row = (f'<tr><td>③ .ply obstacle 겹침 <i>(정황 확인, 판정 아님)</i></td>'
+                   f'<td><span class="pill warn">생략</span></td><td>{p["skipped"]}</td></tr>')
+        ply_note = ''
+    else:
+        ply_row = (f'<tr><td>③ .ply obstacle 겹침 <i>(정황 확인, 판정 아님)</i></td>'
+                   f'<td><span class="pill warn">참고</span></td>'
+                   f'<td>{p["ply_obstacle_points"]:,}점 중 격자 안 {p["inside_grid_frac"]*100:.1f}%, '
+                   f'우리 obstacle과 겹침 {p["in_our_obstacle_frac"]*100:.1f}%</td></tr>')
+        ply_note = (f'<p class="note">③은 <b>기하 검증이 아니다</b> — .ply 점들은 mesh 표면 위 0.0000 m라 '
+                    f'같은 mesh에서 만든 맵과 비교하면 순환논증이다. 게다가 .ply obstacle은 바닥 슬라이스'
+                    f'(z {p["ply_z_range"][0]:.2f}~{p["ply_z_range"][1]:.2f} m)이고 우리 밴드는 그 위쪽이라 '
+                    f'겹침률이 낮은 게 정상이다.</p>')
     return f'''
 <div class="stat-row">
   <div class="stat"><b>전체</b>{pill(checks["passed"])}</div>
@@ -316,13 +345,9 @@ def build_summary(scene, checks, meta) -> str:
   <tr><td>② 맵 sanity</td><td>{pill(s["passed"])}</td>
       <td>장애물 {s["obstacle_frac"]*100:.1f}% · navigable {s["navigable_frac"]*100:.1f}% ·
           max ESDF {s["max_esdf_m"]:.2f} m</td></tr>
-  <tr><td>③ .ply obstacle 겹침 <i>(정황 확인, 판정 아님)</i></td><td><span class="pill warn">참고</span></td>
-      <td>{p["ply_obstacle_points"]:,}점 중 격자 안 {p["inside_grid_frac"]*100:.1f}%,
-          우리 obstacle과 겹침 {p["in_our_obstacle_frac"]*100:.1f}%</td></tr>
+  {ply_row}
 </table>
-<p class="note">③은 <b>기하 검증이 아니다</b> — .ply 점들은 mesh 표면 위 0.0000 m라 같은 mesh에서 만든
-맵과 비교하면 순환논증이다. 게다가 .ply obstacle은 바닥 슬라이스(z {p["ply_z_range"][0]:.2f}~{p["ply_z_range"][1]:.2f} m)이고
-우리 밴드는 그 위쪽이라 겹침률이 낮은 게 정상이다.</p>
+{ply_note}
 <table class="table"><tr><th>에피소드</th><th>h_b</th><th>clearance median</th><th>min</th></tr>{rows}</table>
 '''
 
@@ -333,7 +358,9 @@ def build_summary(scene, checks, meta) -> str:
 
 def main() -> int:
     args = build_argparser().parse_args()
-    print(f'[{SCRIPT_NAME}] scene={args.scene} geometry={args.geometry}')
+    if args.data_root is None:
+        args.data_root = dataset_utils.default_data_root(args.dataset)
+    print(f'[{SCRIPT_NAME}] scene={args.scene} dataset={args.dataset} geometry={args.geometry}')
 
     meta_path = Path(args.scene_meta_dir or args.out_dir) / 'scene_meta' / f'{args.scene}.json'
     if not meta_path.is_file():
@@ -369,10 +396,10 @@ def main() -> int:
               f'(XOR {int((occupancy_alt ^ occupancy).sum())} voxels)')
 
     # --- 참조 2D (시각화·검증용) ---
-    cam_xyz, ref_h_b, _, _ = load_gt_episode(args.data_root, args.scene, args.ref_episode)
+    cam_xyz, ref_h_b, _, _ = load_gt_episode(args.data_root, args.scene, args.ref_episode, args.dataset)
 
     # h_nav가 로봇 키보다 크면 밴드가 비어 맵이 무의미해진다 — assert 트레이스백 대신 명확히 거른다.
-    h_b_list = [load_gt_episode(args.data_root, args.scene, ep)[1]
+    h_b_list = [load_gt_episode(args.data_root, args.scene, ep, args.dataset)[1]
                 for ep in range(min(args.num_check_episodes, n_eps))]
     _min_hb = min(h_b_list + [ref_h_b])
     _eff_h_nav = args.h_nav_ratio * _min_hb if args.h_nav_ratio else args.h_nav
@@ -390,7 +417,12 @@ def main() -> int:
     gt_clearance = check_gt_clearance(occupancy, origin, args, n_eps)
     sanity = check_map_sanity(occupancy, origin, esdf_ref, obstacle_ref,
                               np.asarray(mesh.bounds), args)
-    ply_overlap = check_ply_overlap(Path(args.data_root) / args.scene, obstacle_ref, origin, floor_z, args)
+    if args.dataset == 'vln_pe':
+        # vln_pe에는 meta/pointcloud.ply가 없다(실측 확인 — meta엔 info.json/episodes*.jsonl뿐).
+        # 이 검사는 원래도 판정에 안 들어가는 정황 확인이라 건너뛴다.
+        ply_overlap = {'skipped': 'vln_pe has no meta/pointcloud.ply'}
+    else:
+        ply_overlap = check_ply_overlap(Path(args.data_root) / args.scene, obstacle_ref, origin, floor_z, args)
     passed = bool(gt_clearance['passed'] and sanity['passed'])
     checks = {'gt_clearance': gt_clearance, 'sanity': sanity, 'ply_overlap': ply_overlap, 'passed': passed}
 
@@ -404,7 +436,7 @@ def main() -> int:
               'ref_h_b': np.float32(ref_h_b), 'nav_mask_ref': nav_ref, 'esdf_ref': esdf_ref}
     if occupancy_alt is not None:
         arrays['occupancy_alt'] = occupancy_alt
-    npz_path = esdf_dir / f'{args.scene}.npz'
+    npz_path = esdf_dir / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}.npz'
     np.savez_compressed(npz_path, **arrays)
 
     meta = {
@@ -419,13 +451,13 @@ def main() -> int:
         'note': '2D ESDF는 h_b에 의존하므로 저장하지 않는다 — 03이 occupancy에서 매번 도출한다. '
                 'nav_mask_ref/esdf_ref는 ref_episode의 h_b 기준 참조본(시각화·검증용).',
     }
-    json_path = esdf_dir / f'{args.scene}.json'
+    json_path = esdf_dir / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}.json'
     with open(json_path, 'w') as f:
         json.dump(meta, f, indent=2, ensure_ascii=False)
     print(f'  esdf -> {npz_path} ({npz_path.stat().st_size / 1e6:.1f} MB) + {json_path.name}')
 
     # --- 리포트 ---
-    log_dir = Path(args.log_dir) / SCRIPT_NAME / args.scene
+    log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}'
     states = render_states(occupancy, origin, obstacle_ref, esdf_ref, cam_xyz, args, log_dir)
     body = (f'<h3>맵 단계별 (전부 같은 grid, cell={args.cell_m} m)</h3>'
             '<p class="note">‹ ›로 넘기며 본다. ① mesh 실루엣은 참고용 높이대이고, ②가 실제로 쓰는 '

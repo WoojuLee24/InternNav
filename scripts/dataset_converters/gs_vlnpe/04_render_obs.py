@@ -66,6 +66,8 @@ from geometry_utils import (  # noqa: E402
     synthesize_action_poses,
 )
 from viz_utils import blink_widget_html, save_gallery  # noqa: E402
+import dataset_utils  # noqa: E402
+from skimage.metrics import structural_similarity as ssim_metric  # noqa: E402
 
 DEFAULT_DATA_ROOT = 'data/InternData-N1-v0.5-mini/vln_n1/traj_data/matterport3d_d435i'
 DEFAULT_MESH_ROOT = 'data/scene_data/mp3d_n1'
@@ -182,6 +184,8 @@ def edge_correlation(gray_a: np.ndarray, gray_b: np.ndarray) -> float:
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--scene', default=DEFAULT_SCENE)
+    parser.add_argument('--dataset', default='vln_n1', choices=['vln_n1', 'vln_pe'],
+                        help='GT 데이터셋. vln_pe면 입출력에 _vlnpe 태그, 렌더 해상도 256x256')
     parser.add_argument('--mode', default='gt_replay', choices=['gt_replay', 'reproduce', 'random'],
                         help='gt_replay(2-A, 기본)는 실제 action 시퀀스로 렌더 파이프라인을 검증한다. '
                              'reproduce/random(2-B)은 03이 만든 경로를 따라 새 에피소드를 만든다.')
@@ -189,7 +193,7 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument('--n_frames', type=int, default=6, help='2-A: 에피소드당 균등 표본 프레임 수')
     parser.add_argument('--num_episodes', type=int, default=3,
                         help='2-B: paths/<scene>[_random].json에서 렌더링할 에피소드 수(앞에서부터)')
-    parser.add_argument('--data_root', default=DEFAULT_DATA_ROOT)
+    parser.add_argument('--data_root', default=None, help='생략 시 --dataset의 기본 경로')
     parser.add_argument('--mesh_root', default=DEFAULT_MESH_ROOT)
     parser.add_argument('--out_dir', default=DEFAULT_OUT_DIR)
     parser.add_argument('--log_dir', default=DEFAULT_LOG_DIR)
@@ -204,39 +208,39 @@ def validate_gt_replay(args) -> dict:
     k, renderer = None, None
     model = load_scene_model(args.mesh_root, args.scene)
 
-    frames_out, all_depth_err, all_edge_corr = [], [], []
+    frames_out, all_depth_err, all_edge_corr, all_ssim = [], [], [], []
     for ep in episodes:
-        table = pq.read_table(scene_dir / 'data' / 'chunk-000' / f'episode_{ep:06d}.parquet')
-        actions = table['action'].to_pylist()
+        gt = dataset_utils.load_gt_episode(args.data_root, args.scene, ep, args.dataset)
         if k is None:
-            k = np.asarray(table['observation.camera_intrinsic'].to_pylist()[0], dtype=np.float64).reshape(3, 3)
+            k = gt['k']
             renderer = build_renderer(RENDER_W, RENDER_H, k)
-        n = len(actions)
+        n = len(gt['poses_c2w'])
         frame_idx = np.unique(np.linspace(0, n - 1, args.n_frames).astype(int)).tolist()
-        poses_c2w = [action_to_c2w(np.asarray(actions[f], dtype=np.float64).reshape(4, 4), 'cam2world_gl')
-                    for f in frame_idx]
+        poses_c2w = [gt['poses_c2w'][f] for f in frame_idx]
         rgb_render, depth_render = render_along(renderer, model, poses_c2w)
 
         depth_dir = scene_dir / 'videos' / 'chunk-000' / 'observation.images.depth'
         rgb_dir = scene_dir / 'videos' / 'chunk-000' / 'observation.images.rgb'
         for i, frame in enumerate(frame_idx):
-            real_depth_m, real_valid = load_depth_frame_m(depth_dir, ep, frame, MAX_DEPTH_M)
-            real_rgb = load_rgb_frame(rgb_dir, ep, frame)
+            real_depth_m, real_valid = dataset_utils.load_depth_frame_m(depth_dir, ep, frame, MAX_DEPTH_M, args.dataset)
+            real_rgb = dataset_utils.load_rgb_frame(rgb_dir, ep, frame, args.dataset)
             render_valid = np.isfinite(depth_render[i])
             both = real_valid & render_valid
             depth_err = np.abs(depth_render[i][both] - real_depth_m[both]) if both.any() else np.array([np.nan])
             corr = edge_correlation(cv2.cvtColor(rgb_render[i], cv2.COLOR_RGB2GRAY),
                                     cv2.cvtColor(real_rgb, cv2.COLOR_RGB2GRAY))
+            ssim_val = float(ssim_metric(real_rgb, rgb_render[i], channel_axis=2, data_range=255))
             all_depth_err.append(depth_err)
             all_edge_corr.append(corr)
+            all_ssim.append(ssim_val)
             frames_out.append({
                 'episode': ep, 'frame': int(frame), 'coverage_frac': float(both.mean()),
                 'depth_median_m': float(np.median(depth_err)), 'depth_p95_m': float(np.percentile(depth_err, 95)),
-                'edge_corr': corr, 'rgb_render': rgb_render[i], 'depth_render': depth_render[i],
+                'edge_corr': corr, 'ssim': ssim_val, 'rgb_render': rgb_render[i], 'depth_render': depth_render[i],
                 'rgb_real': real_rgb, 'depth_real_m': real_depth_m, 'real_valid': real_valid,
             })
             print(f'    ep {ep:>3} frame {frame:>4}: depth median={frames_out[-1]["depth_median_m"]:.4f}m '
-                  f'p95={frames_out[-1]["depth_p95_m"]:.4f}m  edge_corr={corr:.3f}  '
+                  f'p95={frames_out[-1]["depth_p95_m"]:.4f}m  edge_corr={corr:.3f}  ssim={ssim_val:.3f}  '
                   f'coverage={frames_out[-1]["coverage_frac"]:.3f}')
 
     all_depth_err = np.concatenate(all_depth_err)
@@ -246,10 +250,25 @@ def validate_gt_replay(args) -> dict:
         'depth_p95_m': float(np.percentile(all_depth_err, 95)),
         'edge_corr_median': float(np.median(all_edge_corr)),
         'edge_corr_min': float(np.min(all_edge_corr)),
+        'ssim_median': float(np.median(all_ssim)),
+        'ssim_min': float(np.min(all_ssim)),
     }
-    stats['depth_ok'] = bool(stats['depth_median_m'] <= GT_REPLAY_DEPTH_MEDIAN_TOL_M
-                             and stats['depth_p95_m'] <= GT_REPLAY_DEPTH_P95_TOL_M)
-    stats['rgb_ok'] = bool(stats['edge_corr_median'] >= GT_REPLAY_RGB_EDGE_CORR_MIN)
+    if args.dataset == 'vln_pe':
+        # vln_pe GT는 보행 중 물리 시뮬 캡처라 pose 기록과 depth 렌더 시점이 어긋난다(00의
+        # mesh-anchor 실측: 정지 frame0은 6mm지만 보행 프레임은 2~9cm, 오프셋 보정 불가).
+        # 렌더러 자체 오차가 아니라 GT의 pose-depth 정합 한계이므로 그만큼 느슨하게 잡는다.
+        # p95는 회전 중 물체 경계 시프트 아웃라이어가 지배해(실측 aggregate 1.6m) 회귀 감지력이
+        # 없다 — 참고용 상한만 두고, 회귀에 민감한 지표는 median이다(컨벤션이 깨지면 정지
+        # 프레임 포함 전 구간이 0.3m+로 뜀 — 00 대조군 실측).
+        med_tol, p95_tol = 0.10, 3.0
+    else:
+        med_tol, p95_tol = GT_REPLAY_DEPTH_MEDIAN_TOL_M, GT_REPLAY_DEPTH_P95_TOL_M
+    stats['depth_median_tol_m'], stats['depth_p95_tol_m'] = med_tol, p95_tol
+    stats['depth_ok'] = bool(stats['depth_median_m'] <= med_tol
+                             and stats['depth_p95_m'] <= p95_tol)
+    # RGB 판정은 SSIM(04_render_obs_isaac.py와 동일 기준 — edge_corr는 엣지 픽셀 정합에
+    # 과도하게 민감해 참고용으로만 표시. 근거는 isaac 버전 GT_REPLAY_RGB_SSIM_MIN 주석).
+    stats['rgb_ok'] = bool(stats['ssim_median'] >= 0.5)
     stats['passed'] = bool(stats['depth_ok'] and stats['rgb_ok'])
     return {'stats': stats, 'frames': frames_out}
 
@@ -264,11 +283,13 @@ def render_gt_replay_report(log_dir: Path, scene: str, result: dict) -> Path:
 <div class="stat-row">
   <div class="stat"><b>전체</b>{pill(stats["passed"])}</div>
   <div class="stat"><b>depth median</b><span class="pill {"good" if stats["depth_ok"] else "bad"}">
-      {stats["depth_median_m"]:.4f} m (기준 {GT_REPLAY_DEPTH_MEDIAN_TOL_M} m)</span></div>
+      {stats["depth_median_m"]:.4f} m (기준 {stats["depth_median_tol_m"]} m)</span></div>
   <div class="stat"><b>depth p95</b><span class="pill {"good" if stats["depth_ok"] else "bad"}">
-      {stats["depth_p95_m"]:.4f} m (기준 {GT_REPLAY_DEPTH_P95_TOL_M} m)</span></div>
-  <div class="stat"><b>rgb 엣지 상관</b><span class="pill {"good" if stats["rgb_ok"] else "bad"}">
-      median {stats["edge_corr_median"]:.3f} / min {stats["edge_corr_min"]:.3f} (기준 {GT_REPLAY_RGB_EDGE_CORR_MIN})
+      {stats["depth_p95_m"]:.4f} m (기준 {stats["depth_p95_tol_m"]} m)</span></div>
+  <div class="stat"><b>rgb SSIM</b><span class="pill {"good" if stats["rgb_ok"] else "bad"}">
+      median {stats["ssim_median"]:.3f} / min {stats["ssim_min"]:.3f} (기준 0.5)</span></div>
+  <div class="stat"><b>rgb 엣지 상관(참고용)</b><span class="pill">
+      median {stats["edge_corr_median"]:.3f} / min {stats["edge_corr_min"]:.3f}
       </span></div>
 </div>
 <p>2-A — GT parquet의 실제 <code>action</code> 시퀀스를 그대로 mesh에 렌더링해(재계획 아님, 원본
@@ -357,22 +378,21 @@ def generate_episode(renderer, model, k: np.ndarray, ep_data: dict, ep_dir: Path
 def run_generate(args) -> dict:
     """2-B — `paths/<scene>[_random].json`의 경로를 따라 새 에피소드 rgb/depth/extrinsic을 만든다."""
     paths_dir = Path(args.out_dir) / 'paths'
-    json_path = paths_dir / (f'{args.scene}.json' if args.mode == 'reproduce' else f'{args.scene}_random.json')
+    tag = dataset_utils.dataset_tag(args.dataset)
+    json_path = paths_dir / (f'{args.scene}{tag}.json' if args.mode == 'reproduce' else f'{args.scene}{tag}_random.json')
     if not json_path.is_file():
         print(f'  [ERROR] {json_path} 없음 — 03_sample_gt_paths.py --mode {args.mode}를 먼저 돌릴 것')
         return {'error': f'{json_path} not found'}
     paths = json.load(open(json_path))
     episodes_data = paths['episodes'][:args.num_episodes]
 
-    ep0_table = pq.read_table(sorted((Path(args.data_root) / args.scene / 'data' / 'chunk-000').glob('*.parquet'))[0],
-                              columns=['observation.camera_intrinsic'])
-    k = np.asarray(ep0_table['observation.camera_intrinsic'].to_pylist()[0], dtype=np.float64).reshape(3, 3)
+    k = dataset_utils.load_gt_episode(args.data_root, args.scene, 0, args.dataset)['k']
 
     model = load_scene_model(args.mesh_root, args.scene)
     renderer = build_renderer(RENDER_W, RENDER_H, k)
     mesh = load_scene_mesh(args.mesh_root, args.scene)
 
-    obs_dir = Path(args.out_dir) / 'obs' / f'{args.scene}_{args.mode}'
+    obs_dir = Path(args.out_dir) / 'obs' / f'{args.scene}{tag}_{args.mode}'
     results = []
     for i, ep_data in enumerate(episodes_data):
         ep_dir = obs_dir / f'episode_{i:06d}'
@@ -438,24 +458,30 @@ intrinsic으로 다시 unproject해 씬 mesh 표면까지 재는 것)는 저장 
 
 def main() -> int:
     args = build_argparser().parse_args()
+    if args.data_root is None:
+        args.data_root = dataset_utils.default_data_root(args.dataset)
+    # 렌더 해상도는 데이터셋의 GT 해상도를 따른다(vln_n1 480x270, vln_pe 256x256) — vln_n1은
+    # 기존 값 그대로라 기본 경로 동작 불변.
+    global RENDER_W, RENDER_H
+    RENDER_W, RENDER_H = dataset_utils.render_wh(args.dataset)
     print(f'[{SCRIPT_NAME}] scene={args.scene} mode={args.mode}')
 
     if args.mode == 'gt_replay':
         result = validate_gt_replay(args)
         stats = result['stats']
-        log_dir = Path(args.log_dir) / SCRIPT_NAME / args.scene
+        log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}'
         report = render_gt_replay_report(log_dir, args.scene, result)
         print(f'  report html -> {report}')
         print(f'  => {"PASS" if stats["passed"] else "FAIL"} '
               f'(depth median {stats["depth_median_m"]:.4f} m / p95 {stats["depth_p95_m"]:.4f} m, '
-              f'edge_corr median {stats["edge_corr_median"]:.3f})')
+              f'ssim median {stats["ssim_median"]:.3f}, edge_corr median {stats["edge_corr_median"]:.3f} 참고)')
         return 0 if stats['passed'] else 1
 
     result = run_generate(args)
     if 'error' in result:
         return 2
     stats = result['stats']
-    log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}_{args.mode}'
+    log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}_{args.mode}'
     report = render_generate_report(log_dir, args.scene, args.mode, result)
     print(f'  obs -> {result["obs_dir"]}')
     print(f'  report html -> {report}')
