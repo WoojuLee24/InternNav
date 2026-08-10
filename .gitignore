@@ -1,5 +1,7 @@
 # queue
 queue.txt
+# dataset_converters logs
+scrips/dataset_converters/gs_vlnpe/logs/
 # personal secrets (rclone/github/huggingface keys) — see keys.env.example
 keys.env
 # kube credentials

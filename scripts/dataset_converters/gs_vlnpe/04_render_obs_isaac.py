@@ -87,6 +87,7 @@ from geometry_utils import (  # noqa: E402
     synthesize_action_poses,
 )
 from viz_utils import blink_widget_html, save_gallery  # noqa: E402
+import dataset_utils  # noqa: E402
 
 DEFAULT_DATA_ROOT = 'data/InternData-N1-v0.5-mini/vln_n1/traj_data/matterport3d_d435i'
 # Open3D 버전은 mp3d_n1(원본 raw obj)을 쓰지만, Isaac 버전은 Isaac-ready USD가 필요해 mp3d_pe를
@@ -122,6 +123,10 @@ GT_REPLAY_DEPTH_P95_TOL_M = 0.05
 # 참고용으로만 계속 표시한다. 임계값 0.5는 SSIM 문헌에서 흔히 쓰는 "중간 이상 일치" 기준.
 GT_REPLAY_RGB_EDGE_CORR_MIN = 0.5
 GT_REPLAY_RGB_SSIM_MIN = 0.5
+# Isaac RTX 톤매퍼(`/rtx/post/tonemap/op = 6`, Iray)의 노출 기본값. 이 값 그대로면 설정을 아예
+# 건드리지 않아 기존 경로가 100% 동일하게 돈다. 같은 톤매퍼의 crushBlacks/burnHighlights는
+# RTX Real-Time 경로에서 무반응임을 실측 확인했다(04d_tonemap_sweep.py 참고).
+DEFAULT_FILM_ISO = 100.0
 
 
 def ensure_texture_symlink(mesh_root, scene: str) -> None:
@@ -149,8 +154,11 @@ def load_scene_model(mesh_root, scene: str) -> Path:
     return find_scene_usd(mesh_root, scene)
 
 
-def build_renderer(width: int, height: int, k: np.ndarray, usd_path: Path) -> tuple:
-    """`(width,height,K)` + 씬 USD -> `(camera, sim)`. `render_along`이 매 프레임 재사용.
+def build_renderer(width: int, height: int, k: np.ndarray, usd_path: Path,
+                   light: str = 'dome', tl: dict = None, rtx_ambient: float = 0.0,
+                   film_iso: float = DEFAULT_FILM_ISO) -> tuple:
+    """`(width,height,K)` + 씬 USD -> `(camera, sim, lights)`. `render_along`이 매 프레임 재사용.
+    `lights`는 three_light일 때만 translate op dict(그 외 None — 위치 갱신 불필요).
 
     **순서가 중요하다** — 실측으로 확인된 성공 순서(raw 스모크 테스트)는 "mesh 참조 -> 조명 ->
     카메라 생성 -> `sim.reset()`"이다. 이 순서를 바꿔서 카메라를 먼저 만들고 나중에 mesh를
@@ -164,7 +172,7 @@ def build_renderer(width: int, height: int, k: np.ndarray, usd_path: Path) -> tu
     cfg = sim_utils.UsdFileCfg(usd_path=str(usd_path),
                                collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=False))
     cfg.func('/World/Scene', cfg)
-    _add_lights(stage)
+    lights = _add_lights(stage, light, tl)
 
     camera_cfg = CameraCfg(
         prim_path='/World/RenderCamera',
@@ -177,13 +185,21 @@ def build_renderer(width: int, height: int, k: np.ndarray, usd_path: Path) -> tu
     camera = Camera(cfg=camera_cfg)
     sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=0.01))
     sim.reset()
+    # 전역 간접광 — **씬/카메라가 올라온 뒤에 걸어야 한다**. main()에서 미리 설정했더니 RTX
+    # 초기화가 기본값으로 덮어써서 전혀 반영되지 않았다(실측: SSIM 0.72로 무변화).
+    if rtx_ambient > 0:
+        carb.settings.get_settings().set_float('/rtx/sceneDb/ambientLightIntensity', float(rtx_ambient))
+    # 노출(ISO). ambient만으로는 GT 응답곡선의 기울기를 못 맞춘다는 실측(04d_tonemap_sweep) 뒤에
+    # 남은 유일한 실효 노브 — 같은 이유로 rtx_ambient와 함께 씬 로드 이후에 건다.
+    if film_iso != DEFAULT_FILM_ISO:
+        carb.settings.get_settings().set_float('/rtx/post/tonemap/filmIso', float(film_iso))
     camera.set_intrinsic_matrices(torch.tensor(np.asarray(k, dtype=np.float32), device=sim.device).unsqueeze(0))
     # 씬 참조 직후 애노테이터 파이프라인이 아직 안 돌아서 첫 프레임에 빈 텐서가 나오는 것을
     # 실측으로 확인했다(RuntimeError: shape invalid for input of size 0) — 워밍업 스텝으로 흡수한다.
     for _ in range(10):
         sim.step()
         camera.update(dt=sim.get_physics_dt())
-    return camera, sim
+    return camera, sim, lights
 
 
 # 카메라를 따라다니는 3-light(distant+up/down disk light) 레시피를 실측 확정(raise=0.2m,
@@ -198,19 +214,76 @@ def build_renderer(width: int, height: int, k: np.ndarray, usd_path: Path) -> tu
 DOME_LIGHT_INTENSITY = 2_000_000
 
 
-def _add_lights(stage) -> None:
-    """씬 전체에 균일한 조명 하나만 둔다(`04c_light_explorer.py`의 `dome_2M` config와 동일).
+# 3-light(three_light) 파라미터 — VLN-PE `vln_eval_task.py`의 `create_light` 원본 세기,
+# raise는 raise x scale 스윕으로 실측 확정했던 0.2m(경위는 260805 메모리 문서).
+THREE_LIGHT_DISTANT_INTENSITY = 1000
+THREE_LIGHT_DISK_INTENSITY = 5000
+THREE_LIGHT_RAISE_M = 0.2
 
-    카메라 위치를 따라다니는 3-light 레시피도 구현해봤지만(자세한 경위는
-    `.claude/memory/260805_gs_vlnpe_04_render_obs_isaac_result.md`), 사용자가 여러 조명
-    옵션을 GT/렌더/차이 이미지로 직접 비교한 뒤 이 단순한 DomeLight 하나가 가장 자연스럽다고
-    판단해 최종 채택했다.
+
+def _add_lights(stage, light: str = 'dome', tl: dict = None):
+    """조명 생성. 기본 dome은 기존 동작 그대로(DomeLight 2M 하나, 위치 갱신 불필요 -> None 반환).
+
+    `three_light`는 VLN-PE 실제 프로덕션 조명(distant + 카메라추적 up/down disk light,
+    `vln_eval_task.py`의 `create_light`) — **vln_pe GT rgb가 이 레시피로 렌더된 것**이라 vln_pe
+    톤 정합 실험용으로 유지한다(vln_n1에서는 육안 비교로 dome이 채택됐던 경위는
+    `.claude/memory/260805_gs_vlnpe_04_render_obs_isaac_result.md`). 반환값은 render_along이
+    매 프레임 위치 갱신에 쓰는 translate op dict(dome이면 None).
     """
-    if stage.GetPrimAtPath('/World/dome_light'):
-        stage.RemovePrim('/World/dome_light')
-    dome_light = UsdLux.DomeLight.Define(stage, '/World/dome_light')
-    dome_light.CreateIntensityAttr(DOME_LIGHT_INTENSITY)
-    dome_light.CreateColorAttr(Gf.Vec3f(1.0, 1.0, 1.0))
+    for path in ('/World/dome_light', '/World/distant_light', '/World/up_disk_light',
+                 '/World/down_disk_light'):
+        if stage.GetPrimAtPath(path):
+            stage.RemovePrim(path)
+    tl = tl or {}
+    raise_m = float(tl.get('raise_m', THREE_LIGHT_RAISE_M))
+    up_i = float(tl.get('up_intensity', THREE_LIGHT_DISK_INTENSITY))
+    down_i = float(tl.get('down_intensity', THREE_LIGHT_DISK_INTENSITY))
+    distant_i = float(tl.get('distant_intensity', THREE_LIGHT_DISTANT_INTENSITY))
+    dome_i = float(tl.get('dome_intensity', 500_000))
+
+    if light == 'ambient_only':
+        # 조명 prim을 만들지 않는다 — 밝기는 전적으로 --rtx_ambient(전역 간접광)가 담당.
+        return None
+    if light == 'dome':
+        dome_light = UsdLux.DomeLight.Define(stage, '/World/dome_light')
+        dome_light.CreateIntensityAttr(DOME_LIGHT_INTENSITY)
+        dome_light.CreateColorAttr(Gf.Vec3f(1.0, 1.0, 1.0))
+        return None
+    elif light in ('three_light', 'dome_three'):
+        if light == 'dome_three':
+            # 실측(천장 스윕): disk 세기는 4배를 올려도 천장 밝기가 거의 안 변한다(62.8->65.5,
+            # 위치 토폴로지가 지배). GT의 밝은 천장(top1/3=207)은 균일 ambient 성분으로 보이므로
+            # 약한 DomeLight를 병행해 채운다.
+            dome_light = UsdLux.DomeLight.Define(stage, '/World/dome_light')
+            dome_light.CreateIntensityAttr(dome_i)
+            dome_light.CreateColorAttr(Gf.Vec3f(1.0, 1.0, 1.0))
+        distant_light = UsdLux.DistantLight.Define(stage, '/World/distant_light')
+        distant_light.CreateIntensityAttr(distant_i)
+        distant_light.CreateColorAttr(Gf.Vec3f(1.0, 1.0, 1.0))
+
+        up_disk_light = UsdLux.DiskLight.Define(stage, '/World/up_disk_light')
+        up_disk_light.CreateIntensityAttr(up_i)
+        up_disk_light.CreateRadiusAttr(50.0)
+        up_disk_light.CreateColorAttr(Gf.Vec3f(1.0, 1.0, 1.0))
+        UsdGeom.Xformable(up_disk_light).AddRotateXYZOp().Set(Gf.Vec3f(180.0, 0.0, 0.0))
+        up_translate = UsdGeom.Xformable(up_disk_light).AddTranslateOp()
+
+        down_disk_light = UsdLux.DiskLight.Define(stage, '/World/down_disk_light')
+        down_disk_light.CreateIntensityAttr(down_i)
+        down_disk_light.CreateRadiusAttr(50.0)
+        down_disk_light.CreateColorAttr(Gf.Vec3f(1.0, 1.0, 1.0))
+        down_translate = UsdGeom.Xformable(down_disk_light).AddTranslateOp()
+        return {'up': up_translate, 'down': down_translate, 'raise_m': raise_m}
+    else:
+        assert False, f'unreachable light={light!r}'
+
+
+def _update_light_positions(lights: dict, camera_xyz: np.ndarray) -> None:
+    """three_light/dome_three 전용 — 카메라 world 위치를 따라 up/down disk translate만 갱신."""
+    x, y, z = float(camera_xyz[0]), float(camera_xyz[1]), float(camera_xyz[2])
+    r = lights['raise_m']
+    lights['up'].Set(Gf.Vec3f(x, y, z + r))
+    lights['down'].Set(Gf.Vec3f(x, y, z - r))
 
 
 def set_camera_pose(camera: Camera, sim, c2w: np.ndarray) -> None:
@@ -237,11 +310,13 @@ def render_along(camera_and_sim, poses_c2w) -> tuple:
     (Open3D 버전의 `render_along`과 같은 역할 분담). 씬 로드는 `build_renderer`가 전담한다(순서
     제약 — 그 함수의 docstring 참고).
     """
-    camera, sim = camera_and_sim
+    camera, sim, lights = camera_and_sim
     rgbs, depths = [], []
     for c2w in poses_c2w:
         c2w = np.asarray(c2w, dtype=np.float64)
         set_camera_pose(camera, sim, c2w)
+        if lights is not None:
+            _update_light_positions(lights, c2w[:3, 3])
         # 2스텝만 주면 실측상 이전 pose의 스테일 데이터(완전히 엉뚱한 장면)가 나온다(렌더
         # 파이프라인 latency가 2프레임보다 김) — `build_renderer`의 워밍업과 같은 수(10)로 맞춘다.
         for _ in range(10):
@@ -261,15 +336,53 @@ def edge_correlation(gray_a: np.ndarray, gray_b: np.ndarray) -> float:
     return float((ea * eb).sum() / denom) if denom > 1e-9 else 0.0
 
 
+def _tl_params(args) -> dict:
+    return {'raise_m': args.tl_raise, 'up_intensity': args.tl_up_intensity,
+            'down_intensity': args.tl_down_intensity, 'distant_intensity': args.tl_distant_intensity,
+            'dome_intensity': args.tl_dome_intensity}
+
+
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--scene', default=DEFAULT_SCENE)
+    parser.add_argument('--dataset', default='vln_n1', choices=['vln_n1', 'vln_pe'],
+                        help='GT 데이터셋. vln_pe면 입출력에 _vlnpe 태그, 렌더 해상도 256x256')
+    parser.add_argument('--light', default='dome',
+                        choices=['dome', 'three_light', 'dome_three', 'ambient_only'],
+                        help='dome(기본, 기존 동작)=DomeLight 2M 균일광. three_light=VLN-PE 실제 '
+                             '조명(distant+카메라추적 up/down disk) — vln_pe GT가 이 레시피로 '
+                             '렌더돼 톤 정합에 유리(ssim 0.553->0.72 실측). dome_three=둘 병행 '
+                             '(disk가 못 채우는 천장 밝기를 dome ambient로 보강)')
+    parser.add_argument('--tl_raise', type=float, default=THREE_LIGHT_RAISE_M,
+                        help='three_light: 카메라 기준 up/down disk 오프셋[m]')
+    parser.add_argument('--tl_up_intensity', type=float, default=THREE_LIGHT_DISK_INTENSITY,
+                        help='three_light: 위(천장 방향) disk 세기')
+    parser.add_argument('--tl_down_intensity', type=float, default=THREE_LIGHT_DISK_INTENSITY,
+                        help='three_light: 아래(바닥 방향) disk 세기')
+    parser.add_argument('--tl_distant_intensity', type=float, default=THREE_LIGHT_DISTANT_INTENSITY,
+                        help='three_light: distant light 세기')
+    parser.add_argument('--film_iso', type=float, default=DEFAULT_FILM_ISO,
+                        help='RTX 톤매퍼 노출(/rtx/post/tonemap/filmIso). 기본 100=기존 동작. '
+                             'ambient만 켰을 때 렌더가 GT보다 밝은 쪽으로 치우치는 것을 낮춰 보정한다 '
+                             '(vln_n1 6프레임 실측: iso 70/85/100/130 -> SSIM 0.852/0.859/0.856/0.836, '
+                             '밝은대역 편차 +17/+28/+36/+48).')
+    parser.add_argument('--rtx_ambient', type=float, default=0.0,
+                        help='RTX 전역 간접광 세기(/rtx/sceneDb/ambientLightIntensity). 0=기존 동작. '
+                             '**vln_pe 톤 정합의 핵심 노브** — raw isaacsim.SimulationApp으로 부팅하면 '
+                             '이 값이 0이라 천장처럼 직접광이 안 닿는 면이 어둡게 남는다(실측: 상단 1/3 '
+                             '밝기 63 vs GT 208, 조명 세기·형태·방향·오토익스포저·톤맵 어떤 것도 이걸 '
+                             '못 올렸다). IsaacLab의 apps/isaaclab.python.headless.rendering.kit는 이 값을 '
+                             '1.0으로 켜는데 AppLauncher를 우회하면서 빠졌던 것. vln_pe 씬1 실측 스윕: '
+                             'ambient 0/4/6/8/10/13 -> SSIM 0.715/0.818/0.824/0.819/0.810/0.794 이고 '
+                             '6.0에서 전체 밝기도 182.0(GT 178.4)로 거의 일치해 6.0을 권장.')
+    parser.add_argument('--tl_dome_intensity', type=float, default=500_000,
+                        help='dome_three 전용: 병행 DomeLight 세기(천장/그림자 ambient 보강용)')
     parser.add_argument('--mode', default='gt_replay', choices=['gt_replay', 'reproduce', 'random'])
     parser.add_argument('--episodes', default='0,1,2', help='2-A에서 검증할 에피소드 (콤마 구분)')
     parser.add_argument('--n_frames', type=int, default=6, help='2-A: 에피소드당 균등 표본 프레임 수')
     parser.add_argument('--num_episodes', type=int, default=3,
                         help='2-B: paths/<scene>[_random].json에서 렌더링할 에피소드 수(앞에서부터)')
-    parser.add_argument('--data_root', default=DEFAULT_DATA_ROOT)
+    parser.add_argument('--data_root', default=None, help='생략 시 --dataset의 기본 경로')
     parser.add_argument('--mesh_root', default=DEFAULT_MESH_ROOT)
     parser.add_argument('--out_dir', default=DEFAULT_OUT_DIR)
     parser.add_argument('--log_dir', default=DEFAULT_LOG_DIR)
@@ -289,22 +402,21 @@ def validate_gt_replay(args) -> dict:
 
     frames_out, all_depth_err, all_edge_corr, all_ssim = [], [], [], []
     for ep in episodes:
-        table = pq.read_table(scene_dir / 'data' / 'chunk-000' / f'episode_{ep:06d}.parquet')
-        actions = table['action'].to_pylist()
+        gt = dataset_utils.load_gt_episode(args.data_root, args.scene, ep, args.dataset)
         if k is None:
-            k = np.asarray(table['observation.camera_intrinsic'].to_pylist()[0], dtype=np.float64).reshape(3, 3)
-            camera_and_sim = build_renderer(RENDER_W, RENDER_H, k, usd_path)
-        n = len(actions)
+            k = gt['k']
+            camera_and_sim = build_renderer(RENDER_W, RENDER_H, k, usd_path, args.light, _tl_params(args), args.rtx_ambient, args.film_iso)
+        n = len(gt['poses_c2w'])
         frame_idx = np.unique(np.linspace(0, n - 1, args.n_frames).astype(int)).tolist()
-        poses_c2w = [action_to_c2w(np.asarray(actions[f], dtype=np.float64).reshape(4, 4), 'cam2world_gl')
-                    for f in frame_idx]
+        poses_c2w = [gt['poses_c2w'][f] for f in frame_idx]
         rgb_render, depth_render = render_along(camera_and_sim, poses_c2w)
 
         depth_dir = scene_dir / 'videos' / 'chunk-000' / 'observation.images.depth'
         rgb_dir = scene_dir / 'videos' / 'chunk-000' / 'observation.images.rgb'
         for i, frame in enumerate(frame_idx):
-            real_depth_m, real_valid = load_depth_frame_m(depth_dir, ep, frame, MAX_DEPTH_M)
-            real_rgb = load_rgb_frame(rgb_dir, ep, frame)
+            real_depth_m, real_valid = dataset_utils.load_depth_frame_m(depth_dir, ep, frame, MAX_DEPTH_M,
+                                                                         args.dataset)
+            real_rgb = dataset_utils.load_rgb_frame(rgb_dir, ep, frame, args.dataset)
             render_valid = np.isfinite(depth_render[i]) & (depth_render[i] < RENDER_FAR_M * 0.99)
             both = real_valid & render_valid
             depth_err = np.abs(depth_render[i][both] - real_depth_m[both]) if both.any() else np.array([np.nan])
@@ -334,8 +446,17 @@ def validate_gt_replay(args) -> dict:
         'ssim_median': float(np.median(all_ssim)),
         'ssim_min': float(np.min(all_ssim)),
     }
-    stats['depth_ok'] = bool(stats['depth_median_m'] <= GT_REPLAY_DEPTH_MEDIAN_TOL_M
-                             and stats['depth_p95_m'] <= GT_REPLAY_DEPTH_P95_TOL_M)
+    if args.dataset == 'vln_pe':
+        # vln_pe GT는 보행 중 물리 시뮬 캡처라 pose 기록과 depth 렌더 시점이 어긋난다(00의
+        # mesh-anchor 실측: 정지 frame0은 6mm, 보행 프레임은 2~9cm, 오프셋 보정 불가). p95는
+        # 회전 중 경계 시프트 아웃라이어가 지배해(실측 ~1.6m) 참고 상한만 둔다 — 회귀에 민감한
+        # 지표는 median(컨벤션이 깨지면 정지 프레임 포함 전 구간 0.3m+).
+        med_tol, p95_tol = 0.10, 3.0
+    else:
+        med_tol, p95_tol = GT_REPLAY_DEPTH_MEDIAN_TOL_M, GT_REPLAY_DEPTH_P95_TOL_M
+    stats['depth_median_tol_m'], stats['depth_p95_tol_m'] = med_tol, p95_tol
+    stats['depth_ok'] = bool(stats['depth_median_m'] <= med_tol
+                             and stats['depth_p95_m'] <= p95_tol)
     # RGB 판정은 SSIM으로 한다(edge_corr는 참고용으로만 계속 표시 — 위 GT_REPLAY_RGB_SSIM_MIN
     # 정의부 주석 참고: 같은 프레임에서 edge_corr는 0.19~0.22, SSIM은 0.65~0.71로 실측 확인).
     stats['rgb_ok'] = bool(stats['ssim_median'] >= GT_REPLAY_RGB_SSIM_MIN)
@@ -353,9 +474,9 @@ def render_gt_replay_report(log_dir: Path, scene: str, result: dict) -> Path:
 <div class="stat-row">
   <div class="stat"><b>전체</b>{pill(stats["passed"])}</div>
   <div class="stat"><b>depth median</b><span class="pill {"good" if stats["depth_ok"] else "bad"}">
-      {stats["depth_median_m"]:.4f} m (기준 {GT_REPLAY_DEPTH_MEDIAN_TOL_M} m)</span></div>
+      {stats["depth_median_m"]:.4f} m (기준 {stats["depth_median_tol_m"]} m)</span></div>
   <div class="stat"><b>depth p95</b><span class="pill {"good" if stats["depth_ok"] else "bad"}">
-      {stats["depth_p95_m"]:.4f} m (기준 {GT_REPLAY_DEPTH_P95_TOL_M} m)</span></div>
+      {stats["depth_p95_m"]:.4f} m (기준 {stats["depth_p95_tol_m"]} m)</span></div>
   <div class="stat"><b>rgb SSIM</b><span class="pill {"good" if stats["rgb_ok"] else "bad"}">
       median {stats["ssim_median"]:.3f} / min {stats["ssim_min"]:.3f} (기준 {GT_REPLAY_RGB_SSIM_MIN})
       </span></div>
@@ -442,22 +563,21 @@ def generate_episode(camera_and_sim, k: np.ndarray, ep_data: dict, ep_dir: Path)
 
 def run_generate(args) -> dict:
     paths_dir = Path(args.out_dir) / 'paths'
-    json_path = paths_dir / (f'{args.scene}.json' if args.mode == 'reproduce' else f'{args.scene}_random.json')
+    tag = dataset_utils.dataset_tag(args.dataset)
+    json_path = paths_dir / (f'{args.scene}{tag}.json' if args.mode == 'reproduce' else f'{args.scene}{tag}_random.json')
     if not json_path.is_file():
         print(f'  [ERROR] {json_path} 없음 — 03_sample_gt_paths.py --mode {args.mode}를 먼저 돌릴 것')
         return {'error': f'{json_path} not found'}
     paths = json.load(open(json_path))
     episodes_data = paths['episodes'][:args.num_episodes]
 
-    ep0_table = pq.read_table(sorted((Path(args.data_root) / args.scene / 'data' / 'chunk-000').glob('*.parquet'))[0],
-                              columns=['observation.camera_intrinsic'])
-    k = np.asarray(ep0_table['observation.camera_intrinsic'].to_pylist()[0], dtype=np.float64).reshape(3, 3)
+    k = dataset_utils.load_gt_episode(args.data_root, args.scene, 0, args.dataset)['k']
 
     usd_path = load_scene_model(args.mesh_root, args.scene)
-    camera_and_sim = build_renderer(RENDER_W, RENDER_H, k, usd_path)
+    camera_and_sim = build_renderer(RENDER_W, RENDER_H, k, usd_path, args.light, _tl_params(args), args.rtx_ambient, args.film_iso)
     mesh = load_scene_mesh(args.mesh_root, args.scene)
 
-    obs_dir = Path(args.out_dir) / 'obs' / f'{args.scene}_{args.mode}_isaac'
+    obs_dir = Path(args.out_dir) / 'obs' / f'{args.scene}{tag}_{args.mode}_isaac'
     results = []
     for i, ep_data in enumerate(episodes_data):
         ep_dir = obs_dir / f'episode_{i:06d}'
@@ -522,12 +642,18 @@ def render_generate_report(log_dir: Path, scene: str, mode: str, result: dict) -
 
 def main() -> int:
     args = build_argparser().parse_args()
-    print(f'[{SCRIPT_NAME}] scene={args.scene} mode={args.mode}')
+    if args.data_root is None:
+        args.data_root = dataset_utils.default_data_root(args.dataset)
+    # 렌더 해상도는 데이터셋의 GT 해상도를 따른다(vln_n1 480x270, vln_pe 256x256) — vln_n1은
+    # 기존 값 그대로라 기본 경로 동작 불변.
+    global RENDER_W, RENDER_H
+    RENDER_W, RENDER_H = dataset_utils.render_wh(args.dataset)
+    print(f'[{SCRIPT_NAME}] scene={args.scene} dataset={args.dataset} mode={args.mode}')
 
     if args.mode == 'gt_replay':
         result = validate_gt_replay(args)
         stats = result['stats']
-        log_dir = Path(args.log_dir) / SCRIPT_NAME / args.scene
+        log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}'
         report = render_gt_replay_report(log_dir, args.scene, result)
         print(f'  report html -> {report}')
         print(f'  => {"PASS" if stats["passed"] else "FAIL"} '
@@ -539,7 +665,7 @@ def main() -> int:
     if 'error' in result:
         return 2
     stats = result['stats']
-    log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}_{args.mode}'
+    log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}_{args.mode}'
     report = render_generate_report(log_dir, args.scene, args.mode, result)
     print(f'  obs -> {result["obs_dir"]}')
     print(f'  report html -> {report}')

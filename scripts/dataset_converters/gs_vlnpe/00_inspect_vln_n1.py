@@ -114,7 +114,10 @@ BEV_CELL_M = 0.05
 
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--data_root', default=DEFAULT_DATA_ROOT, help='vln_n1 traj_data 루트 (scene 폴더들의 부모)')
+    parser.add_argument('--dataset', default='vln_n1', choices=['vln_n1', 'vln_pe'],
+                        help='vln_pe면 run_inspect_vln_pe로 위임(스키마 덤프 + pose 변환식 mesh-anchor 검증)')
+    parser.add_argument('--data_root', default=None,
+                        help='traj_data 루트 (scene 폴더들의 부모). 생략 시 --dataset의 기본 경로')
     parser.add_argument('--scene', default=DEFAULT_SCENE, help='씬 ID (예: 17DRP5sb8fy)')
     parser.add_argument('--mesh_root', default=DEFAULT_MESH_ROOT,
                         help='씬 mesh 루트 (<mesh_root>/<scene>/matterport_mesh/*/*.obj). pose convention을 '
@@ -602,8 +605,128 @@ def build_target_schema(data_root: str, scene: str, episode: int, info: dict, pa
 # 8. main
 # ---------------------------------------------------------------------------
 
+def run_inspect_vln_pe(args) -> int:
+    """vln_pe 전용 검사 — 스키마 덤프 + pose 변환식(mesh-anchor) 실측 검증.
+
+    vln_n1 검사(main)와 목적은 같지만 포맷이 근본적으로 달라(쿼터니언 pose, npy 스택, intrinsic
+    없음) 별도 함수로 위임한다(가이드라인 guard clause). 핵심은 `dataset_utils`의
+    `vlnpe_orientation_to_c2w_rotation` 변환식이 맞는지 **mesh 표면거리로 절대 검증**하는 것:
+    GT depth를 후보 변환식별 pose로 world에 올려 mp3d mesh까지 거리를 잰다 — 정답이면 mm대,
+    부호가 틀리면 수십 cm(vln_n1 때 0.00003m vs 0.27~0.60m로 판별한 것과 동일한 방법).
+    """
+    import trimesh
+    from scipy.spatial.transform import Rotation
+    import dataset_utils as du
+
+    scene_dir = Path(args.data_root) / args.scene
+    depth_dir = scene_dir / 'videos' / 'chunk-000' / 'observation.images.depth'
+    rgb_dir = scene_dir / 'videos' / 'chunk-000' / 'observation.images.rgb'
+    run_log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}_vlnpe' / f'episode_{args.episode:06d}'
+    print(f'[{SCRIPT_NAME}] dataset=vln_pe scene={args.scene} episode={args.episode}')
+
+    # --- 스키마 덤프 (meta/info.json은 stale이라 신뢰 금지 — parquet 직접) ---
+    table = pq.read_table(scene_dir / 'data' / 'chunk-000' / f'episode_{args.episode:06d}.parquet')
+    schema_rows = [(f.name, str(f.type)) for f in table.schema]
+    print('  parquet schema:')
+    for name, typ in schema_rows:
+        print(f'    {name}: {typ}')
+
+    ep = du.load_gt_episode(args.data_root, args.scene, args.episode, 'vln_pe')
+    cam_ori = np.asarray(table['observation.camera_orientation'].to_pylist(), dtype=np.float64)
+    n = len(cam_ori)
+    print(f'  frames={n}, h_b={ep["h_b"]:.3f}m, pitch={ep["pitch_deg"]:.2f}deg')
+
+    # --- 후보 변환식: 정답 후보 + 기각용 대조군 2개 (대조군 없이 절대값만 보지 않는다) ---
+    def rot_flu_cv(r):     # 유도식: R 컬럼=[forward,left,up] -> [-left,-up,forward]
+        return np.column_stack([-r[:, 1], -r[:, 2], r[:, 0]])
+
+    def rot_flu_raw(r):    # 대조군: 부호 flip 없이 [left,up,forward] (거울상)
+        return np.column_stack([r[:, 1], r[:, 2], r[:, 0]])
+
+    def rot_gl_cam(r):     # 대조군: 쿼터니언을 USD/OpenGL 카메라 프레임으로 잘못 해석
+        return r @ np.diag([1.0, -1.0, -1.0])
+
+    candidates = {'flu_cv(유도식)': rot_flu_cv, 'flu_raw(대조군)': rot_flu_raw,
+                  'gl_cam(대조군)': rot_gl_cam}
+
+    mesh = trimesh.load(str(find_scene_mesh(args.mesh_root, args.scene)), process=False, force='mesh')
+    proximity = trimesh.proximity.ProximityQuery(mesh)
+    # frame 0을 반드시 포함 — 에피소드 시작 시 로봇이 정지 상태라 pose-depth 타이밍 지터가
+    # 없는 유일한 깨끗한 앵커다(실측: frame0=0.006m vs 보행 중 0.02~0.09m — 보행 중에는 pose
+    # 기록과 depth 렌더 시점이 컨트롤 substep 안에서 어긋나며, 고정 오프셋 보정(-2..+2 프레임
+    # 스윕)으로도 안 잡히는 vln_pe 데이터 자체의 속성이다).
+    frames = np.unique(np.linspace(0, n - 1, 4).astype(int)).tolist()
+    rng = np.random.RandomState(0)
+
+    results, frame0_median = {}, {}
+    for name, rot_fn in candidates.items():
+        all_d = []
+        for f in frames:
+            depth_m, valid = du.load_depth_frame_m(depth_dir, args.episode, f, args.max_depth_m, 'vln_pe')
+            pose = np.eye(4)
+            pose[:3, :3] = rot_fn(Rotation.from_quat(cam_ori[f][[1, 2, 3, 0]]).as_matrix())
+            pose[:3, 3] = ep['cam_xyz'][f]
+            world_pts = unproject_to_world_frame(depth_m, ep['k'], pose, 'cam2world')[valid]
+            sel = rng.choice(len(world_pts), min(400, len(world_pts)), replace=False)
+            d = np.abs(proximity.signed_distance(world_pts[sel]))
+            if f == 0:
+                frame0_median[name] = float(np.median(d))
+            all_d.append(d)
+        all_d = np.concatenate(all_d)
+        results[name] = (float(np.median(all_d)), float(np.percentile(all_d, 90)))
+        print(f'  mesh-anchor [{name}]: median={results[name][0]:.5f}m p90={results[name][1]:.5f}m '
+              f'frame0={frame0_median[name]:.5f}m')
+
+    ranked = sorted(results, key=lambda c: results[c][0])
+    best = ranked[0]
+    margin = results[ranked[1]][0] / max(results[best][0], 1e-12)
+    # 게이트: ① 유도식이 최우수 ② 대조군 대비 5배 이상(자릿수) 우세 ③ 정지 frame0에서 1cm 미만.
+    # 전체 median에 걸지 않는 이유는 위 주석(보행 지터는 데이터 속성이라 우리가 못 줄임).
+    passed = best.startswith('flu_cv') and margin >= 5.0 and frame0_median[best] < 0.01
+
+    # --- 시각화: 검사 프레임들의 GT rgb/depth (육안 sanity) ---
+    body = ''
+    for f in frames:
+        rgb = du.load_rgb_frame(rgb_dir, args.episode, f, 'vln_pe')
+        depth_m, valid = du.load_depth_frame_m(depth_dir, args.episode, f, args.max_depth_m, 'vln_pe')
+        states = [
+            ('GT rgb', save_jpg(rgb, run_log_dir / f'frame{f}_rgb.jpg')),
+            ('GT depth', save_jpg(colorize_depth(depth_m, valid), run_log_dir / f'frame{f}_depth.jpg')),
+        ]
+        body += f'<h4>frame {f}</h4>' + blink_widget_html(f'pe{f}', states)
+
+    rows = ''.join(f'<tr><td>{c}</td><td>{m:.5f}</td><td>{p:.5f}</td><td>{frame0_median[c]:.5f}</td></tr>'
+                   for c, (m, p) in results.items())
+    summary = f'''
+<div class="stat-row">
+  <div class="stat"><b>판정</b><span class="pill {"good" if passed else "bad"}">
+      {"PASS" if passed else "FAIL"} (최우수: {best}, 대조군 대비 {margin:.0f}배)</span></div>
+  <div class="stat"><b>프레임</b><span class="pill">{n}</span></div>
+  <div class="stat"><b>h_b / pitch</b><span class="pill">{ep["h_b"]:.3f} m / {ep["pitch_deg"]:.2f}°</span></div>
+</div>
+<p>vln_pe pose 변환식 검증 — GT depth를 각 후보 변환식의 c2w로 world에 올려 mp3d mesh
+표면거리를 측정(절대 앵커). 정답이면 정지 frame0에서 mm대, 부호가 틀리면 수십 cm로 자릿수가
+갈린다. 보행 중 프레임은 pose 기록과 depth 렌더 시점이 어긋나는 vln_pe 데이터 속성 때문에
+정답 변환식이라도 2~9cm 지터가 있다(고정 오프셋 보정 불가 — 실측).</p>
+<table><tr><th>후보</th><th>median [m]</th><th>p90 [m]</th><th>frame0(정지) [m]</th></tr>{rows}</table>
+<p>parquet 스키마: <code>{", ".join(name for name, _ in schema_rows)}</code></p>
+'''
+    report = save_gallery(run_log_dir, 'report.html',
+                          f'{SCRIPT_NAME} — {args.scene} ep{args.episode} (vln_pe pose 검증)',
+                          summary, body)
+    print(f'  report html -> {report}')
+    print(f'  => {"PASS" if passed else "FAIL"} (best={best}, margin={margin:.0f}x, '
+          f'frame0={frame0_median[best]:.5f}m)')
+    return 0 if passed else 1
+
+
 def main():
     args = build_argparser().parse_args()
+    if args.data_root is None:
+        import dataset_utils as du
+        args.data_root = du.default_data_root(args.dataset)
+    if args.dataset == 'vln_pe':
+        return run_inspect_vln_pe(args)
 
     scene_dir = Path(args.data_root) / args.scene
     rgb_dir = scene_dir / 'videos' / 'chunk-000' / 'observation.images.rgb'
@@ -834,4 +957,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
