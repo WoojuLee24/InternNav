@@ -1,5 +1,6 @@
 import copy
 import itertools
+import os
 import re
 from collections import OrderedDict
 from typing import Union
@@ -10,6 +11,7 @@ from PIL import Image
 from transformers import AutoProcessor, AutoTokenizer, PreTrainedModel
 
 from internnav.configs.model.base_encoders import ModelCfg
+from internnav.utils.dist import get_rank
 from internnav.model.basemodel.internvla_n1.internvla_n1 import (
     InternVLAN1ForCausalLM,
     InternVLAN1ModelConfig,
@@ -36,6 +38,17 @@ class InternVLAN1Net(PreTrainedModel):
             attn_implementation="flash_attention_2",
             device_map={"": self.model_config.device},
         )
+
+        # Post-model-load debugger attach (moved here from distributed_base.py so
+        # --debugpy eval pauses right after the LLM weights load, instead of after
+        # Env.init() + the rest of Agent.init() finish too). Rank-0 only so a
+        # multi-GPU torchrun eval doesn't try to bind the same port from every rank.
+        if os.environ.get('DEBUGPY') == 'eval' and get_rank() == 0:
+            import debugpy
+
+            debugpy.listen(("0.0.0.0", 5679))
+            print("[debugpy] model loaded — waiting for VSCode attach on port 5679 ...", flush=True)
+            debugpy.wait_for_client()
 
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_config.model_path, use_fast=True)
         self.processor = AutoProcessor.from_pretrained(self.model_config.model_path)

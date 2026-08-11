@@ -1,3 +1,5 @@
+import os
+import sys
 # from scripts.eval.configs.agent import *
 from internnav.configs.agent import AgentCfg
 from internnav.configs.evaluator import (

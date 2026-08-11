@@ -457,7 +457,11 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
     if machine == "h1":
         # Isaac Sim does not support torchrun; run as a single process.
         python = H1_PYTHON if os.path.exists(H1_PYTHON) else sys.executable
-        cmd = [python, "scripts/eval/eval.py"] + eval_argv
+        python_argv = [python, "-X", "frozen_modules=off"] if debugpy else [python]
+        # Isaac Sim's bundled Python 3.11 enables frozen stdlib modules, which makes
+        # pydevd silently miss breakpoints after --debugpy attach (see the "frozen
+        # modules" warning pydevd itself prints); only disabled for debug runs.
+        cmd = python_argv + ["scripts/eval/eval.py"] + eval_argv
         if watchdog:
             # h1 eval can freeze inside Isaac Sim's env.step(); auto-detect the stall
             # (no output for watchdog_idle_min minutes) and relaunch (resumes lmdb+wandb).

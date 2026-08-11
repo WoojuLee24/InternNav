@@ -69,20 +69,6 @@ class DistributedEvaluator(Evaluator):
                 eval_cfg.agent.model_settings['task_name'] = eval_cfg.task.task_name
                 self.agent = Agent.init(eval_cfg.agent)
 
-                # Optional post-load debugger attach — same DEBUGPY='eval' convention as
-                # habitat_vln_evaluator.py (which bypasses this Agent.init path via
-                # init_agent=False and does its own attach), so evaluators that DO go
-                # through Agent.init (e.g. VLNDistributedEvaluator / h1) get the same
-                # --debugpy eval support. Gated so normal runs never hang; rank 0 only.
-                if os.environ.get('DEBUGPY') == 'eval' and self.rank == 0:
-                    import debugpy
-
-                    debugpy.listen(("0.0.0.0", 5679))
-                    print("[debugpy] model loaded — waiting for VSCode attach on port 5679 ...", flush=True)
-                    debugpy.wait_for_client()
-                
-                pass
-
     def eval(self):
         """
         Uniform distributed evaluation pipeline:
