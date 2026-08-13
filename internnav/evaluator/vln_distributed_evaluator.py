@@ -283,9 +283,20 @@ class VLNDistributedEvaluator(DistributedEvaluator):
             import wandb
             if wandb.run is None:
                 wandb.init(
+                    entity=self.eval_config.eval_settings.get("wandb_entity"),
                     project=self.eval_config.eval_settings.get("wandb_project", "huggingface"),
                     name=self.eval_config.eval_settings.get("wandb_run_name"),
                 )
+            # Log once at startup so the run is verifiably alive in the wandb UI before
+            # the first episode finishes (minutes away) -- the per-episode logs below
+            # and the final test_* log are the only other wandb calls, and either can
+            # be silently dropped (step collision on a resumed run) or never reached
+            # (Isaac Sim kills the process inside env.close()).
+            collision_tag = getattr(self.eval_config.task, "flash_collision", None) or "none"
+            wandb.log({f"eval_{collision_tag}/started": 1})
+            print(f"[wandb] eval logging -> {wandb.run.url} "
+                  f"(project={wandb.run.project}, name={wandb.run.name}, step={wandb.run.step})",
+                  flush=True)
             return True
         except Exception as e:
             print(f"[Warning] wandb init failed: {e}")
@@ -404,17 +415,21 @@ class VLNDistributedEvaluator(DistributedEvaluator):
                         trajectory_id=self.now_path_key(info), obs=ob, action=act[self.robot_name]
                     )
 
-        self.env.close()
-        progress_log_multi_util.report()
-
+        # NOTE: log the final metrics BEFORE env.close(). On h1 (Isaac Sim) closing the
+        # env tears down the Simulation App and the process dies inside it, so nothing
+        # after env.close() ever runs -- that is why these test_* metrics used to be
+        # missing from wandb and had to be backfilled from result_h1.json.
         if self._wandb_active and self.result_logger.last_result:
             try:
                 import wandb
-                collision_tag = self.eval_config.task.flash_collision or "none"
+                collision_tag = getattr(self.eval_config.task, "flash_collision", None) or "none"
                 for split, metrics in self.result_logger.last_result.items():
                     wandb.log({f"test_{split}_{collision_tag}/{k}": v for k, v in metrics.items()})
                 wandb.finish()
             except Exception as e:
                 print(f"[Warning] wandb logging failed: {e}")
+
+        self.env.close()
+        progress_log_multi_util.report()
 
         print('--- VlnMultiEvaluator end ---')
