@@ -231,9 +231,12 @@ class VLNDistributedEvaluator(DistributedEvaluator):
                     try:
                         import wandb
                         collision_tag = self.eval_config.task.flash_collision or "none"
+                        # running metrics under the SAME test_<split>_<tag>/ keys as the
+                        # final log below -- one wandb section for the whole eval. No step=
+                        # arg: a resumed run's step is already past `count`, which silently
+                        # dropped these logs before.
                         for split, metrics in result.items():
-                            count = metrics.get("Count", 0)
-                            wandb.log({f"eval_{split}_{collision_tag}/samples": count}, step=count)
+                            wandb.log({f"test_{split}_{collision_tag}/{k}": v for k, v in metrics.items()})
                     except Exception as e:
                         print(f"[Warning] wandb step log failed: {e}")
                 self.runner_status[env_id] = runner_status_code.NOT_RESET
@@ -287,13 +290,13 @@ class VLNDistributedEvaluator(DistributedEvaluator):
                     project=self.eval_config.eval_settings.get("wandb_project", "huggingface"),
                     name=self.eval_config.eval_settings.get("wandb_run_name"),
                 )
-            # Log once at startup so the run is verifiably alive in the wandb UI before
-            # the first episode finishes (minutes away) -- the per-episode logs below
-            # and the final test_* log are the only other wandb calls, and either can
-            # be silently dropped (step collision on a resumed run) or never reached
-            # (Isaac Sim kills the process inside env.close()).
+            # Log Count=0 at startup so the test_<split>_<tag>/ panel exists in the wandb
+            # UI right away -- otherwise the first evidence that logging works is the
+            # first finished episode, minutes later. Same keys as the per-episode and
+            # final logs, so this adds no extra wandb section.
             collision_tag = getattr(self.eval_config.task, "flash_collision", None) or "none"
-            wandb.log({f"eval_{collision_tag}/started": 1})
+            for split in self.result_logger.split_map:
+                wandb.log({f"test_{split}_{collision_tag}/Count": 0})
             print(f"[wandb] eval logging -> {wandb.run.url} "
                   f"(project={wandb.run.project}, name={wandb.run.name}, step={wandb.run.step})",
                   flush=True)
