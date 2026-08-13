@@ -281,6 +281,15 @@ TRAIN_MACHINE = {
 }
 
 # --------------------------------------------------------------------------- #
+# wandb destination for h1 (Isaac Sim) eval runs. Single source of truth shared by
+# runner.py (which creates/resumes the run) and the evaluator's wandb.init(), so
+# both always land in the SAME entity/project. Override per shell with
+# WANDB_ENTITY / WANDB_PROJECT env vars. entity=None -> wandb's default entity.
+# h200/5090 (Habitat) keep their own per-machine "wandb_project" in EVAL_MACHINE.
+WANDB_ENTITY = os.environ.get("WANDB_ENTITY") or "kaist-url-ai28"
+WANDB_PROJECT = os.environ.get("WANDB_PROJECT") or "InternNav"
+
+# --------------------------------------------------------------------------- #
 # Machine-specific eval infra (mirrors the existing reference configs), keyed by
 # the same --machine values as build_eval_cfg (h200/5090 = Habitat, h1 = Isaac Sim).
 # num_history / resize_* / predict_step_num are NOT here — they come from the
@@ -562,6 +571,8 @@ def build_h1_eval_cfg(p: Params, model_path: str = EVAL_MACHINE["h1"]["model_pat
             "show_rgb": False,
             "use_agent_server": False,
             "use_wandb": p.use_wandb,
+            "wandb_entity": WANDB_ENTITY,
+            "wandb_project": WANDB_PROJECT,
         },
     )
 

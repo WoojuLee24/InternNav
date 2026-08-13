@@ -341,6 +341,36 @@ def _save_wandb_run_id(output_dir: str) -> None:
             f.write(run_id)
 
 
+def _ckpt_run_name(model_path: str) -> str:
+    """wandb run name for an eval-only run: the checkpoint path below `checkpoints/`.
+
+    checkpoints/image_base/s1.bev.rgb.concat_s2.fpv_20260714_024944
+        -> 'image_base/s1.bev.rgb.concat_s2.fpv_20260714_024944'
+           (identical to the run_name that trained it: '<exp_name>_<timestamp>')
+    checkpoints/InternVLA-N1-DualVLN -> 'InternVLA-N1-DualVLN'
+    Anything not under a `checkpoints` dir falls back to the directory name.
+    """
+    parts = os.path.normpath(os.path.abspath(model_path)).split(os.sep)
+    if "checkpoints" in parts:
+        tail = parts[len(parts) - 1 - parts[::-1].index("checkpoints") + 1:]
+        if tail:
+            return "/".join(tail)
+    return parts[-1]
+
+
+def _wandb_target() -> dict:
+    """entity/project for the runner-created eval run.
+
+    Read from default_config (WANDB_ENTITY / WANDB_PROJECT) — the same values the
+    evaluator's wandb.init() gets via eval_settings, so the run the runner creates
+    and the run the eval subprocess resumes are the same run in the same project.
+    Falls back to wandb's old default when default_config is not loaded.
+    """
+    mod = sys.modules.get("default_config")
+    return {"entity": getattr(mod, "WANDB_ENTITY", None),
+            "project": getattr(mod, "WANDB_PROJECT", None) or "huggingface"}
+
+
 def _wandb_resume_env(output_dir: str = None, base_env=None, override_run_id: str = None) -> dict:
     """Return env vars that make the subprocess resume an existing wandb run.
 
@@ -408,7 +438,7 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
             try:
                 import wandb
                 if wandb.run is None:
-                    run = wandb.init(project="huggingface", name=new_run_name, dir=output_dir)
+                    run = wandb.init(**_wandb_target(), name=new_run_name, dir=output_dir)
                     print(f"[wandb] new run created (one-shot): {run.url}", flush=True)
                     wandb.finish()
                     one_shot_run_id = run.id
@@ -421,7 +451,7 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
             try:
                 import wandb
                 if wandb.run is None:
-                    run = wandb.init(project="huggingface", name=new_run_name, dir=output_dir)
+                    run = wandb.init(**_wandb_target(), name=new_run_name, dir=output_dir)
                     print(f"[wandb] new run created: {run.url}", flush=True)
                     wandb.finish()
                     with open(id_file, "w") as f:
@@ -510,6 +540,10 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
         output_dir = os.path.abspath(p.debug_dir)
     elif not do_train and model_path:
         output_dir = os.path.abspath(model_path)
+        # eval-only: name the wandb run after the CHECKPOINT, not the config, so two
+        # GPUs evaluating different checkpoints with the same --config are still
+        # distinguishable (for a trained ckpt this reproduces its training run_name).
+        run_name = _ckpt_run_name(model_path)
     else:
         output_dir = os.path.join(checkpoints_root, run_name)
 
