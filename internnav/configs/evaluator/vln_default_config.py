@@ -314,8 +314,19 @@ def get_config(evaluator_cfg: EvalCfg):
         model_settings = rdp_cfg.model_dump()
     elif evaluator_cfg.agent.model_name == 'seq2seq':
         model_settings = seq2seq_cfg.model_dump()
-    elif evaluator_cfg.agent.model_name in ('internvla_n1', 'internvla_n1_bev', 'internvla_n1_unified'):
+    elif evaluator_cfg.agent.model_name in (
+        'internvla_n1',
+        'internvla_n1_bev',
+        'internvla_n1_unified',
+        'internvla_n1_llamacpp',
+    ):
         model_settings = internvla_n1_cfg.model_dump()
+    else:
+        # was an UnboundLocalError on the .update() below, which said nothing about the cause
+        raise ValueError(
+            f"get_config(): no default model_settings for model_name="
+            f"{evaluator_cfg.agent.model_name!r}. Add it to this dispatch."
+        )
 
     model_settings.update(evaluator_cfg.agent.model_settings)
     evaluator_cfg.agent.model_settings = model_settings

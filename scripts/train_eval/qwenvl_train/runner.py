@@ -40,6 +40,9 @@ from typing import List, Optional
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 H1_PYTHON = "/workspace/isaaclab/_isaac_sim/python.sh"
+# tensorrt-only PYTHONPATH overlay for the quantized eval stack (WORKFLOW.md Step 9).
+# Absent -> skipped, so unquantized runs are unaffected.
+TRT_PY311 = "/ws/src/InternNav/vln-deploy/quantization_kit/trt_py311"
 
 # The config (Params + eval-cfg builders) lives in its own file, separated out so
 # this module stays a pure train+eval engine. runner imports Params for type hints
@@ -431,6 +434,14 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
     env["TRAIN_EVAL_TARGET"] = machine  # read by the experiment config.py
     env["EVAL_OUTPUT_DIR"] = os.path.abspath(log_dir)
     env["WANDB_DIR"] = output_dir
+    # Isaac Sim's bundled python has no tensorrt, so the quantized-S1 eval config
+    # (h1_internvla_n1_async_lite_cfg.py, use_trt_s1=True) cannot import it. This overlay
+    # holds ONLY the tensorrt package dirs from vln-deploy's venv — Isaac's own
+    # numpy/torch still win because setup_python_env.sh appends its paths after these.
+    # Never put the whole venv site-packages here: its torch/numpy would shadow Isaac's
+    # and break the sim extensions. See vln-deploy/docs/WORKFLOW.md Step 9.
+    if os.path.isdir(TRT_PY311):
+        env["PYTHONPATH"] = TRT_PY311 + os.pathsep + env.get("PYTHONPATH", "")
     if debugpy:
         env["DEBUGPY"] = debugpy  # habitat_vln_evaluator.py checks DEBUGPY=='eval' after model load
     if debug_dir:

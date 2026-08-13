@@ -6,6 +6,17 @@ sys.path.insert(0, os.path.join(
 ))
 import default_config as base  # noqa: E402
 
+# Env relays so this config can be A/B'd against h1_internvla_n1_async_lite_cfg.py under
+# vln-deploy/verify/compare_eval.sh. Both must read the SAME EVAL_MAX_EPISODES to evaluate
+# the same episode slice. Unset -> unchanged behaviour (full split, no timing).
+_MAX_EP = os.environ.get("EVAL_MAX_EPISODES")
+_MAX_TOK = os.environ.get("EVAL_MAX_NEW_TOKENS")
+if os.environ.get("VLN_TIMING"):
+    sys.path.insert(0, "/ws/src/InternNav/vln-deploy/verify")
+    import eval_timing  # noqa: E402
+
+    eval_timing.install()
+
 # from scripts.eval.configs.agent import *
 from internnav.configs.agent import AgentCfg
 from internnav.configs.evaluator import (
@@ -31,7 +42,8 @@ eval_cfg = EvalCfg(
             'hfov': 79,
             'resize_w': 384,
             'resize_h': 384,
-            'max_new_tokens': 1024,
+            # EVAL_MAX_NEW_TOKENS overrides; unset -> this config's own value.
+            'max_new_tokens': int(_MAX_TOK) if _MAX_TOK else 1024,
             'num_frames': 32,
             'num_history': 8,
             'num_future_steps': 4,
@@ -40,14 +52,15 @@ eval_cfg = EvalCfg(
             'continuous_traj': True,
             'infer_mode': 'partial_async',  # You can choose "sync" or "partial_async", but for this model, "partial_async" is better.
             # debug
-            'vis_debug': True, # False,  # If vis_debug=True, you can get visualization results
+            'vis_debug': False,  # If vis_debug=True, you can get visualization results
             'vis_debug_path': './logs/lite/original',
         },
     ),
     env=EnvCfg(
         env_type='internutopia',
         env_settings={
-            # 'max_episodes': 100, # Evaluate only 100 episodes
+            # EVAL_MAX_EPISODES=N caps the run (unset -> full split)
+            **({'max_episodes': int(_MAX_EP)} if _MAX_EP else {}),
             'use_fabric': False,  # Please set use_fabric=False due to the render delay;
             'headless': True, # Isaac-sim
         },

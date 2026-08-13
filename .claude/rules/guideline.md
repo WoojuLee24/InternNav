@@ -100,6 +100,12 @@ else:
   - 더 근본적인 해결: 애초에 A가 B보다 의미론적으로 넓은 범위를 표현한다면(A의 일부 인스턴스만 B 역할을 함), A는 B를 상속하지 말고 필요한 로직만 A 안에 직접 작성하거나 B의 하위 로직을 호출하는 방식으로 가져온다. "코드 재사용" 하나만으로 상속 여부를 정하지 말 것 — `isinstance`/타입 계층이 실제 동작을 정확히 반영하는지도 같이 판단해야 한다.
 
 
+### 8. 코드 주석은 최대 2줄
+
+- Claude가 추가/수정하는 코드의 주석(블록·인라인 모두)은 **최대 2줄**로 제한한다.
+- 배경 설명·근거·실험 결과 등 긴 서사는 코드 주석이 아니라 `.claude/memory/` 문서나 커밋 메시지에 쓴다.
+- 주석은 코드만 봐서는 알 수 없는 제약/이유 하나만 압축해서 적는다.
+
 ## Command
 ### Training & evaluation
 `python scripts/train_eval/qwenvl_train/runner.py --config scripts/train_eval/qwenvl_train/bev/base_s1.fpv_s2.fpv_rgb_gt.py --machine 5090` 

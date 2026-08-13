@@ -162,3 +162,25 @@ checkpoints
 internnav/model/basemodel/LongCLIP/
 .gradio/
 result/
+
+# vln-deploy 양자화 배포판 — venv/빌드 산출물/모델 바이너리, 로컬에서 재생성됨
+vln-deploy/quantization_kit/convenv_x86/
+vln-deploy/quantization_kit/llama.cpp/build/
+vln-deploy/quantization_kit/llama.cpp/build_x86/
+vln-deploy/quantization_kit/gguf/
+vln-deploy/quantization_kit/onnx/
+vln-deploy/quantization_kit/trt_engines/
+vln-deploy/quantization_kit/trt_py311/
+vln-deploy/deploy/logs/
+vln-deploy/verify/compare_out/
+vln-deploy/quantization_kit/data/
+
+# vendored llama.cpp 중 llama-s2-runner 빌드에 불필요한 대용량 파일 (약 104MB)
+# upstream 테스트 픽스처(models: ggml-vocab-*.gguf) / 자동생성 문서(docs/ops/*.csv) /
+# fork 저자의 로컬 벤치마크 이미지·발표자료
+vln-deploy/quantization_kit/llama.cpp/models/
+vln-deploy/quantization_kit/llama.cpp/docs/
+vln-deploy/quantization_kit/llama.cpp/bench_imgs/
+vln-deploy/quantization_kit/llama.cpp/*.pptx
+vln-deploy/quantization_kit/llama.cpp/*.drawio
+vln-deploy/quantization_kit/llama.cpp/test_*.jpg
