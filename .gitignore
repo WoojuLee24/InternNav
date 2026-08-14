@@ -127,6 +127,7 @@ work_dirs/
 *.pth
 *.py~
 *.sh~
+*.bak_*
 
 # grutopia assets
 /asset
@@ -153,6 +154,30 @@ nohup.out
 
 wandb/
 logs/
+
+# gs_vlnpe local/generated dataset artifacts (source code is kept separately)
+scripts/dataset_converters/gs_vlnpe/apply_real/target_schema.json
+scripts/dataset_converters/gs_vlnpe/apply_real/scene_meta/
+scripts/dataset_converters/gs_vlnpe/apply_real/esdf/
+scripts/dataset_converters/gs_vlnpe/apply_real/paths/
+scripts/dataset_converters/gs_vlnpe/apply_real/obs/
+scripts/dataset_converters/gs_vlnpe/apply_real/verify/
+scripts/dataset_converters/gs_vlnpe/apply_real/compare/
+scripts/dataset_converters/gs_vlnpe/apply_real/gridsearch/
+scripts/dataset_converters/gs_vlnpe/apply_real/format_validation/*.json
+scripts/dataset_converters/gs_vlnpe/apply_real/format_validation/*.html
+scripts/dataset_converters/gs_vlnpe/apply_real/format_validation/*_assets/
+scripts/dataset_converters/gs_vlnpe/noeun_pipeline_codex/
+scripts/dataset_converters/gs_vlnpe/scene_meta/
+scripts/dataset_converters/gs_vlnpe/esdf/
+scripts/dataset_converters/gs_vlnpe/paths/
+scripts/dataset_converters/gs_vlnpe/obs/
+scripts/dataset_converters/gs_vlnpe/verify/
+scripts/dataset_converters/gs_vlnpe/compare/
+scripts/dataset_converters/gs_vlnpe/gridsearch/
+scripts/dataset_converters/gs_vlnpe/format_validation/*.json
+scripts/dataset_converters/gs_vlnpe/format_validation/*.html
+scripts/dataset_converters/gs_vlnpe/format_validation/*_assets/
 
 .vis_debug
 *.png

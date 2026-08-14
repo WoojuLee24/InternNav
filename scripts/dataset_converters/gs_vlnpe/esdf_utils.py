@@ -169,20 +169,25 @@ def load_scene_usd(usd_path):
 # ---------------------------------------------------------------------------
 
 def voxelize_surface(mesh, cell_m: float = VOXEL_SIZE_M, samples: int = SURFACE_SAMPLES,
-                     seed: int = 0, align_to_m: float = None):
+                     seed: int = 0, align_to_m: float = None, bounds=None):
     """mesh 표면을 샘플링해 3D occupancy로 만든다.
 
     정점만 쓰면 큰 삼각형 내부가 비므로 `sample_surface`로 면적 비례 샘플링한다.
 
+    `bounds`를 생략하면 기존처럼 mesh 전체 bounds를 voxelize한다.
+    `(bounds_min, bounds_max)`를 주면 동일한 surface sampling 결과 중 해당
+    world-space 영역의 점만 사용해 logical scene occupancy를 만든다.
+    원본 mesh 자체는 수정하지 않는다.
+
     `align_to_m`을 주면 원점을 그 간격의 **월드 격자에 스냅**한다(내림). 논문은 격자 원점을
     언급하지 않는데, `mesh.bounds[0]`을 그대로 쓰면 격자 위상이 **씬마다 제멋대로**가 된다
-    (실측: 월드 0.2 m 격자선까지 y로 0.087 / 0.082 m 어긋남). A\\*가 출력하는 좌표는 셀중심이므로
+    (실측: 월드 0.2 m 격자선까지 y로 0.087 / 0.082 m 어긋남). A*가 출력하는 좌표는 셀중심이므로
     이 위상이 경로를 그만큼 옮긴다. 월드 정렬은 **자유 파라미터가 0개인 씬 독립 규칙**이고,
     `s8pcmisQ38h` ep17의 루트 불일치를 해결했다(같은 루트 39/40 -> **40/40**,
     chamfer 1.036 -> 0.140, 위상 면적 1.745 -> 0.000 m²).
 
     02의 `--grid_align` 기본값이 `ASTAR_CELL_M`이라 실제로는 항상 스냅된다. `0`을 주면 이전 동작.
-    내림이므로 `origin <= mesh.bounds[0]`이 유지된다(02의 bounds sanity 검사가 그대로 성립).
+    내림이므로 `origin <= bounds_min`이 유지된다(02의 bounds sanity 검사가 그대로 성립).
 
     Returns:
         occupancy: (Nx, Ny, Nz) bool
@@ -190,18 +195,68 @@ def voxelize_surface(mesh, cell_m: float = VOXEL_SIZE_M, samples: int = SURFACE_
     """
     import trimesh
 
-    points, _ = trimesh.sample.sample_surface(mesh, samples, seed=seed)
-    origin = np.asarray(mesh.bounds[0], dtype=np.float64)
+    if bounds is None:
+        voxel_bounds = np.asarray(mesh.bounds, dtype=np.float64)
+        sample_mesh = mesh
+    else:
+        voxel_bounds = np.asarray(bounds, dtype=np.float64)
+
+        if voxel_bounds.shape != (2, 3):
+            raise ValueError(
+                f'bounds must have shape (2, 3), got {voxel_bounds.shape}'
+            )
+        if np.any(voxel_bounds[1] <= voxel_bounds[0]):
+            raise ValueError(
+                f'invalid bounds: min={voxel_bounds[0]}, max={voxel_bounds[1]}'
+            )
+
+        triangles = np.asarray(mesh.triangles)
+        face_min = triangles.min(axis=1)
+        face_max = triangles.max(axis=1)
+        intersects = np.all(
+            (face_max >= voxel_bounds[0]) & (face_min <= voxel_bounds[1]),
+            axis=1,
+        )
+        if not intersects.any():
+            raise ValueError('no mesh faces intersect requested bounds')
+        sample_mesh = mesh.submesh([np.flatnonzero(intersects)], append=True, repair=False)
+
+    points, _ = trimesh.sample.sample_surface(sample_mesh, samples, seed=seed)
+
+    if bounds is not None:
+        # ROI와 교차하는 삼각형은 일부가 바깥에 있을 수 있으므로 최종 point
+        # filter는 유지한다. sampling 자체는 ROI face에서 수행해 밀도를 보존한다.
+        inside = np.all(
+            (points >= voxel_bounds[0]) & (points <= voxel_bounds[1]),
+            axis=1,
+        )
+        points = points[inside]
+
+        if len(points) == 0:
+            raise ValueError(
+                'no sampled mesh surface points inside requested bounds: '
+                f'min={voxel_bounds[0]}, max={voxel_bounds[1]}'
+            )
+
+    origin = voxel_bounds[0].copy()
     if align_to_m:
         origin = np.floor(origin / align_to_m) * align_to_m
-    shape = ((np.asarray(mesh.bounds[1]) - origin) / cell_m).astype(int) + 1
+
+    shape = ((voxel_bounds[1] - origin) / cell_m).astype(int) + 1
 
     idx = ((points - origin) / cell_m).astype(int)
-    np.clip(idx, 0, shape - 1, out=idx)
+
+    if bounds is None:
+        # 기존 full-scene 경로의 동작은 그대로 보존한다.
+        np.clip(idx, 0, shape - 1, out=idx)
+    else:
+        # ROI 경로에서는 boundary clipping 대신 실제 grid 내부 점만 사용한다.
+        valid = np.all((idx >= 0) & (idx < shape), axis=1)
+        idx = idx[valid]
+
     occupancy = np.zeros(tuple(shape), dtype=bool)
     occupancy[idx[:, 0], idx[:, 1], idx[:, 2]] = True
     return occupancy, origin
-
 
 def detect_floor_levels(occupancy: np.ndarray, origin: np.ndarray, cell_m: float = VOXEL_SIZE_M,
                         min_share: float = 0.15, headroom_m=(0.3, 1.2)):
