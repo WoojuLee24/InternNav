@@ -62,6 +62,10 @@ class Params:
     lr_scheduler_min_lr: float = 1e-05
     save_total_limit: int = 1
     save_only_model: bool = True  # skip DeepSpeed optimizer states (~32G/ckpt); set False to enable training resume
+    # None -> val_interval_steps (= 100*4//batch_size, unchanged). Set an explicit value when the
+    # dataset is large enough that a validation pass every val_interval_steps would dominate the run
+    # (main's train_dual_system.sh uses save_steps=5000 with no mid-train validation at all).
+    save_interval_steps: Optional[int] = None
     logging_steps: int = 1
     model_max_length: int = 8192
     dataloader_num_workers: int = 4
@@ -120,6 +124,9 @@ class Params:
     data_root: str = "/home/irteam/git/InternNav/data/InternData-N1-v0.5-mini/vln_ce"
     system2_ckpt: str = "/home/irteam/data-vol2/checkpoints/InternVLA-N1-System2"
     deepspeed: str = "scripts/train/qwenvl_train/zero2.json"
+    # Habitat eval yaml. None -> EVAL_MACHINE[machine]["config_path"] (unchanged). Override to swap the
+    # benchmark/simulator settings (e.g. a different look_down tilt_angle) without touching the shared yamls.
+    eval_config_path: Optional[str] = None
 
     # ---- distributed launcher ----
     nnodes: int = 1
@@ -147,6 +154,11 @@ class Params:
     def val_interval_steps(self) -> int:
         # mirrors $((100 * 4 / batch_size)) in the shell scripts
         return 100 * 4 // self.batch_size
+
+    @property
+    def eval_save_interval_steps(self) -> int:
+        """--eval_steps / --save_steps. Defaults to val_interval_steps (unchanged)."""
+        return self.save_interval_steps or self.val_interval_steps
 
     def train_argv(self, output_dir: str, run_name: str) -> List[str]:
         """Flags passed to internnav/trainer/internvla_n1_trainer.py.
@@ -192,6 +204,10 @@ class Params:
                 "--s2_combine_mode", self.s2_combine_mode,
             ]
         smoke = self.max_steps > 0
+        # val_ratio=0 -> make_supervised_data_module returns eval_dataset=None (100% of the data is
+        # trained on, as in main's train_dual_system.sh). HF Trainer raises if eval_strategy != "no"
+        # without an eval_dataset, and load_best_model_at_end has no eval_loss to select on.
+        no_val = self.val_ratio <= 0.0
         argv = bev_argv + image_argv + s2_argv + [
             "--deepspeed", self.deepspeed,
             "--model_name_or_path", self.system2_ckpt,
@@ -219,15 +235,15 @@ class Params:
             "--max_pixels", str(self.max_pixels),
             "--min_pixels", str(self.min_pixels),
             "--val_ratio", str(self.val_ratio),
-            "--eval_strategy", "no" if smoke else "steps",
-            "--eval_steps", str(self.val_interval_steps),
+            "--eval_strategy", "no" if (smoke or no_val) else "steps",
+            "--eval_steps", str(self.eval_save_interval_steps),
             "--save_strategy", "no" if smoke else "steps",
-            "--save_steps", str(self.val_interval_steps),
+            "--save_steps", str(self.eval_save_interval_steps),
             "--save_total_limit", str(self.save_total_limit),
             "--save_only_model", "True" if self.save_only_model else "False",
             "--metric_for_best_model", "eval_loss",
             "--greater_is_better", "False",
-            "--load_best_model_at_end", b(not smoke),
+            "--load_best_model_at_end", b(not smoke and not no_val),
             "--learning_rate", _fmt_num(self.lr),
             "--weight_decay", _fmt_num(self.weight_decay),
             "--warmup_ratio", _fmt_num(self.warmup_ratio),
@@ -410,7 +426,7 @@ def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
         ),
         env=EnvCfg(
             env_type="habitat",
-            env_settings={"config_path": m["config_path"]},
+            env_settings={"config_path": p.eval_config_path or m["config_path"]},
         ),
         eval_type=eval_type,
         eval_settings={
