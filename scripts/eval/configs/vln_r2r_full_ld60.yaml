@@ -1,26 +1,11 @@
 # @package _global_
 #
-# VLN-CE R2R val_unseen (1839 episodes), with the look-down geometry restored to the
-# original main-branch behaviour.
+# VLN-CE R2R val_unseen (1839 episodes) — FULL data root, look-down 60 deg.
 #
-# Only difference vs vln_r2r_mini.yaml: look_up/look_down tilt_angle 30 -> 15.
-#
-# Why: habitat_vln_evaluator.py issues TWO consecutive LOOKDOWN steps (and two LOOKUP to
-# restore), so the effective look-down pitch is 2 * tilt_angle.
-#   main (habitat 0.2.x): simulator.tilt_angle: 15  ->  2 * 15 = 30 deg
-#   this branch's yamls  : per-action tilt_angle: 30 ->  2 * 30 = 60 deg
-# The training data's look-down is pitch_1 -> pitch_2, i.e. at most 0 -> 30 deg
-# (r2r_125cm_0_30 / rxr_125cm_0_30), so 30 deg is what the model was trained on.
-# habitat 0.3.3's LookDown/LookUpActionConfig default is already 15; the explicit 30 was
-# introduced during the 0.3.x port. vln_rxr.yaml on this branch omits it and thus uses 15.
-#
-# The existing vln_r2r.yaml / vln_r2r_mini.yaml are left untouched so the 12 previous
-# ablation runs (all measured at 60 deg) stay comparable with each other.
-#
-# NOTE on the "-v0.5-mini" data paths below: they are not a reduced benchmark. mini and full
-# ship the identical val_unseen split (1839 episodes / 11 scenes, same json.gz) and the same
-# 90 MP3D scenes; only the *training* traj_data differs (mini has no rxr/scalevln). The full
-# root has no scene_data/mp3d_ce at all, so these are the paths that actually resolve.
+# A/B control for vln_r2r_full_ld30.yaml: identical except look_up/look_down tilt_angle
+# 15 -> 30. habitat_vln_evaluator.py steps LOOKDOWN twice, so this is 60 deg effective —
+# what every ablation run on this branch has been measuring. See vln_r2r_full_ld30.yaml
+# for the full rationale on the angle and on scenes_dir.
 
 defaults:
   - /habitat: habitat_config_base
@@ -90,15 +75,15 @@ habitat:
         # agent_index: 0  # removed in habitat 0.3.x
       look_up:
         type: LookUpAction
-        tilt_angle: 15  # 2 x LOOKUP = 30 deg (main parity)
+        tilt_angle: 30  # 2 x LOOKUP = 60 deg (current branch behaviour)
         # agent_index: 0  # removed in habitat 0.3.x
       look_down:
         type: LookDownAction
-        tilt_angle: 15  # 2 x LOOKDOWN = 30 deg (main parity)
+        tilt_angle: 30  # 2 x LOOKDOWN = 60 deg (current branch behaviour)
         # agent_index: 0  # removed in habitat 0.3.x
 
   dataset:
     type: R2RVLN-v1
     split: val_unseen
-    scenes_dir: data/InternData-N1-v0.5-mini/scene_data/mp3d_ce
-    data_path: data/InternData-N1-v0.5-mini/vln_ce/raw_data/r2r/{split}/{split}.json.gz
+    scenes_dir: data/InternData-N1/scene_data
+    data_path: data/InternData-N1/vln_ce/raw_data/r2r/{split}/{split}.json.gz

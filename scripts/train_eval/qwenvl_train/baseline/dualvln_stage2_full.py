@@ -69,9 +69,9 @@ PARAMS = replace(
     save_only_model=False,       # main default; keeps optimizer state so a 3.5-day run can resume
     dataloader_num_workers=8,    # main
     # ---- eval: same Params object -> train==eval for num_history/resize/predict_step_num ----
-    # look-down 15 deg x 2 LOOKDOWN steps = 30 deg, matching main and the training data's
-    # pitch_1->pitch_2 delta. See scripts/eval/configs/vln_r2r_ld30.yaml for the full rationale.
-    eval_config_path="scripts/eval/configs/vln_r2r_ld30.yaml",
+    # full data root + look-down 15 deg x 2 LOOKDOWN steps = 30 deg, i.e. the same effective
+    # settings as main. See scripts/eval/configs/vln_r2r_full_ld30.yaml for the rationale.
+    eval_config_path="scripts/eval/configs/vln_r2r_full_ld30.yaml",
 )
 
 # Everything else is inherited from base.PARAMS and already matches train_dual_system.sh:

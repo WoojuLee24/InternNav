@@ -1,0 +1,104 @@
+# @package _global_
+#
+# VLN-CE R2R val_unseen (1839 episodes) — FULL data root, look-down 30 deg.
+#
+# This is the "same settings as main branch" config. Two axes are in the filename:
+#   full  = data/InternData-N1              (mini = data/InternData-N1-v0.5-mini)
+#   ld30  = look_up/look_down tilt_angle 15 (ld60 = 30)
+#
+# Why tilt_angle 15 means 30 deg: habitat_vln_evaluator.py:579-580 steps LOOKDOWN TWICE
+# (and LOOKUP twice to restore), so the effective pitch is 2 * tilt_angle.
+#   main (habitat 0.2.x): simulator.tilt_angle: 15  -> 2 * 15 = 30 deg
+#   this branch's yamls : per-action tilt_angle: 30 -> 2 * 30 = 60 deg
+# habitat 0.3.3 dropped SimulatorConfig.tilt_angle entirely and defaults the per-action
+# value to 15, so the explicit 30 added during the 0.3.x port doubled the angle. The
+# training data's look-down is pitch_1 -> pitch_2, i.e. at most 0 -> 30 deg, so 30 is
+# what the model was trained on.
+#
+# Why scenes_dir has no /mp3d_ce here: the loader does os.path.join(scenes_dir, scene_id)
+# with scene_id = "mp3d/<scene>/<scene>.glb" (habitat-lab r2r_vln_dataset.py:71), so
+# scenes_dir must be the PARENT of mp3d/. The mini root nests it one level deeper
+# (scene_data/mp3d_ce/mp3d), the full root does not (scene_data/mp3d). The 90 scenes are
+# byte-identical between the two roots; the full root cannot be given an mp3d_ce alias
+# because scene_data/ is not writable.
+
+defaults:
+  - /habitat: habitat_config_base
+  - /habitat/task: vln_r2r
+  - /habitat/simulator/sensor_setups@habitat.simulator.agents.main_agent: rgbd_agent  # agents -> sensor_setups in habitat 0.3.x
+  - /habitat/dataset/vln: mp3d_r2r
+  - /habitat/task/lab_sensors:
+    - gps_sensor
+    - compass_sensor
+  - /habitat/task/actions:  # look_up/look_down must be explicitly listed in habitat 0.3.x
+    - look_up
+    - look_down
+  - _self_
+
+habitat:
+  environment:
+    max_episode_steps: 5000
+    iterator_options:
+      max_scene_repeat_steps: 50000
+      shuffle: False
+  simulator:
+    agents:
+      main_agent:
+        sim_sensors:
+          rgb_sensor:
+            width: 640
+            height: 480
+            hfov: 79
+          depth_sensor:
+            width: 640
+            height: 480
+            hfov: 79
+            min_depth: 0.0
+            max_depth: 10.0
+    forward_step_size: 0.25
+    turn_angle: 15
+    # tilt_angle: 15  # moved to per-action config in habitat 0.3.x
+    # action_space_config: "v1"  # removed in habitat 0.3.x
+    habitat_sim_v0:
+      gpu_device_id: 0
+  task:
+    measurements:
+      distance_to_goal:
+        type: DistanceToGoal
+        distance_to: POINT
+      success:
+        type: Success
+        success_distance: 3.0
+      spl:
+        type: SPL
+      oracle_success:
+        type: OracleSuccess
+      oracle_navigation_error:
+        type: OracleNavigationError
+    actions:
+      stop:
+        type: StopAction
+        # agent_index: 0  # removed in habitat 0.3.x
+      move_forward:
+        type: MoveForwardAction
+        # agent_index: 0  # removed in habitat 0.3.x
+      turn_left:
+        type: TurnLeftAction
+        # agent_index: 0  # removed in habitat 0.3.x
+      turn_right:
+        type: TurnRightAction
+        # agent_index: 0  # removed in habitat 0.3.x
+      look_up:
+        type: LookUpAction
+        tilt_angle: 15  # 2 x LOOKUP = 30 deg (main parity)
+        # agent_index: 0  # removed in habitat 0.3.x
+      look_down:
+        type: LookDownAction
+        tilt_angle: 15  # 2 x LOOKDOWN = 30 deg (main parity)
+        # agent_index: 0  # removed in habitat 0.3.x
+
+  dataset:
+    type: R2RVLN-v1
+    split: val_unseen
+    scenes_dir: data/InternData-N1/scene_data
+    data_path: data/InternData-N1/vln_ce/raw_data/r2r/{split}/{split}.json.gz
