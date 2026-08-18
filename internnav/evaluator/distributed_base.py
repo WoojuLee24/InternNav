@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import time
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -159,8 +160,13 @@ class DistributedEvaluator(Evaluator):
             machine = os.environ.get("TRAIN_EVAL_TARGET", "")
             fname = f"result_{machine}.json" if machine else "result.json"
             out_path = os.path.join(self.output_path, fname)
+            # This file is append-only, so tag each row with runner.py's EVAL_RUN_STAMP --
+            # the same stamp as test_<machine>_<stamp>.log / repro_<stamp>.sh next to it.
+            # Kept out of result_all: that dict is logged to wandb as test/<k>.
+            row = dict(result_all)
+            row["timestamp"] = os.environ.get("EVAL_RUN_STAMP") or datetime.now().strftime("%Y%m%d_%H%M%S")
             with open(out_path, "a") as f:
-                f.write(json.dumps(result_all) + "\n")
+                f.write(json.dumps(row) + "\n")
 
         if self.eval_config.eval_settings.get("use_wandb", False):
             try:
@@ -168,6 +174,7 @@ class DistributedEvaluator(Evaluator):
 
                 if wandb.run is None:
                     wandb.init(
+                        entity=self.eval_config.eval_settings.get("wandb_entity", None),
                         project=self.eval_config.eval_settings.get("wandb_project", "huggingface"),
                         name=self.eval_config.eval_settings.get("wandb_run_name", None),
                         config=self.eval_config.eval_settings,

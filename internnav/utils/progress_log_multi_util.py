@@ -60,7 +60,11 @@ def init(dataset_name, path_count):
     global PROGRESS
     global INITED
     PROGRESS = ProgressInfo(dataset_name, path_count)
-    log_dir = f'{PROJECT_ROOT_PATH}/logs/{get_task_name()}/progress/'
+    # Keep this with the eval's other artifacts instead of the repo root, when runner.py
+    # set EVAL_OUTPUT_DIR (same pattern as result_logger.finalize_all_results).
+    eval_output_dir = os.environ.get('EVAL_OUTPUT_DIR')
+    base = eval_output_dir or f'{PROJECT_ROOT_PATH}/logs/{get_task_name()}'
+    log_dir = os.path.join(base, 'progress')
     os.makedirs(log_dir, exist_ok=True)
     file_handler = logging.FileHandler(f'{log_dir}/{dataset_name}.log')
     file_handler.setLevel(logging.INFO)
