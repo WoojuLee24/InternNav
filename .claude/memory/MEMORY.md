@@ -1,11 +1,14 @@
 # Memory Index
 
+- [S2 단독 latency A/B](260819_s2_standalone_latency_result.md) — Isaac 없이 s2_step만 측정, 이미지 장수 스윕으로 llama.cpp 순차 인코딩 확정(orig 27.2 vs lite 56.7 ms/장); 구 "2.4x 빠름" 값은 폐기
+
 - [VLN-PE GT Follower Agent Plan](project_gt_follower_agent.md) — GT oracle agent 구현 계획 (미완료), 플랜 파일: `/root/.claude/plans/vln-pe-gt-episode-misty-moon.md`
 - [BEV Injection Architecture Plan](project_bev_injection.md) — Phase 1 구현 완료(feature/bev_v0.1, merge 대기); S1/S2 모드(fpv/bev/fpv_bev), 지원범위/커맨드/함정/Phase 2 과제
 - [BEV Injection 관련 핵심 파일](reference_bev_key_files.md) — 구현 시 참조 파일 목록, Habitat LOOKDOWN 흐름, 체크포인트별 depth 사용 여부
 - [기존 파일 수정 금지 — 신규 파일만 추가](feedback_new_files_only.md) — 신규 feature는 반드시 신규 파일 + config arg 선택 구조로 제안
 - [교정에서 일반원리 추출](feedback_extract_principle_from_corrections.md) — `lesson` 스킬 사용, 즉흥적으로 하지 않고 정해진 절차로 원인파악+일반원리 추출
 - [train_eval/qwenvl_train Python 구조](project_train_eval_qwenvl_python.md) — 셸 대신 Python으로 train+eval 한 프로세스 구동, Params 단일 소스로 train==eval 보장(batch_size 완료); 다음 단계는 config 통일
+- [2dloader_vlnce — 시야각 내 RGB/depth만으로 embodiment augmentation](260817_2dloader_vlnce_result.md) — mesh/렌더러 없이 depth 1장으로 GT path·pixel goal 재생성. W0–W6 전부 PASS(두 씬), 18 ms/frame. 3dloader와 다른 결론 5가지(바닥 free carving·미관측 정책·goal 라벨 분리·retreat 우세·torch 스레드 절벽 → R2의 165 ms/frame 원인 확정)
 - [Quantization Kit (S2 벤치마크)](project_quantization_kit.md) — two-step look-down iteration, VLN-PE/VLN-CE 분리 데이터셋, 커맨드, 주요 파라미터
 
 ### Understanding (구 `.claude/understanding/`, Claude 작성 코드 이해 문서)
@@ -19,6 +22,7 @@
 - 리포트 링크 전체 목록: repo 파일 `scripts/dataset_converters/gs_vlnpe/pipeline_reports.md` (단일 소스 — 48개 링크 + 로컬 경로 + 권장 커맨드)
 
 ### Task Results (구 `.claude/tasks/*_result.md`, 완료된 작업 결과 보고)
+- [On-the-fly embodiment augmentation 구현 가능성 판정 & 계획](260814_onthefly_embodiment_aug_feasibility_result.md) — 논문 `VLN collision.md` 해결방법v0.2를 repo에 매핑. **학습은 vln_ce만 읽는다**(vln_n1/vln_pe는 현 dataloader가 못 읽음). **S1이 BEV면 on-the-fly aug 완전 성립(렌더러 불필요)** — occupancy 20MB worker 상주 + `esdf_utils` 순수함수(2D 격자만 받아 world 의존 없음) 재사용, depth만 바꾸면 BEV 자동 반영. **불가능한 건 FPV RGB 연속 시점 변화 하나**(worker당 Isaac/Open3D 불가) → vln_ce의 이산 5리그로 대체. 현 BEV 경로엔 **r_b dilation이 아예 없다**(논문 C1의 구멍). Isaac은 `TaskCfg.objects`로 장애물 spawn·`robot_platform_size`·`camera_translation` 전부 config 노출, 에셋 로컬 30,958+33,330개, flash 충돌이 top-down depth 기반이라 spawn 물체를 자동 인식. **⚠️ 장애물/r_b를 바꾸면 `reference_path`가 거짓 GT** → GT 재생성 필수. habitat은 미설치(magnum 미빌드)라 §7로 분리
 - [S1/S2 통합 Image Provider 구현](260707_s1s2_bev_depth_panorama_result.md) — view x type x mode x combine
 - [UnifiedImageProvider 전체 조합 스모크 테스트](260707_unified_provider_combos_result.md)
 - [Habitat eval(rollout) 10개 조합 검증](260708_habitat_eval_unified_provider_result.md)
@@ -38,3 +42,5 @@
 - [gs_vlnpe 02 ESDF 맵](260803_gs_vlnpe_02_esdf_result.md) — M1.2 완료; occupancy 저장 + GT 궤적 clearance 게이트, h_nav/h_obs 밴드, 입력은 obj
 - [gs_vlnpe 01_prepare_scene 씬 정합 게이트](260802_gs_vlnpe_01_prepare_scene_result.md) — M1.1 완료; USD/정규화 불필요로 게이트만 남김, mesh 표면거리 <1mm, negative test 포함. **camera_extrinsic = 에피소드별 로봇 키 h_b + 카메라 pitch**(2026-08-03 정정)
 - [h1 eval hang 원인 조사](260724_h1_eval_hang_investigation_result.md) — env.step() 내부 Isaac stall, system memory 초과 아님(배제), watchdog 대응
+- [GT vs find_path 여유 — #03 결론 정정](260820_clearance_gt_vs_findpath_result.md) — min만 보고 정반대로 결론냈던 사례. **남은 질문 2개는 아래 #03 재작성에서 닫힘**
+- [#03 재작성 — "벽 뚫기"는 재현되지 않는다](260820_03_rewrite_result.md) — 게이트 8→4개·447→392줄, clearance 분석 삭제(반경 이중 계산). GT는 배포 navmesh에서 안 뚫는다(17DRP 0/2465 · s8 14/2450, 깊이 최대 3.7cm < 한 칸), 래스터 불일치 58점 **전부 깊이 1칸** = 격자 반올림(반증 가능한 술어). ⚠️ **길이비 1.002인데 find_path가 장애물 반대편으로 돈다** — 그림 보고 발견, 요약 통계가 실체를 가린 3번째 사례. `chain_find_path` 갭 점프 버그 + `summary.html` 이름 충돌 수정

@@ -159,7 +159,8 @@ class InternVLAN1LlamaCppPolicy:
         return resp[3:] if len(resp) > 2 else ""
 
     def _save(self, pil):
-        p = os.path.join(self._tmp, f"i{self._img_n}.png"); self._img_n += 1
+        # BMP = 헤더 + raw RGB. PNG(zlib)는 장당 21 ms인데 BMP는 0.3 ms이고 디코드 결과는 동일.
+        p = os.path.join(self._tmp, f"i{self._img_n}.bmp"); self._img_n += 1
         pil.convert("RGB").save(p); return p
 
     # ---- policy interface ----

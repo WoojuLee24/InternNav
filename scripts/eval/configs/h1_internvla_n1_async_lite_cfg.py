@@ -88,7 +88,8 @@ eval_cfg = EvalCfg(
             # ---- quantized-stack knobs (see internvla_n1_policy_llamacpp.py) ----
             'use_trt_s1': True,   # needs Step 9 on PYTHONPATH; False = PyTorch fp32 fallback
             's1_steps': 5,        # deployment default (5 -> ~30 Hz S1; 10 = slower, higher quality)
-            'kv_reuse': False,    # conservative: fresh S2 conversation each step
+            # True면 S2가 4.2x 빨라지지만 프롬프트 구조가 학습과 달라져 SR 0.70 -> 0.40 (2026-08-20 실측).
+            'kv_reuse': False,
             # runner_bin / model_gguf / mmproj_gguf / lib_dir are resolved from model_path.
             # Set them here to override (e.g. to point at a different quantization set).
             # debug
