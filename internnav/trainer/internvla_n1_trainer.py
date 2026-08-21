@@ -246,6 +246,11 @@ def train(attn_implementation="flash_attention_2"):
     else:
         data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args, n_query=model_args.n_query)
     trainer = Trainer(model=model, processing_class=tokenizer, args=training_args, **data_module)
+    from internnav.trainer.checkpoint_aux_callback import SaveAuxFilesCallback, write_chat_template
+
+    # make every checkpoint-<step> self-contained (preprocessor_config.json + chat_template.json)
+    aux_callback = SaveAuxFilesCallback(data_args.image_processor, model_args.model_name_or_path)
+    trainer.add_callback(aux_callback)
     from tabulate import tabulate
 
     if trainer.is_world_process_zero():
@@ -268,6 +273,7 @@ def train(attn_implementation="flash_attention_2"):
     if training_args.max_steps <= 0:  # smoke tests (max_steps>0) skip the final save entirely
         trainer.save_state()
         data_args.image_processor.save_pretrained(training_args.output_dir)
+        write_chat_template(aux_callback.chat_template, training_args.output_dir)
 
         model.config.use_cache = True
 
