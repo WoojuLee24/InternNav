@@ -290,6 +290,38 @@ def find_best_checkpoint(output_dir: str) -> Optional[str]:
     return best
 
 
+def _latest_checkpoint(output_dir: str) -> Optional[str]:
+    """Highest-step checkpoint-<N>/ that contains a saved model (config.json)."""
+    step, latest = -1, None
+    for d in glob.glob(os.path.join(output_dir, "checkpoint-*")):
+        suffix = os.path.basename(d).rsplit("-", 1)[-1]
+        if suffix.isdigit() and int(suffix) > step and os.path.isfile(os.path.join(d, "config.json")):
+            step, latest = int(suffix), d
+    return latest
+
+
+def _pick_eval_ckpt(model_path: Optional[str], output_dir: str) -> Optional[str]:
+    """--model-path > best_metric ckpt > top-level final model (val_ratio=0) > newest
+    checkpoint-<step>. Deliberately NO released-ckpt fallback (silent wrong-model eval);
+    returns None after printing why."""
+    if model_path:
+        return model_path
+    best = find_best_checkpoint(output_dir)
+    if best:
+        return best
+    if os.path.isfile(os.path.join(output_dir, "config.json")):
+        return output_dir
+    latest = _latest_checkpoint(output_dir)
+    if latest:
+        print(f"[eval] no final model at the top level of {output_dir}; "
+              f"evaluating the latest intermediate checkpoint: {latest}", flush=True)
+        return latest
+    print(f"[eval] ERROR: no evaluable checkpoint in {output_dir} (no best_metric ckpt, no "
+          "top-level config.json, no intermediate checkpoint-*); skipping eval. "
+          "Pass --model-path to evaluate a specific checkpoint.", file=sys.stderr)
+    return None
+
+
 def _prep_ckpt_aux_files(output_dir: str, ckpt: str, system2_ckpt: str) -> None:
     import shutil
     for src, name in [
@@ -316,6 +348,14 @@ def _backfill_chat_template(ckpt: str, system2_ckpt: str) -> None:
     if os.path.exists(dst):
         return
     src = os.path.join(system2_ckpt, "chat_template.json")
+    if not os.path.isfile(src) and not os.path.isdir(system2_ckpt):
+        # system2_ckpt is a HF model id (stage1: "Qwen/..."), not a local dir
+        try:
+            from huggingface_hub import hf_hub_download
+            src = hf_hub_download(system2_ckpt, "chat_template.json")
+        except Exception as e:
+            print(f"[eval] could not resolve chat_template.json from hub id {system2_ckpt}: {e}", flush=True)
+            return
     try:
         shutil.copy(src, dst)
         print(f"[eval] backfilled missing chat_template.json into {ckpt}", flush=True)
@@ -547,11 +587,8 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
     if p.node_rank != 0:
         return
 
-    eval_machine = getattr(sys.modules.get("default_config"), "EVAL_MACHINE", {})
-    default_model_path = eval_machine.get(machine, {}).get("model_path")
-    best = model_path or find_best_checkpoint(output_dir) or default_model_path
+    best = _pick_eval_ckpt(model_path, output_dir)
     if not best:
-        print("[eval] No best checkpoint found, skipping eval.")
         return
     print(f"[eval] machine={machine}  checkpoint={best}")
     if do_train:

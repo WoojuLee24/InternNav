@@ -49,6 +49,7 @@ class Params:
     # ---- train-only ----
     sample_step: int = 4
     lr: float = 1e-4
+    vision_tower_lr: Optional[float] = None  # None -> flag not emitted; stage1 uses 5e-6
     batch_size: int = 16
     grad_accum_steps: int = 1
     max_pixels: int = 313600
@@ -59,7 +60,7 @@ class Params:
     warmup_ratio: float = 0.003
     max_grad_norm: float = 1.0
     lr_scheduler_type: str = "cosine_with_min_lr"
-    lr_scheduler_min_lr: float = 1e-05
+    lr_scheduler_min_lr: Optional[float] = 1e-05  # None -> kwargs not emitted (plain cosine rejects min_lr)
     save_total_limit: int = 1
     save_only_model: bool = True  # skip DeepSpeed optimizer states (~32G/ckpt); set False to enable training resume
     # None -> val_interval_steps (= 100*4//batch_size, unchanged). Set an explicit value when the
@@ -114,6 +115,12 @@ class Params:
 
     # ---- wandb ----
     use_wandb: bool = True  # False -> no wandb run created/resumed for this eval (runner.py sets this False for --max-steps/--debugpy smoke runs)
+
+    # ---- Habitat eval ----
+    # 0 = render on the model's GPU (unchanged). N>0 = render on (local_rank+N) % device_count.
+    # Driver 580.126.16 (2026-07-31) aborts in libnvidia-eglcore and silently corrupts frames
+    # when GL renders on a GPU whose CUDA context is busy in the same process -> use 1 on h200.
+    eval_render_gpu_offset: int = 0
 
     # ---- Isaac Sim (h1 eval only) ----
     headless: bool = False  # True -> no Isaac Sim GUI window (unchanged default: GUI shown)
@@ -245,11 +252,17 @@ class Params:
             "--greater_is_better", "False",
             "--load_best_model_at_end", b(not smoke and not no_val),
             "--learning_rate", _fmt_num(self.lr),
+        ] + (
+            ["--vision_tower_lr", _fmt_num(self.vision_tower_lr)] if self.vision_tower_lr is not None else []
+        ) + [
             "--weight_decay", _fmt_num(self.weight_decay),
             "--warmup_ratio", _fmt_num(self.warmup_ratio),
             "--max_grad_norm", _fmt_num(self.max_grad_norm),
             "--lr_scheduler_type", self.lr_scheduler_type,
-            "--lr_scheduler_kwargs", json.dumps({"min_lr": self.lr_scheduler_min_lr}),
+        ] + (
+            ["--lr_scheduler_kwargs", json.dumps({"min_lr": self.lr_scheduler_min_lr})]
+            if self.lr_scheduler_min_lr is not None else []
+        ) + [
             "--logging_steps", str(self.logging_steps),
             "--model_max_length", str(self.model_max_length),
             "--gradient_checkpointing", b(self.gradient_checkpointing),
@@ -361,7 +374,8 @@ def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
     from internnav.configs.evaluator import EnvCfg, EvalCfg
 
     model_settings = {
-        "mode": "dual_system",
+        # system1="none" (stage1: no S1 weights) -> S2 + ShortestPathFollower eval (_run_eval_system2)
+        "mode": "system2" if p.system1 == "none" else "dual_system",
         "model_path": m["model_path"],  # overridden by eval.py --model_path
         "num_history": p.num_history,
         "resize_w": p.resize_w,
@@ -426,7 +440,10 @@ def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
         ),
         env=EnvCfg(
             env_type="habitat",
-            env_settings={"config_path": p.eval_config_path or m["config_path"]},
+            env_settings={
+                "config_path": p.eval_config_path or m["config_path"],
+                "render_gpu_offset": p.eval_render_gpu_offset,
+            },
         ),
         eval_type=eval_type,
         eval_settings={

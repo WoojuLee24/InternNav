@@ -106,7 +106,8 @@ else:
 ### Training only (debugging)
 `--no-eval --debug-dir logs/260615_base_s1.fpv_s2.fpv_rgb_gt`  
 ### Evaluation only (debugging)
-` --no-train  --debug-dir logs/260615_base_s1.fpv_s2.fpv_rgb_gt`
+` --no-train --model-path <평가할 ckpt 경로> --debug-dir logs/260615_base_s1.fpv_s2.fpv_rgb_gt`
+- `--model-path`는 항상 명시 (released ckpt로의 자동 fallback은 오평가 위험 때문에 제거됨)
 
 
 ## 명령어 (command) 출력 규칙

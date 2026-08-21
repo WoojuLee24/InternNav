@@ -20,11 +20,10 @@ can never drift between the two.
     # C) evaluate the trained checkpoint
     python scripts/train_eval/qwenvl_train/runner.py --config <this file> --machine h200 --no-train --model-path <checkpoints_root>/baseline/dualvln_stage2_full_<TIMESTAMP>
 
-Train and eval are run as two separate invocations on purpose: with val_ratio=0 there is no
-`best_metric` in trainer_state.json, so runner.find_best_checkpoint() returns None and the
-automatic path would silently fall back to EVAL_MACHINE's model_path (InternVLA-N1-w-NavDP).
-The final model is written to the top level of output_dir by internvla_n1_trainer.py, so
-`--model-path <output_dir>` is the "last checkpoint" that main's recipe evaluates.
+Train+eval also works as a SINGLE invocation (drop --no-eval): with val_ratio=0 there is no
+`best_metric`, so runner falls back to the final model at the top level of output_dir (the
+"last checkpoint" that main's recipe evaluates). B/C above remain useful for re-running eval
+on an existing checkpoint.
 """
 
 import os
@@ -72,6 +71,7 @@ PARAMS = replace(
     # full data root + look-down 15 deg x 2 LOOKDOWN steps = 30 deg, i.e. the same effective
     # settings as main. See scripts/eval/configs/vln_r2r_full_ld30.yaml for the rationale.
     eval_config_path="scripts/eval/configs/vln_r2r_full_ld30.yaml",
+    eval_render_gpu_offset=1,    # driver 580.126.16: same-GPU GL+CUDA aborts/corrupts frames
 )
 
 # Everything else is inherited from base.PARAMS and already matches train_dual_system.sh:

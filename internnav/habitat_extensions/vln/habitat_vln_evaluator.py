@@ -276,7 +276,15 @@ class HabitatVLNEvaluator(DistributedEvaluator):
         self.agent_config = get_agent_config(self.config.habitat.simulator)
         self.sim_sensors_config = self.config.habitat.simulator.agents.main_agent.sim_sensors
 
+        # render_gpu_offset N>0: render on (local_rank+N) % device_count instead of the model's
+        # GPU — driver 580.126.16 aborts in libnvidia-eglcore (and corrupts frames) when GL and
+        # a busy CUDA context share a device in one process. 0 = unchanged.
+        render_gpu_offset = int(cfg.env.env_settings.get('render_gpu_offset', 0) or 0)
         with habitat.config.read_write(self.config):
+            if render_gpu_offset > 0:
+                local_rank = int(os.environ.get('LOCAL_RANK', '0'))
+                n_gpu = torch.cuda.device_count()
+                self.config.habitat.simulator.habitat_sim_v0.gpu_device_id = (local_rank + render_gpu_offset) % n_gpu
             self.config.habitat.task.measurements.update(
                 {
                     "top_down_map": TopDownMapMeasurementConfig(
