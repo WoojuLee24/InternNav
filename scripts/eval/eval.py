@@ -146,9 +146,17 @@ def main():
     if args.model_path is not None:
         evaluator_cfg.agent.model_settings['model_path'] = args.model_path
         ckpt_name = os.path.basename(args.model_path.rstrip('/'))
-        evaluator_cfg.eval_settings.setdefault('wandb_run_name', ckpt_name)
+        if not os.environ.get('WANDB_RUN_ID'):
+            # Resuming: leave unset so wandb.init(name=None) keeps the run's own name.
+            evaluator_cfg.eval_settings.setdefault('wandb_run_name', ckpt_name)
         evaluator_cfg.eval_settings.setdefault('output_path', f"./logs/eval/{ckpt_name}")
         evaluator_cfg.eval_settings['best_checkpoint'] = ckpt_name
+
+    if evaluator_cfg.agent.model_settings.get('model_path') is None:
+        raise SystemExit(
+            "[eval] no checkpoint to evaluate: pass --model_path <ckpt>. "
+            "(No default on purpose — it used to silently evaluate the released model.)"
+        )
 
     if eval_output_dir:
         evaluator_cfg.eval_settings["output_path"] = eval_output_dir

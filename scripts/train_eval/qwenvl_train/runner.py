@@ -41,6 +41,9 @@ from typing import List, Optional
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 H1_PYTHON = "/workspace/isaaclab/_isaac_sim/python.sh"
 
+# Captured at import: write_repro() needs the launch argv before anything mutates sys.argv.
+_CLI_ARGV = list(sys.argv)
+
 # The config (Params + eval-cfg builders) lives in its own file, separated out so
 # this module stays a pure train+eval engine. runner imports Params for type hints
 # and uses default_config.py as the default --config (the b4 baseline).
@@ -254,7 +257,7 @@ def run_train(p: Params, output_dir: str, run_name: str, in_process: bool = Fals
         # DeepSpeed / HF Trainer initialize the process group correctly)
         env = {"RANK": "0", "WORLD_SIZE": "1", "LOCAL_RANK": "0",
                "MASTER_ADDR": p.master_addr, "MASTER_PORT": str(master_port),
-               "WANDB_DIR": output_dir}
+               "WANDB_DIR": output_dir, **_wandb_env()}
         return _run_in_process(p.trainer, argv, env_extra=env)
     launcher = [
         "torchrun",
@@ -268,8 +271,73 @@ def run_train(p: Params, output_dir: str, run_name: str, in_process: bool = Fals
     cmd = launcher + argv
     log_dir = os.path.join(output_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
+    write_repro(log_dir, datetime.now().strftime("%Y%m%d_%H%M%S"), "training",
+                {"output": output_dir, "run": run_name})
     return _run_and_tee(cmd, os.path.join(log_dir, "train.log"),
-                        env={**os.environ, "WANDB_DIR": output_dir})
+                        env={**os.environ, "WANDB_DIR": output_dir, **_wandb_env()})
+
+
+def _git(*args: str) -> str:
+    try:
+        return subprocess.check_output(["git", *args], cwd=REPO_ROOT,
+                                       stderr=subprocess.DEVNULL, text=True).strip()
+    except Exception:
+        return ""
+
+
+def write_repro(dest_dir: str, stamp: str, phase: str, notes: Optional[dict] = None) -> Optional[str]:
+    """Write `<dest_dir>/repro_<stamp>.sh` (git checkout + this runner.py command line),
+    plus `repro_<stamp>.diff` if the worktree was dirty. <stamp> matches test_*_<stamp>.log.
+    """
+    import shlex
+    import socket
+
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+        commit = _git("rev-parse", "HEAD")
+        branch = _git("rev-parse", "--abbrev-ref", "HEAD")
+        dirty = _git("status", "--porcelain")
+        cmd = shlex.join([sys.executable if os.path.isabs(_CLI_ARGV[0]) else "python3", *_CLI_ARGV])
+
+        lines = [
+            "#!/usr/bin/env bash",
+            f"# Reproduce this {phase} run.",
+            f"#   when   : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"#   host   : {socket.gethostname()}",
+            f"#   branch : {branch}",
+        ]
+        for k, v in (notes or {}).items():
+            lines.append(f"#   {k:<7}: {v}")
+        if dirty:
+            lines += [
+                "#",
+                f"#   WARNING: {len(dirty.splitlines())} uncommitted change(s) at launch time.",
+                f"#   The commit below does NOT describe them -- apply repro_{stamp}.diff too:",
+                f"#     git apply repro_{stamp}.diff",
+            ]
+        lines += [
+            "",
+            "set -euo pipefail",
+            f"cd {shlex.quote(REPO_ROOT)}",
+            f"git checkout {commit or '<unknown>'}",
+            "",
+            cmd,
+            "",
+        ]
+        path = os.path.join(dest_dir, f"repro_{stamp}.sh")
+        with open(path, "w") as f:
+            f.write("\n".join(lines))
+        os.chmod(path, 0o755)
+        if dirty:
+            diff = _git("diff", "HEAD")
+            if diff:
+                with open(os.path.join(dest_dir, f"repro_{stamp}.diff"), "w") as f:
+                    f.write(diff + "\n")
+        print(f"[repro] {path}", flush=True)
+        return path
+    except Exception as e:  # never let bookkeeping kill a 3-day run
+        print(f"[repro] could not write repro script: {e}", flush=True)
+        return None
 
 
 def _pick_port() -> int:
@@ -290,36 +358,27 @@ def find_best_checkpoint(output_dir: str) -> Optional[str]:
     return best
 
 
-def _latest_checkpoint(output_dir: str) -> Optional[str]:
-    """Highest-step checkpoint-<N>/ that contains a saved model (config.json)."""
-    step, latest = -1, None
-    for d in glob.glob(os.path.join(output_dir, "checkpoint-*")):
-        suffix = os.path.basename(d).rsplit("-", 1)[-1]
-        if suffix.isdigit() and int(suffix) > step and os.path.isfile(os.path.join(d, "config.json")):
-            step, latest = int(suffix), d
-    return latest
+def _has_model_weights(d: str) -> bool:
+    return os.path.exists(os.path.join(d, "config.json")) and bool(
+        glob.glob(os.path.join(d, "model*.safetensors")) or glob.glob(os.path.join(d, "pytorch_model*.bin"))
+    )
 
 
-def _pick_eval_ckpt(model_path: Optional[str], output_dir: str) -> Optional[str]:
-    """--model-path > best_metric ckpt > top-level final model (val_ratio=0) > newest
-    checkpoint-<step>. Deliberately NO released-ckpt fallback (silent wrong-model eval);
-    returns None after printing why."""
-    if model_path:
-        return model_path
-    best = find_best_checkpoint(output_dir)
-    if best:
-        return best
-    if os.path.isfile(os.path.join(output_dir, "config.json")):
+def find_last_checkpoint(output_dir: str) -> Optional[str]:
+    """Last model this run produced, for val_ratio=0 configs that have no best_metric:
+    output_dir itself (final save) else the highest-numbered checkpoint-N.
+    """
+    if _has_model_weights(output_dir):
         return output_dir
-    latest = _latest_checkpoint(output_dir)
-    if latest:
-        print(f"[eval] no final model at the top level of {output_dir}; "
-              f"evaluating the latest intermediate checkpoint: {latest}", flush=True)
-        return latest
-    print(f"[eval] ERROR: no evaluable checkpoint in {output_dir} (no best_metric ckpt, no "
-          "top-level config.json, no intermediate checkpoint-*); skipping eval. "
-          "Pass --model-path to evaluate a specific checkpoint.", file=sys.stderr)
-    return None
+    best_step, best_dir = -1, None
+    for d in glob.glob(os.path.join(output_dir, "checkpoint-*")):
+        try:
+            step = int(os.path.basename(d).split("-")[-1])
+        except ValueError:
+            continue
+        if step > best_step and _has_model_weights(d):
+            best_step, best_dir = step, d
+    return best_dir
 
 
 def _prep_ckpt_aux_files(output_dir: str, ckpt: str, system2_ckpt: str) -> None:
@@ -408,6 +467,17 @@ def _wandb_target() -> dict:
             "project": getattr(mod, "WANDB_PROJECT", None) or "huggingface"}
 
 
+def _wandb_env() -> dict:
+    """_wandb_target() as env vars, so HF Trainer's WandbCallback and the evaluator land
+    in the same project (they used to split: 'huggingface' for train, WANDB_PROJECT for eval).
+    """
+    target = _wandb_target()
+    env = {"WANDB_PROJECT": target["project"]}
+    if target["entity"]:
+        env["WANDB_ENTITY"] = target["entity"]
+    return env
+
+
 def _wandb_resume_env(output_dir: str = None, base_env=None, override_run_id: str = None) -> dict:
     """Return env vars that make the subprocess resume an existing wandb run.
 
@@ -439,19 +509,33 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
              wandb_new_run: bool = False,
              use_wandb: bool = True,
              watchdog: bool = False,
-             watchdog_idle_min: int = 10) -> int:
+             watchdog_idle_min: int = 10,
+             exp_name: Optional[str] = None,
+             vis: bool = False) -> int:
+    # One logs/<exp_slug>/ per experiment config: for --no-train runs output_dir IS the
+    # checkpoint, so several configs used to interleave progress.json / result_*.json.
+    # No timestamp in the dir name -- resume reads <log_dir>/progress.json (habitat) or
+    # <log_dir>/lmdb (h1); a fresh dir per run would re-evaluate everything every time.
+    #
     # h1 (Isaac Sim) eval: give each collision mode its own logs dir so `none` and
     # `stop` runs against the same --model-path don't share one lmdb/result/test log
     # (the lmdb key is trajectory_id_episode_id, NOT tagged by collision mode, so a
     # shared dir makes the second mode resume-skip everything and overwrites the
     # first's result_h1.json). wandb_run_id.txt lives at output_dir (above log_dir),
     # so it stays shared -> both modes still resume the SAME wandb run.
-    # Other machines (habitat h200/5090) keep the plain "logs" dir, unchanged.
-    if machine == "h1":
+    exp_slug = exp_name.replace("/", "_") if exp_name else None
+    if exp_slug and machine == "h1":
+        log_dir = os.path.join(output_dir, "logs", f"{exp_slug}_{flash_collision or 'none'}")
+    elif exp_slug:
+        log_dir = os.path.join(output_dir, "logs", exp_slug)
+    elif machine == "h1":  # direct run_eval() call without exp_name: pre-existing layout
         log_dir = os.path.join(output_dir, f"logs_{flash_collision or 'none'}")
     else:
         log_dir = os.path.join(output_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    write_repro(log_dir, stamp, "eval",
+                {"machine": machine, "ckpt": model_path, "config": config_path})
 
     if not use_wandb:
         # smoke-test / debug run: create/resume NO wandb run at all (not even the
@@ -459,9 +543,12 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
         # wandb.init() the evaluator itself calls a local no-op, belt and suspenders.
         env = dict(os.environ)
         env["WANDB_MODE"] = "disabled"
+        resuming = False
     else:
         id_file = os.path.join(output_dir, _WANDB_RUN_ID_FILE)
         one_shot_run_id = None  # set for --wandb-new-run (not saved to txt)
+        # BEFORE the branches below, which may create the file (see --wandb_run_name guard).
+        resuming = os.path.exists(id_file)
 
         if wandb_run_id:
             # --wandb-run-id: explicit run to resume; persist so future evals reuse it
@@ -500,7 +587,10 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
 
     env["TRAIN_EVAL_TARGET"] = machine  # read by the experiment config.py
     env["EVAL_OUTPUT_DIR"] = os.path.abspath(log_dir)
+    # stamps this run's row in the append-only result_<machine>.json (distributed_base.py)
+    env["EVAL_RUN_STAMP"] = stamp
     env["WANDB_DIR"] = output_dir
+    env.update(_wandb_env())
     if debugpy:
         env["DEBUGPY"] = debugpy  # habitat_vln_evaluator.py checks DEBUGPY=='eval' after model load
     if debug_dir:
@@ -514,16 +604,25 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
         env["EVAL_HEADLESS"] = "1"
     if flash_collision:
         env["EVAL_FLASH_COLLISION"] = flash_collision  # same env-var relay; see default_config.build_h1_eval_cfg
+    if vis:
+        # same env-var relay; writers are off by default and write under EVAL_OUTPUT_DIR
+        env["EVAL_VIS"] = "1"
     eval_argv = [
         "--config", config_path, "--quiet",
-        "--model_path", model_path, "--wandb_run_name", run_name,
+        "--model_path", model_path,
     ]
+    if not resuming:
+        # Only name the run when this eval creates it: wandb.init(name=...) RENAMES a
+        # resumed run, which used to rewrite a training run's name on its first eval.
+        eval_argv += ["--wandb_run_name", run_name]
     if in_process:
         # eval.py runs fine as a single process on one GPU (no torchrun); --quiet
         # dropped so console logs are visible while stepping in the debugger.
         argv = [a for a in eval_argv if a != "--quiet"]
         return _run_in_process("scripts/eval/eval.py", argv, env_extra=env)
-    log_file = os.path.join(log_dir, f"test_{machine}.log")
+    # timestamped: log_dir is stable across runs, so a fixed name would clobber the
+    # previous run's console log. repro_<stamp>.sh / the result row share the stamp.
+    log_file = os.path.join(log_dir, f"test_{machine}_{stamp}.log")
     if machine == "h1":
         # Isaac Sim does not support torchrun; run as a single process.
         python = H1_PYTHON if os.path.exists(H1_PYTHON) else sys.executable
@@ -547,7 +646,8 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
                    wandb_run_id: Optional[str] = None,
                    wandb_new_run: bool = False,
                    watchdog: bool = False,
-                   watchdog_idle_min: int = 10) -> None:
+                   watchdog_idle_min: int = 10,
+                   vis: bool = False) -> None:
     """End-to-end driver. ``exp_name`` e.g. 'batch_size/b4_eff128_base'.
 
     ``in_process=True`` runs train/eval in THIS process (no torchrun) for VSCode
@@ -587,10 +687,20 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
     if p.node_rank != 0:
         return
 
-    best = _pick_eval_ckpt(model_path, output_dir)
+    # Deliberately NO fallback to EVAL_MACHINE[machine]["model_path"]: with val_ratio=0
+    # there is no best_metric, and that fallback silently evaluated the RELEASED checkpoint.
+    if model_path:
+        best, how = model_path, "explicit --model-path"
+    elif find_best_checkpoint(output_dir):
+        best, how = find_best_checkpoint(output_dir), "lowest eval_loss"
+    else:
+        best, how = find_last_checkpoint(output_dir), "last checkpoint (no eval_loss)"
     if not best:
-        return
-    print(f"[eval] machine={machine}  checkpoint={best}")
+        raise SystemExit(
+            f"[eval] no checkpoint found under {output_dir}. Pass --model-path <ckpt> to "
+            f"evaluate an existing checkpoint, or check that training actually saved one."
+        )
+    print(f"[eval] machine={machine}  checkpoint={best}  ({how})")
     if do_train:
         _prep_ckpt_aux_files(output_dir, best, p.system2_ckpt)
     else:
@@ -601,7 +711,8 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
              debug_dir=p.debug_dir, eval_max_episodes=p.eval_max_episodes,
              headless=p.headless, flash_collision=p.flash_collision,
              wandb_run_id=wandb_run_id, wandb_new_run=wandb_new_run,
-             use_wandb=p.use_wandb, watchdog=watchdog, watchdog_idle_min=watchdog_idle_min)
+             use_wandb=p.use_wandb, watchdog=watchdog, watchdog_idle_min=watchdog_idle_min,
+             exp_name=exp_name, vis=vis)
 
 
 # --------------------------------------------------------------------------- #
@@ -668,6 +779,10 @@ def main_cli() -> None:
                          "runner: pauses at start; trainer/eval: pauses after model load.")
     ap.add_argument("--debug-dir", default=None,
                     help="BEV debug image output dir (auto-set to output/bev_debug when --debugpy is given)")
+    ap.add_argument("--vis", action="store_true",
+                    help="save per-episode visualizations under <ckpt>/logs/<config>/ "
+                         "(habitat: vis_debug mp4, h1: vis_output frames+video). Off by default — "
+                         "without this flag nothing is written.")
     # --- wandb control ---
     ap.add_argument("--wandb-run-id", default=None,
                     help="resume a specific wandb run ID (saved to wandb_run_id.txt for future evals)")
@@ -775,6 +890,7 @@ def main_cli() -> None:
         wandb_new_run=args.wandb_new_run,
         watchdog=args.watchdog,
         watchdog_idle_min=args.watchdog_idle_min,
+        vis=args.vis,
     )
 
 
