@@ -61,8 +61,14 @@ class VisualizeUtil:
         self.video_ext = video_ext
         self.trajectories: Dict[str, TrajectoryVizInfo] = {}
 
-        # Set up log directory and file handler (mirrors your progress logger style)
-        base_dir = os.path.join(PROJECT_ROOT_PATH, "logs", dataset_name, root_subdir)
+        # Set up log directory and file handler (mirrors your progress logger style).
+        # EVAL_OUTPUT_DIR wins so frames/videos stay with the rest of that eval's output.
+        eval_output_dir = os.environ.get("EVAL_OUTPUT_DIR")
+        base_dir = (
+            os.path.join(eval_output_dir, root_subdir)
+            if eval_output_dir
+            else os.path.join(PROJECT_ROOT_PATH, "logs", dataset_name, root_subdir)
+        )
         os.makedirs(base_dir, exist_ok=True)
 
         file_handler = logging.FileHandler(os.path.join(base_dir, f"{dataset_name}.log"))

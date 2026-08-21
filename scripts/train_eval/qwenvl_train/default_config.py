@@ -324,35 +324,51 @@ WANDB_PROJECT = os.environ.get("WANDB_PROJECT") or "InternNav"
 # num_history / resize_* / predict_step_num are NOT here — they come from the
 # training Params so train and eval stay in lockstep. Only the host/runtime
 # settings differ per machine. build_habitat_eval_cfg() consumes the full dict
-# (h200/5090 only); build_h1_eval_cfg() and runner.py's checkpoint fallback only
-# read "model_path", so the "h1" entry only needs that key.
+# (h200/5090 only); build_h1_eval_cfg() only reads "model_path".
+#
+# "model_path" is deliberately None everywhere: a real default here used to be reached as
+# runner.py's silent fallback and evaluated the RELEASED checkpoint. eval.py now raises if
+# no --model_path is given. Key kept (not deleted) so the dict schema is stable.
 EVAL_MACHINE = {
     # scripts/eval/configs/habitat_dual_system_mini_h200_cfg.py (H200, 8-GPU)
     "h200": {
-        "model_path": "/home/irteam/git/InternNav/checkpoints/InternVLA-N1-w-NavDP",
+        "model_path": None,
         "max_new_tokens": 1024,
         "config_path": "scripts/eval/configs/vln_r2r_mini.yaml",
         "output_path": "./logs/habitat/test_dual_system_mini",
         "use_wandb": True,
-        "wandb_project": "huggingface",
+        "wandb_project": WANDB_PROJECT,
         "extra_eval": {},
     },
     # scripts/eval/configs/habitat_dual_system_mini_5090_cfg.py (RTX 5090)
     "5090": {
-        "model_path": "/ws/src/InternNav/checkpoints/InternVLA-N1-DualVLN",
+        "model_path": None,
         "max_new_tokens": 256,
         "config_path": "scripts/eval/configs/vln_r2r_mini_5090.yaml",
         "output_path": "./logs/habitat/test_dual_system",
         "use_wandb": False,
-        "wandb_project": "internnav",
+        "wandb_project": WANDB_PROJECT,
         "extra_eval": {"wandb_run_name": "habitat_dual_system_mini_single"},
         "debug_dir": "./logs/5090_debug",  # visualization output dir for the BEV evaluator (also used by the BEV trainer when bev=True)
     },
     # Isaac Sim / VLN-PE (run manually); see build_h1_eval_cfg
     "h1": {
-        "model_path": "/ws/src/InternNav/checkpoints/InternVLA-N1-DualVLN",
+        "model_path": None,
     },
 }
+
+
+def _vis_enabled() -> bool:
+    """runner.py --vis, relayed through the env (eval.py re-imports this module fresh)."""
+    return os.environ.get("EVAL_VIS") == "1"
+
+
+def _vis_dir(name: str) -> str:
+    """Visualization output dir, under the eval's own log dir (EVAL_OUTPUT_DIR) when there
+    is one; falls back to the old CWD-relative path outside runner.py.
+    """
+    out = os.environ.get("EVAL_OUTPUT_DIR")
+    return os.path.join(out, name) if out else f"./logs/habitat/{name}"
 
 
 def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
@@ -382,8 +398,9 @@ def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
         "resize_h": p.resize_h,
         "predict_step_num": p.predict_step_num,
         "max_new_tokens": m["max_new_tokens"],
-        "vis_debug": False,
-        "vis_debug_path": "./logs/habitat/vis_debug",
+        # off unless runner.py was given --vis (env relay, same as BEV_DEBUG_DIR)
+        "vis_debug": _vis_enabled(),
+        "vis_debug_path": _vis_dir("vis_debug"),
     }
     eval_type = "habitat_vln"
     output_path = m["output_path"]
@@ -455,6 +472,7 @@ def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
             "port": "2333",
             "dist_url": "env://",
             "use_wandb": m["use_wandb"] and p.use_wandb,
+            "wandb_entity": WANDB_ENTITY,
             "wandb_project": m["wandb_project"],
             **m["extra_eval"],
         },
@@ -600,7 +618,7 @@ def build_h1_eval_cfg(p: Params, model_path: str = EVAL_MACHINE["h1"]["model_pat
         eval_type="vln_distributed",
         eval_settings={
             "save_to_json": True,
-            "vis_output": False,
+            "vis_output": _vis_enabled(),  # runner.py --vis; writes under EVAL_OUTPUT_DIR
             "show_rgb": False,
             "use_agent_server": False,
             "use_wandb": p.use_wandb,

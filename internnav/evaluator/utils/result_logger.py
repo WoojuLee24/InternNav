@@ -225,7 +225,10 @@ class ResultLogger:
 
         # write log content to file
         log_file_path = os.path.join(self.lmdb_path, 'eval.log')
-        log_file_path1 = f'{PROJECT_ROOT_PATH}/logs/{self.name}/eval_result.log'
+        # EVAL_OUTPUT_DIR first, same as finalize_all_results below.
+        log_dir1 = os.environ.get('EVAL_OUTPUT_DIR') or f'{PROJECT_ROOT_PATH}/logs/{self.name}'
+        os.makedirs(log_dir1, exist_ok=True)
+        log_file_path1 = os.path.join(log_dir1, 'eval_result.log')
         with open(log_file_path, 'w') as f:
             f.write('\n'.join(log_content))
         with open(log_file_path1, 'w') as f:
