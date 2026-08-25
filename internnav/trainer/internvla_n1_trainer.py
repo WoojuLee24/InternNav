@@ -211,6 +211,10 @@ def train(attn_implementation="flash_attention_2"):
         )
         data_args.model_type = "qwen2vl"
 
+    # patch_embed_impl='conv'(기본)이면 no-op — 기존 경로 완전 보존
+    from internnav.model.basemodel.internvla_n1.patch_embed_impl import apply_patch_embed_impl
+    apply_patch_embed_impl(model, model_args.patch_embed_impl)
+
     if data_args.data_flatten:
         replace_qwen2_vl_attention_class()
     model.config.use_cache = False
