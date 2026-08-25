@@ -19,6 +19,15 @@ class ModelArguments:
     debug_modes: str = field(default="")
     debug_dir: Optional[str] = field(default=None)
     debugpy: str = field(default="", metadata={"help": "debugpy attach target: 'trainer' listens on port 5681 after model load (rank 0 only)"})
+    patch_embed_impl: str = field(
+        default="conv",
+        metadata={
+            "help": "ViT patch_embed 구현. 'conv' = 기존 동작(기본). "
+                    "'gemm' = 등가 GEMM (forward 비트 동일, H200 실측 2373x). "
+                    "'channels_last' = Conv3d 유지 + 입력만 channels_last_3d (cuDNN 경로, 293x, "
+                    "forward 출력은 conv와 다름). 파라미터 이름/shape는 세 경우 모두 불변."
+        },
+    )
 
 
 @dataclass

@@ -78,6 +78,11 @@ class Params:
     tune_mm_llm: bool = False
     gradient_checkpointing: bool = True
     system1: str = "nextdit_async"
+    # ViT patch_embed 구현. 'conv' = 기존 동작(기본, 플래그 자체를 emit하지 않음).
+    # 'gemm' = 등가 GEMM (forward 비트 동일, H200 실측 fwd+bwd 2373x, 전체 step 2.32x).
+    # 'channels_last' = Conv3d 유지 + 입력만 channels_last_3d (cuDNN 경로 293x, forward는 conv와 다름).
+    # 세 경우 모두 파라미터 이름/shape 불변 -> checkpoint/ZeRO/resume 무영향.
+    patch_embed_impl: str = "conv"
 
     # ---- BEV visual input (bev=False => plain trainer + fpv eval, unchanged) ----
     bev: bool = False              # master toggle for the BEV pipeline (train + eval)
@@ -270,6 +275,10 @@ class Params:
             "--run_name", run_name,
             "--report_to", "none" if (smoke or not self.use_wandb) else "wandb",
         ]
+        # 'conv'면 플래그를 아예 emit하지 않아 기존 config들의 argv가 바이트 단위로 동일하게 유지된다
+        # (verify_params*.py의 upstream argv parity 검사가 수정 없이 통과한다)
+        if self.patch_embed_impl != "conv":
+            argv += ["--patch_embed_impl", self.patch_embed_impl]
         if smoke:
             argv += ["--max_steps", str(self.max_steps)]
         return argv
@@ -398,6 +407,8 @@ def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
         "resize_h": p.resize_h,
         "predict_step_num": p.predict_step_num,
         "max_new_tokens": m["max_new_tokens"],
+        # train과 동일한 ViT patch_embed 구현을 쓴다 (train/eval 일치). 'conv'면 기존 동작.
+        "patch_embed_impl": p.patch_embed_impl,
         # off unless runner.py was given --vis (env relay, same as BEV_DEBUG_DIR)
         "vis_debug": _vis_enabled(),
         "vis_debug_path": _vis_dir("vis_debug"),

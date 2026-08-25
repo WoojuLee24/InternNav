@@ -770,6 +770,10 @@ def main_cli() -> None:
                     help="h1/Isaac Sim eval only: collision handling during flash-move "
                          "('stop'=halt in place, 'reset'=episode failure, 'none'=no detection). "
                          "Default: stop (config default, unchanged if omitted).")
+    ap.add_argument("--patch-embed-impl", choices=["conv", "gemm", "channels_last"], default=None,
+                    help="ViT patch_embed 구현. 'conv'=기존 동작, 'gemm'=등가 GEMM(forward 비트 동일, "
+                         "전체 step 2.3x), 'channels_last'=Conv3d 유지+cuDNN 경로(forward는 conv와 다름). "
+                         "Default: config 값(대개 conv), 생략하면 변경 없음.")
     ap.add_argument("--print-train-argv", action="store_true", help="print resolved train flags and exit")
     # --- VSCode debugging ---
     ap.add_argument("--in-process", action="store_true",
@@ -845,6 +849,8 @@ def main_cli() -> None:
         params = replace(params, headless=True)
     if args.flash_collision:
         params = replace(params, flash_collision=args.flash_collision)
+    if args.patch_embed_impl:
+        params = replace(params, patch_embed_impl=args.patch_embed_impl)
     if args.max_steps:  # one smoke-test knob: caps train steps AND eval episodes to the same N
         params = replace(params, max_steps=args.max_steps, eval_max_episodes=args.max_steps)
     if in_process:
