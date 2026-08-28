@@ -232,3 +232,9 @@ save_steps=5000 직전이라 **checkpoint 0개, 14시간 학습 유실, resume �
 - resume 직후 HF Trainer가 15,000 step 분량 데이터 순서 fast-forward (수정 덕에 ~3-4h 예상).
 - wandb는 resume 구간이 새 run으로 기록됨 (기존 run id 미보존).
 - 완료 후 평가: `runner --no-train --model-path <_031307 dir>` 수동 실행 필요 (runner 미경유 학습이므로).
+
+### resume 결과 (2026-08-28 확정)
+- fast-forward는 sampler 인덱스 스킵으로 **29초 만에 완료** (우려했던 수 시간 아님).
+- loss 0.40에서 자연스럽게 연속, grad_norm ~1.5 (optimizer/scheduler 복원된 warm resume 확인).
+- **20.0 s/step, GPU 평균 665W** (수정 전 48s/step, 190–340W) — dataloader 병목 해소,
+  연산 한계 도달. 남은 34k steps ≈ **7.9일** (기존 페이스 ~19일).
