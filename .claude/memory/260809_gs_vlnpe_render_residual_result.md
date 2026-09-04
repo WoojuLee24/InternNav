@@ -104,7 +104,7 @@ timeout --signal=KILL 2400 /workspace/isaaclab/_isaac_sim/python.sh scripts/data
 ```
 
 - `--film_iso`: RTX 톤매퍼 노출(`/rtx/post/tonemap/filmIso`). 낮추면 전체가 어두워진다.
-- 나머지 인자 의미는 `pipeline_reports.md` 참고.
+- 나머지 인자 의미는 `reports.md` 참고.
 
 ## 5. 신규 파일
 
