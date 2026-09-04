@@ -1,11 +1,14 @@
 # Memory Index
 
+- [S2 단독 latency A/B](260819_s2_standalone_latency_result.md) — Isaac 없이 s2_step만 측정, 이미지 장수 스윕으로 llama.cpp 순차 인코딩 확정(orig 27.2 vs lite 56.7 ms/장); 구 "2.4x 빠름" 값은 폐기
+
 - [VLN-PE GT Follower Agent Plan](project_gt_follower_agent.md) — GT oracle agent 구현 계획 (미완료), 플랜 파일: `/root/.claude/plans/vln-pe-gt-episode-misty-moon.md`
 - [BEV Injection Architecture Plan](project_bev_injection.md) — Phase 1 구현 완료(feature/bev_v0.1, merge 대기); S1/S2 모드(fpv/bev/fpv_bev), 지원범위/커맨드/함정/Phase 2 과제
 - [BEV Injection 관련 핵심 파일](reference_bev_key_files.md) — 구현 시 참조 파일 목록, Habitat LOOKDOWN 흐름, 체크포인트별 depth 사용 여부
 - [기존 파일 수정 금지 — 신규 파일만 추가](feedback_new_files_only.md) — 신규 feature는 반드시 신규 파일 + config arg 선택 구조로 제안
 - [교정에서 일반원리 추출](feedback_extract_principle_from_corrections.md) — `lesson` 스킬 사용, 즉흥적으로 하지 않고 정해진 절차로 원인파악+일반원리 추출
 - [train_eval/qwenvl_train Python 구조](project_train_eval_qwenvl_python.md) — 셸 대신 Python으로 train+eval 한 프로세스 구동, Params 단일 소스로 train==eval 보장(batch_size 완료); 다음 단계는 config 통일
+- [2dloader_vlnce — 시야각 내 RGB/depth만으로 embodiment augmentation](260817_2dloader_vlnce_result.md) — mesh/렌더러 없이 depth 1장으로 GT path·pixel goal 재생성. W0–W6 전부 PASS(두 씬), 18 ms/frame. 3dloader와 다른 결론 5가지(바닥 free carving·미관측 정책·goal 라벨 분리·retreat 우세·torch 스레드 절벽 → R2의 165 ms/frame 원인 확정)
 - [Quantization Kit (S2 벤치마크)](project_quantization_kit.md) — two-step look-down iteration, VLN-PE/VLN-CE 분리 데이터셋, 커맨드, 주요 파라미터
 
 ### Understanding (구 `.claude/understanding/`, Claude 작성 코드 이해 문서)
@@ -16,9 +19,10 @@
 - [S2 입력 파이프라인](understanding_input.md) — internvla_n1_policy.py s2_step 5단계 변환 흐름
 - [gs_vlnpe FPV/BEV 정합 검증 기하](understanding_gs_vlnpe_fpv_bev_geometry.md) — `action[t] @ diag(1,-1,-1,1)`이 진짜 c2w; FPV(상대)는 축 오류를 상쇄해 못 잡고 BEV/world(절대)만 잡음; mesh 앵커가 최종 판별 근거
 
-- 리포트 링크 전체 목록: repo 파일 `scripts/dataset_converters/gs_vlnpe/pipeline_reports.md` (단일 소스 — 48개 링크 + 로컬 경로 + 권장 커맨드)
+- 리포트 링크 전체 목록: repo 파일 `scripts/dataset_converters/gs_vlnpe/reports.md` (단일 소스 — 46개 링크 + 로컬 경로 + 권장 커맨드. 2d/3dloader도 같은 이름 `reports.md`로 통일됨)
 
 ### Task Results (구 `.claude/tasks/*_result.md`, 완료된 작업 결과 보고)
+- [On-the-fly embodiment augmentation 구현 가능성 판정 & 계획](260814_onthefly_embodiment_aug_feasibility_result.md) — 논문 `VLN collision.md` 해결방법v0.2를 repo에 매핑. **학습은 vln_ce만 읽는다**(vln_n1/vln_pe는 현 dataloader가 못 읽음). **S1이 BEV면 on-the-fly aug 완전 성립(렌더러 불필요)** — occupancy 20MB worker 상주 + `esdf_utils` 순수함수(2D 격자만 받아 world 의존 없음) 재사용, depth만 바꾸면 BEV 자동 반영. **불가능한 건 FPV RGB 연속 시점 변화 하나**(worker당 Isaac/Open3D 불가) → vln_ce의 이산 5리그로 대체. 현 BEV 경로엔 **r_b dilation이 아예 없다**(논문 C1의 구멍). Isaac은 `TaskCfg.objects`로 장애물 spawn·`robot_platform_size`·`camera_translation` 전부 config 노출, 에셋 로컬 30,958+33,330개, flash 충돌이 top-down depth 기반이라 spawn 물체를 자동 인식. **⚠️ 장애물/r_b를 바꾸면 `reference_path`가 거짓 GT** → GT 재생성 필수. habitat은 미설치(magnum 미빌드)라 §7로 분리
 - [S1/S2 통합 Image Provider 구현](260707_s1s2_bev_depth_panorama_result.md) — view x type x mode x combine
 - [UnifiedImageProvider 전체 조합 스모크 테스트](260707_unified_provider_combos_result.md)
 - [Habitat eval(rollout) 10개 조합 검증](260708_habitat_eval_unified_provider_result.md)
@@ -38,3 +42,11 @@
 - [gs_vlnpe 02 ESDF 맵](260803_gs_vlnpe_02_esdf_result.md) — M1.2 완료; occupancy 저장 + GT 궤적 clearance 게이트, h_nav/h_obs 밴드, 입력은 obj
 - [gs_vlnpe 01_prepare_scene 씬 정합 게이트](260802_gs_vlnpe_01_prepare_scene_result.md) — M1.1 완료; USD/정규화 불필요로 게이트만 남김, mesh 표면거리 <1mm, negative test 포함. **camera_extrinsic = 에피소드별 로봇 키 h_b + 카메라 pitch**(2026-08-03 정정)
 - [h1 eval hang 원인 조사](260724_h1_eval_hang_investigation_result.md) — env.step() 내부 Isaac stall, system memory 초과 아님(배제), watchdog 대응
+- [GT vs find_path 여유 — #03 결론 정정](260820_clearance_gt_vs_findpath_result.md) — min만 보고 정반대로 결론냈던 사례. **남은 질문 2개는 아래 #03 재작성에서 닫힘**
+- [#03 재작성 — "벽 뚫기"는 재현되지 않는다](260820_03_rewrite_result.md) — 게이트 8→4개, clearance 분석 삭제(줄 수는 447→593으로 늘었다 — 개념 수만 줄었다)(반경 이중 계산). GT는 배포 navmesh에서 안 뚫는다(17DRP 0/2465 · s8 14/2450, 깊이 최대 3.7cm < 한 칸), 래스터 불일치 58점 **전부 깊이 1칸** = 격자 반올림(반증 가능한 술어). ⚠️ **길이비 1.002인데 find_path가 장애물 반대편으로 돈다** — 그림 보고 발견, 요약 통계가 실체를 가린 3번째 사례. `chain_find_path` 갭 점프 버그 + `summary.html` 이름 충돌 수정
+- [#04 재작성 — 불일치 원인 분해](260820_04_rewrite_result.md) — 밴드 8조합 스윕 폐기(값은 navmesh 직독), 게이트 1→4개. **원인 분해**: s8 거짓 승인의 **66.6%가 "이 높이에 바닥 없음"**(다층 씬), 17DRP는 경계 1칸이 80%. `& floor_exists` 수정은 일치율 75.8→90.7%지만 **거짓 기각 9배로 채택 불가**. **헤드리스 pathfollower 레시피**(`move_filter_fn` 없으면 벽 통과) — s8 재현 median 56.4→8.8 cm지만 4/9는 여전히 경로 갈라짐. ⚠️ 지표를 바꿨으니 옛 88.7%와 직접 비교 금지. 내가 만든 항등식 게이트를 스스로 잡음. **후속: recast-like v2**(`recast_like.py`, 칸마다 바닥+despike+시작점 연결성) — s8 **92.30%로 모든 후보 중 최고**·GT 이탈 0/0·FR 895. v1은 ledge 가짜 seam(스캔 구멍 kf)이 GT 1,183점 차단했었음. 잔여 F 745로 G1 실패 → default는 navmesh 래스터화 유지, v2는 navmesh 없는 씬용 최선. 균일 침식 확대는 천장(96.8/81.3%)+identity 붕괴로 기각
+- [GT 벽 여유의 정체 — 의도인가?](260820_gt_wall_clearance_result.md) — vln_ce GT는 100% 이산 액션 산물(0.25m/15° 실측)이지만 벽 여유는 **의도도 이산화 부산물도 아님**(우리 follower·sliding OFF 둘 다 재현 실패, 여유<0.10이 GT의 2~4배) → 2020 당시 follower 구현 특성, 메커니즘 미해결. **vln_n1은 사용자 말대로 의도적**(refine 목적함수 = 장애물에서 멀어지기, clearance median 0.46/0.67 m). 함의: 회랑 중심선=GT 서브궤적 재확인 · 우리 follower 재생성 경로는 원본보다 벽에 붙는 스타일 차이
+- [GT 여유 매칭 refine (corridor_gtc)](260820_gtc_refine_result.md) — 목표 여유 = GT 로컬 여유로 미는 새 refiner. **전제 수정**: ladder의 corridor는 애초에 벽에 안 붙었음(|Δ여유| 3.4cm — 벽 붙음은 follower/측지선 얘기). 결과 갈림: 17DRP P1~P4 전부 PASS(GT거리 7.5→6.0), s8 P1·P2 FAIL(+2.6cm — 여유 등고선이 GT 반대쪽에도 있어 역행) → **기본 ladder 교체 안 함**. 예상 밖 발견: **blocked leg 8개(5+3)를 전부 해소**(min_move 계단→스플라인 코너컷 위반을 match_gt가 회피). 후속: 방향 항(GT쪽 반공간), gtc-ladder r_b 스윕
+- [학습용 지도 벤치마크](260821_map_bench_result.md) — 샘플당: 밴드 **1.7~4.2ms** · navmesh 래스터 37~73ms(**이산 r_b만**·habitat 필요·fork 안전) · recast v2 **17~41ms**(csum 씬당 캐시 반영, 연속 r_b·habitat 불필요). 셋 다 렌더(~349ms) 대비 소액 → 선택 기준은 속도가 아니라 정확도·제약. ⚠️ Open3D 렌더러는 habitat import **전에** 만들 것(EGL core dump)
+- [지도 3종 비교 종합 리포트](260821_map_comparison_report.md) — 세션의 비교표 전부를 한 페이지로. Artifact: https://claude.ai/code/artifact/aea56605-e2ef-4868-af5b-69f4939a988e
+- [노은역 USDZ 00→04 실행 (apply_real 도입)](260820_gs_vlnpe_noeun_run_result.md) — `origin/feature/real_dg` `606b7dc` cherry-pick 후 `noeun_station_collision.usdz`로 재현. **기준선 소수점까지 일치**(01 area 798.1859255685 m² · 02 nav 0.8796391665 · 03 20/20 median 14.41 m). **04 PASS 20/20 · 8,378 frame · mesh-anchor median 0.00462 m**(기준선과 동일). 실측: **RGB=NuRec GS 볼륨 / depth=collision mesh**(`expose_collision_meshes_for_rendering`이 runtime stage만 visible로), depth raw 227~10000(0.227~10.0 m). Isaac 5.1 `librtx.hydra.so`에 NuRec 내장(extension 불필요). ⚠️ usdz 경로가 문서(`data/noeun_station/`)와 다름 → `data/GS_USDZ/Subway/`. ⚠️ **중간층(-0.05)만 완료**, low/high 미완 · `detect_floor_levels()` 미연결 · `camera_profiles`에 d455_nominal 하나뿐. 정합 대상 diff는 7,000줄 중 833줄(12%). ⚠️ **용량만 0.81 GB vs 문서 3.1 GB로 미해소** — 인코더 기본값이 on-disk를 바이트 단위 재현하므로 설정 차이 아님, 내용 검증은 전부 통과. **depth 30 m 실험**: `d455_30m` 추가(저장 0.1~30 m, **far 12→35 m 필수** — 유효조건이 `depth < far*0.99`), 값없음 7.6%→0.1%. ⚠️ **far plane 변경이 rgb도 바꾼다** — 같은 프로파일 재렌더가 픽셀 단위 동일(렌더러 결정론적)임을 확인해 원인을 far plane으로 확정. 10 m/30 m 데이터셋 rgb는 섞어 쓸 수 없다. [report](https://claude.ai/code/artifact/e42ce9d3-f8f2-41f3-b4bb-9dd889459abc)

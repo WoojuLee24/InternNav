@@ -1,7 +1,7 @@
-# gs_vlnpe 파이프라인 리포트 링크 모음 (00~04, vln_n1 + vln_pe)
+# gs_vlnpe 파이프라인 리포트 링크 모음 (00~04, vln_n1 + vln_pe + 노은역 usdz)
 
 각 스크립트가 만든 `report.html`의 Artifact 링크 + 로컬 경로. 로컬 경로는 repo 루트 기준.
-최종 갱신 2026-08-10 (ambient_only + film_iso 70 재렌더 반영). 상세 경위·수치는
+최종 갱신 2026-09-03 (노은역 usdz 절 추가). 상세 경위·수치는
 `.claude/memory/260804_gs_vlnpe_04_render_obs_result.md`(Open3D),
 `.claude/memory/260805_gs_vlnpe_04_render_obs_isaac_result.md`(Isaac),
 `.claude/memory/260807_gs_vlnpe_vlnpe_dataset_result.md`(VLN-PE 지원) 참고.
@@ -84,6 +84,72 @@ report.html/이미지는 `main()` 반환 시점에 이미 저장 완료다. 로�
 03 씬1 20/20 성공·**같은루트 19/20**(chamfer 0.130, `--refine_radius 0.20`) / 씬2 14/16·9/14 ·
 03e 계획GT 대비 씬1 19/20 · 04 Isaac 재현 경로 렌더 mesh-anchor 0.0033~0.0079 m ·
 롤아웃 자체 성공률(R2R 3 m 기준) 씬1 25/25, 씬2 7/15.
+
+---
+
+# 노은역 usdz (`apply_real/`, GT 없는 GS 씬)
+
+`data/GS_USDZ/Subway/noeun_station_collision.usdz`(NuRec Gaussian-splat + 충돌 mesh, 2.2 GB)의
+**중간층**(`floor_z = -0.05 m`)에서 만든 데이터셋. 위 두 절과 달리 **기존 GT 궤적이 없어**
+02가 geometry만으로 맵을 만들고 03이 경로 GT를 생성한다(`--mode random` 전용, `gt_replay` 불가).
+`noeun_station_mid`는 잘라낸 새 usdz가 아니라 원본 안의 범위를 적어둔 **논리 scene ID**다.
+
+개별 단계 report는 Artifact로 발행하지 않았고, 아래 통합 리포트 하나에 5단계 대조 결과가 모여 있다:
+**[노은역 00→04 실행 결과](https://claude.ai/code/artifact/e42ce9d3-f8f2-41f3-b4bb-9dd889459abc)**
+(카메라·depth 범위 3종 다이어그램, rgb↔depth 전환 위젯, 10 m vs 30 m 비교 포함)
+
+| 단계 | 로컬 경로 (`logs/gs-vlnpe/apply_real/` 이하) | 판정 | 주요 수치 |
+|---|---|---|---|
+| 00 자산 계약 검사 | `00_inspect_vln_n1/noeun_station_mid/` | PASS | 6 gate, triangle 665,812, 중간층 후보 면 14,618 |
+| 01 중간층 논리 ROI | `01_prepare_scene/noeun_station_mid/` | PASS | 면 14,618, 면적 798.1859255685 m² |
+| 02 occupancy·ESDF | `02_build_freemap_esdf/noeun_station_mid/` | UNVERIFIED | grid 1345×1308×40, occ 0.010131462, navigable 0.879639166, maxESDF 27.6688 m |
+| 03 경로 GT 20개 | `03_sample_gt_paths/noeun_station_mid_random/` | PASS | 20/20, 충돌 0, 길이 median 14.41 m (2.26~31.90), min clearance 0.158 m |
+| 04 렌더 (`d455_nominal`) | `04_render_obs_isaac/noeun_station_mid_random_d455_nominal/` | PASS | 20/20, **8,378 frame**, mesh-anchor median 0.00462 m / worst 0.00727 m |
+| 04 렌더 (`d455_30m`) | `04_render_obs_isaac/noeun_station_mid_random_d455_30m/` | PASS | 2 episode(비교용), 값없음 7.6 %→0.1 % |
+
+02가 **UNVERIFIED**인 이유는 실패가 아니다 — GT 궤적이 없어 독립 clearance 검증을 건너뛴 것이고
+geometry sanity 게이트는 통과했다.
+
+## 실행 커맨드 (전부 한 줄, repo 루트에서)
+
+```
+timeout --signal=KILL 1800 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/apply_real/00_inspect_vln_n1.py --scene noeun_station_mid --usd_path data/GS_USDZ/Subway/noeun_station_collision.usdz --floor_z -0.05 --out_dir scripts/dataset_converters/gs_vlnpe/apply_real --log_dir logs/gs-vlnpe/apply_real
+```
+```
+timeout --signal=KILL 1800 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/apply_real/01_prepare_scene.py --scene noeun_station_mid --usd_path data/GS_USDZ/Subway/noeun_station_collision.usdz --floor_z -0.05 --out_dir scripts/dataset_converters/gs_vlnpe/apply_real --log_dir logs/gs-vlnpe/apply_real
+```
+```
+timeout --signal=KILL 3600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/apply_real/02_build_freemap_esdf.py --scene noeun_station_mid --geometry usd --ref_h_b 0.875 --scene_meta_dir scripts/dataset_converters/gs_vlnpe/apply_real --out_dir scripts/dataset_converters/gs_vlnpe/apply_real --log_dir logs/gs-vlnpe/apply_real
+```
+```
+timeout --signal=KILL 3600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/apply_real/03_sample_gt_paths.py --scene noeun_station_mid --mode random --num_episodes 20 --esdf_dir scripts/dataset_converters/gs_vlnpe/apply_real/esdf --out_dir scripts/dataset_converters/gs_vlnpe/apply_real --log_dir logs/gs-vlnpe/apply_real
+```
+```
+timeout --signal=KILL 14400 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/apply_real/04_render_obs_isaac.py --scene noeun_station_mid --mode random --num_episodes 20 --camera d455_nominal --out_dir scripts/dataset_converters/gs_vlnpe/apply_real --log_dir logs/gs-vlnpe/apply_real
+```
+
+**노은역 전용 인자**: `--usd_path`(기본 `None`=기존 Matterport 경로) · `--floor_z -0.05`(수동 지정,
+자동 검출 아님) · `--geometry usd`(obj가 없어 필수) · `--ref_h_b 0.875`(GT가 없어 `--ref_episode`로
+못 얻음) · `--camera`(new_scene에서 기본값 `dataset`은 exit 2, 반드시 프로파일 지정).
+
+## 새 카메라 프로파일 (`camera_profiles.py`)
+
+| | 해상도 | hfov | depth 한 칸 | 저장 범위 | 렌더 near/far | uint16 상한 |
+|---|---|---|---|---|---|---|
+| `dataset` (vln_n1 GT) | 480×270 | 68.0° | 0.0001 m | 0.1~3 m | 0.05/10 m | 6.5534 m |
+| `d455_nominal` | 480×270 | 90.0° | 0.001 m | 0.1~10 m | 0.05/12 m | 65.534 m |
+| `d455_30m` | 480×270 | 90.0° | 0.001 m | 0.1~30 m | 0.05/35 m | 65.534 m |
+
+**불변식**: `render_far_m > depth_max_m / 0.99` — `generate_episode`의 유효 조건이
+`depth < render_far × 0.99`라서 far를 안 올리면 저장 상한을 올려도 담기지 않는다.
+
+⚠️ **far plane 변경은 rgb도 바꾼다**(실측). 같은 프로파일로 재렌더하면 rgb·depth가 픽셀 단위
+완전 동일(렌더러 결정론적)임을 확인해 원인을 far plane으로 확정했다. 따라서 **10 m와 30 m
+데이터셋의 rgb는 같은 장면의 다른 데이터이므로 섞어 쓸 수 없다.**
+
+상세 경위·수치는 `.claude/memory/260820_gs_vlnpe_noeun_run_result.md`,
+실행 순서·기대 수치는 `apply_real/README.md`, 설계 근거는
+`.claude/memory/codex/codex_noeun_usdz_mid_00_to_04_complete_reproduction_guide.md` 참고.
 
 ---
 

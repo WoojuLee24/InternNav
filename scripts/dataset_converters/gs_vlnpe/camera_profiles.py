@@ -63,7 +63,22 @@ D455_NOMINAL = CameraProfile(
     render_far_m=12.0,
 )
 
-PROFILES = {D455_NOMINAL.name: D455_NOMINAL}
+# 30 m 저장 범위 변형. K/해상도는 d455_nominal과 동일하게 두어 "범위만 바꿨을 때의 차이"를
+# 분리해서 볼 수 있게 한다. render_far는 저장 상한보다 커야 한다 — generate_episode의 valid
+# 조건이 depth < render_far*0.99 이므로 30 m를 담으려면 far가 최소 30/0.99 = 30.3 m다.
+D455_30M = CameraProfile(
+    name='d455_30m',
+    width=480,
+    height=270,
+    k=square_pixel_k_from_hfov(480, 270, 90.0),
+    depth_scale_m=0.001,
+    depth_min_m=0.1,
+    depth_max_m=30.0,
+    render_near_m=0.05,
+    render_far_m=35.0,
+)
+
+PROFILES = {D455_NOMINAL.name: D455_NOMINAL, D455_30M.name: D455_30M}
 
 
 def names() -> tuple:
