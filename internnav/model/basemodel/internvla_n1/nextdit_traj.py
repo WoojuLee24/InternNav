@@ -101,7 +101,10 @@ class LuminaNextDiTBlock(nn.Module):
 
         self.feed_forward = LuminaFeedForward(
             dim=dim,
-            inner_dim=4 * dim,
+            # DualVLN traj-DiT FFN = 1024 (matches its checkpoint). Safe-global: this nextdit block is only
+            # built for system1='nextdit_async' (DualVLN); the system2 baseline uses 'navdp_async' and NEVER
+            # constructs this block (verified: 0 nextdit refs in the completed system2 run) -> byte-identical.
+            inner_dim=int(4 * dim),
             multiple_of=multiple_of,
             ffn_dim_multiplier=ffn_dim_multiplier,
         )
