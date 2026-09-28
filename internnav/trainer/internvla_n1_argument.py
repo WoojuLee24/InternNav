@@ -19,6 +19,18 @@ class ModelArguments:
     debug_modes: str = field(default="")
     debug_dir: Optional[str] = field(default=None)
     debugpy: str = field(default="", metadata={"help": "debugpy attach target: 'trainer' listens on port 5681 after model load (rank 0 only)"})
+    patch_embed_impl: str = field(
+        default="conv",
+        metadata={
+            "help": "ViT patch_embed 구현. 'conv' = 기존 동작(기본). "
+                    "'gemm' = 등가 GEMM (forward 비트 동일, H200 실측 2373x). "
+                    "'channels_last' = Conv3d 유지 + 입력만 channels_last_3d (cuDNN 경로, 293x). "
+                    "'conv_fp32' = Conv3d를 fp32로 (cuDNN, 403x, wgrad 오차 2.94e-4). "
+                    "'gemm_fp32' = 등가 GEMM을 fp32 누산으로 (wgrad 오차 1.05e-6 = bf16 gemm의 1/1580, "
+                    "step당 +0.1%). conv 외에는 forward가 conv와 비트 동일하지 않을 수 있다 "
+                    "(gemm만 동일). 파라미터 이름/shape는 모든 경우 불변."
+        },
+    )
 
 
 @dataclass
