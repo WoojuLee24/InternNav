@@ -27,5 +27,19 @@ import dualvln_stage1_full as full  # noqa: E402
 TRAIN_MACHINE = full.TRAIN_MACHINE  # 재-export 필수 (빼면 조용히 mini 데이터셋으로 떨어진다)
 
 EXP_NAME = "baseline_ablation/dualvln_stage1_full_gemm"
-PARAMS = replace(full.PARAMS, patch_embed_impl="gemm")
+# stage2(dualvln_stage2_from_stage1)는 두 가지를 이름으로 판단한다:
+#   1) glob  : {checkpoints_root}/baseline/dualvln_stage1_internvla-n1-system2_*
+#   2) 모델 클래스: internvla_n1_trainer.py가 model_name_or_path에 이 substring이 있는지로
+#      InternVLAN1ForCausalLM을 고른다. 없으면 조용히 Qwen2VL(2.5도 아님)로 로드된다.
+# EXP_NAME이 규약을 벗어나면 stage2가 이 출력을 못 쓴다 -> 규약에 맞는 심볼릭 링크를
+# baseline/ 아래 만들거나 STAGE1_CKPT로 직접 지정해야 한다.
+# eval: 모델 rank를 GPU 0-3, habitat GL 렌더를 GPU 4-7로 완전 분리한다.
+# 부모의 eval_render_gpu_offset=1 + nproc 8은 8개 GPU 전부가 CUDA와 GL을 동시에 호스팅해
+# local_rank 6이 libnvidia-eglcore에서 SIGABRT로 죽는다 (결정적 재현 확인, mode='system2').
+PARAMS = replace(
+    full.PARAMS,
+    patch_embed_impl="gemm",
+    eval_nproc=4,
+    eval_render_gpu_offset=4,
+)
 eval_cfg = base.make_eval_cfg(PARAMS)

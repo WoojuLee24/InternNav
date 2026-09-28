@@ -26,5 +26,13 @@ import dualvln_stage2_from_stage1 as full  # noqa: E402
 TRAIN_MACHINE = full.TRAIN_MACHINE  # 재-export 필수 (빼면 조용히 mini 데이터셋으로 떨어진다)
 
 EXP_NAME = "baseline_ablation/dualvln_stage2_from_stage1_gemm"
-PARAMS = replace(full.PARAMS, patch_embed_impl="gemm")
+# eval: 모델 rank를 GPU 0-3, habitat GL 렌더를 GPU 4-7로 완전 분리 (겹치는 GPU 없음).
+# 부모의 eval_render_gpu_offset=1 + nproc 8은 8개 GPU 전부가 CUDA와 GL을 동시에 호스팅해
+# libnvidia-eglcore에서 SIGABRT가 난다 (stage1 mode='system2'에서 결정적 재현 확인).
+PARAMS = replace(
+    full.PARAMS,
+    patch_embed_impl="gemm",
+    eval_nproc=4,
+    eval_render_gpu_offset=4,
+)
 eval_cfg = base.make_eval_cfg(PARAMS)
