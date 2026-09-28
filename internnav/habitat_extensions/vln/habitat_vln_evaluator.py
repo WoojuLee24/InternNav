@@ -338,6 +338,12 @@ class HabitatVLNEvaluator(DistributedEvaluator):
         else:
             raise ValueError(f"Invalid mode: {self.model_args.mode}")
 
+        # train과 동일한 patch_embed 구현을 쓴다 (guideline 5: train/eval 연산 일치).
+        # 'conv'(기본)이면 no-op이므로 기존 eval 경로는 완전히 그대로다.
+        # 'gemm'은 forward가 비트 동일하므로 지표가 불변이고 S2 forward가 빨라진다.
+        from internnav.model.basemodel.internvla_n1.patch_embed_impl import apply_patch_embed_impl
+        apply_patch_embed_impl(model, getattr(self.model_args, "patch_embed_impl", "conv"))
+
         # Optional post-load debugger attach (after model load to avoid debugger-tracing
         # OOM during checkpoint loading). Gated so normal/multi-GPU eval never hangs:
         # only when DEBUGPY_ENABLE=1, and only rank 0 binds the port.

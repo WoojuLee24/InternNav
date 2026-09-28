@@ -191,7 +191,10 @@ def main():
     REFS = {"h200": "habitat_dual_system_mini_h200_cfg.py",
             "5090": "habitat_dual_system_mini_5090_cfg.py"}
     # runtime-overridden / cosmetic keys (not parameters that affect results)
-    IGNORE_EVAL = {"model_settings.model_path", "eval_settings.output_path", "eval_settings.wandb_run_name"}
+    IGNORE_EVAL = {"model_settings.model_path", "eval_settings.output_path", "eval_settings.wandb_run_name",
+                   # Params에서 오는 키. 기준 config 파일들은 이 키가 생기기 전에 작성됐다.
+                   # 기본값 'conv' = 기존 eval 동작이므로 부재/'conv'는 동등하다.
+                   "model_settings.patch_embed_impl"}
     # model params that intentionally come from training, NOT the reference file
     TRAIN_SYNCED = {"model_settings.num_history", "model_settings.resize_w",
                     "model_settings.resize_h", "model_settings.predict_step_num"}
