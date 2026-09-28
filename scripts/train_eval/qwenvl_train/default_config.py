@@ -125,7 +125,15 @@ class Params:
     # 0 = render on the model's GPU (unchanged). N>0 = render on (local_rank+N) % device_count.
     # Driver 580.126.16 (2026-07-31) aborts in libnvidia-eglcore and silently corrupts frames
     # when GL renders on a GPU whose CUDA context is busy in the same process -> use 1 on h200.
+    #
+    # 주의: offset=1 + nproc 8이면 8개 GPU 전부가 CUDA 컨텍스트와 GL 컨텍스트를 동시에
+    # 호스팅한다(프로세스는 다르지만). 실측으로 local_rank 6이 SIGABRT로 결정적 재현됨
+    # (mode='system2' eval). 완전 분리를 원하면 eval_nproc=4 + eval_render_gpu_offset=4로
+    # 모델을 GPU 0-3, 렌더를 GPU 4-7에 두면 겹치는 GPU가 없다.
     eval_render_gpu_offset: int = 0
+    # eval용 torchrun --nproc_per_node. None -> nproc_per_node를 그대로 사용(기존 동작).
+    # GL/CUDA를 GPU 단위로 분리하려면 4로 낮춘다 (eval_render_gpu_offset=4와 함께).
+    eval_nproc: Optional[int] = None
 
     # ---- Isaac Sim (h1 eval only) ----
     headless: bool = False  # True -> no Isaac Sim GUI window (unchanged default: GUI shown)
