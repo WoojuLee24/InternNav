@@ -10,6 +10,18 @@ label 하나당 `data/InternData-N1-v0.5-mini/vln_ce_<label>/` 을 만든다.
 
 ## 커맨드
 
+한 번에 (data/vln 준비 → self_check → 생성 → 결과 검증, 하나라도 실패하면 exit 1):
+
+```bash
+bash scripts/dataset_converters/relabel_vlnce/setup_relabel.sh
+bash scripts/dataset_converters/relabel_vlnce/setup_relabel.sh --labels v6,v24 --emit data,yaml,config
+bash scripts/dataset_converters/relabel_vlnce/setup_relabel.sh --check-only
+```
+
+`--src`(기본 `/home/irteam/data-vol2/vln`)를 `data/vln` 으로 복사한다 (`--link` 면 symlink). 이미 있으면 원본과 `diff -rq` 비교만 한다.
+
+개별 단계:
+
 ```bash
 # 검증만 (데이터 생성 안 함)
 /usr/bin/python3 scripts/dataset_converters/relabel_vlnce/build_relabel_dataset.py --self_check

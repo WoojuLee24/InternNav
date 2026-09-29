@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Download a checkpoint subdirectory from a Google Drive/rclone data root.
 # Adapted from VLN-Challenge/download_checkpoints_rclone.sh. Uses the InternNav Drive
-# account's own My Drive root; files live under the "InternNav/checkpoints" subfolder there,
-# prepended automatically via DRIVE_PREFIX so callers don't need to type it.
+# account's own My Drive root. The cloud path is taken relative to My Drive root as-is
+# (e.g. "InternNav/checkpoints/image_base/..."); nothing is prepended unless DRIVE_PREFIX is set.
 #
 # Convenient 2-arg form: give a LOCAL path (absolute — the one you know) and a CLOUD path
-# (relative to the fixed Drive folder). When one arg is an absolute/explicit path (/ ./ ../) it
+# (relative to My Drive root). When one arg is an absolute/explicit path (/ ./ ../) it
 # is taken as the local side, the other as the cloud side (order-independent). If the cloud path
 # ends in "/" (or is empty), the local basename is appended. When BOTH args are relative the
 # legacy order applies: <cloud_rel> <local_rel>.
@@ -22,10 +22,10 @@
 # Defaults:
 #   SRC_DATA_ROOT=gdrive:  (My Drive root, no folder ID needed)
 #   DST_DATA_ROOT=/ws/src/InternNav/checkpoints
-#   DRIVE_PREFIX=InternNav/checkpoints  (subfolder under My Drive root; prepended to rel_src)
+#   DRIVE_PREFIX=""  (optional subfolder prepended to rel_src; empty = none)
 #
 # Arguments:
-#   rel_src        Relative path under src_data_root (cloud), below DRIVE_PREFIX, to copy.
+#   rel_src        Relative path under src_data_root (cloud), to copy (below DRIVE_PREFIX if set).
 #                  Ending in "/" -> append the local basename.
 #   rel_dst        Relative path under dst_data_root (local) to write, OR an absolute/explicit
 #                  path (/ ./ ../) used verbatim.
@@ -33,7 +33,7 @@
 # Download an image_base checkpoint to an absolute local path:
 #   ./download_checkpoints_rclone.sh \
 #     /ws/src/InternNav/checkpoints/image_base/base_s1.fpv_s2.fpv_20260709_130547 \
-#     image_base/
+#     InternNav/checkpoints/image_base/
 #   # <- Drive: My Drive/InternNav/checkpoints/image_base/base_s1.fpv_s2.fpv_20260709_130547
 #
 # First-time auth, if needed:
@@ -48,7 +48,7 @@ RCLONE_BIN="${RCLONE_BIN:-}"
 REMOTE="${RCLONE_REMOTE:-gdrive}"
 SRC_DATA_ROOT="${SRC_DATA_ROOT:-${REMOTE}:}"
 DST_DATA_ROOT="${DST_DATA_ROOT:-/ws/src/InternNav/checkpoints}"
-DRIVE_PREFIX="${DRIVE_PREFIX:-InternNav/checkpoints}"
+DRIVE_PREFIX="${DRIVE_PREFIX-}"
 TRANSFERS="${TRANSFERS:-2}"
 CHECKERS="${CHECKERS:-8}"
 FOLDER_ID="${FOLDER_ID:-}"
@@ -77,8 +77,7 @@ Environment:
   DST_DATA_ROOT    Default destination root. Default: $DST_DATA_ROOT
   DRIVE_PREFIX     Subfolder prepended to rel_src for root-scoped sources (bare "remote:",
                     URL/drive-folder:/bare ID), so multiple projects can share one Drive root.
-                    Default: $DRIVE_PREFIX
-                    Set to "" to disable. Ignored for explicit "remote:path" overrides.
+                    Default: "" (none). Ignored for explicit "remote:path" overrides.
   RCLONE_BIN       Explicit rclone binary path.
   RCLONE_REMOTE    Default remote name. Default: gdrive
   RCLONE_VERSION   Auto-downloaded rclone version. Default: v1.74.3
