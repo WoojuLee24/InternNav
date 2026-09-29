@@ -98,10 +98,10 @@ bash kube/download_checkpoints_rclone.sh {절대경로:local} {상대경로:host
 ### example (download & upload)
 
 ```bash
-bash kube/download_checkpoints_rclone.sh /ws/src/InternNav/checkpoints/image_base image_base
-bash kube/download_checkpoints_rclone.sh /ws/src/InternNav/checkpoints/image_base/base_s1.fpv_s2.fpv_20260709_130547 image_base/
-bash kube/upload_checkpoints_rclone.sh /home/irteam/git/InternNav/checkpoints/image_base image_base
-bash kube/upload_checkpoints_rclone.sh /home/irteam/git/InternNav/checkpoints/image_base/base_s1.fpv_s2.fpv_20260709_130547 image_base/
+bash kube/download_checkpoints_rclone.sh /ws/src/InternNav/checkpoints/image_base InternNav/checkpoints/image_base
+bash kube/download_checkpoints_rclone.sh /ws/src/InternNav/checkpoints/image_base/base_s1.fpv_s2.fpv_20260709_130547 InternNav/checkpoints/image_base/
+bash kube/upload_checkpoints_rclone.sh /home/irteam/git/InternNav/checkpoints/image_base InternNav/checkpoints/image_base
+bash kube/upload_checkpoints_rclone.sh /home/irteam/git/InternNav/checkpoints/image_base/base_s1.fpv_s2.fpv_20260709_130547 InternNav/checkpoints/image_base/
 ```
 
 
