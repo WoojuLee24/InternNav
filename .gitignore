@@ -187,3 +187,7 @@ checkpoints
 internnav/model/basemodel/LongCLIP/
 .gradio/
 result/
+
+# gs_vlnpe 생성물 — 빌더/렌더러가 만든다 (코드는 커밋, 산출물은 제외)
+scripts/dataset_converters/gs_vlnpe/apply_real_step014/
+scripts/dataset_converters/gs_vlnpe/usd_overrides/**/*.usda

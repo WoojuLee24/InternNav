@@ -748,14 +748,18 @@ def heading_alignment(ours_xy, gt_xy, n: int = 200) -> dict:
     **하한이 0이 아니다** — 0.2 m 격자에 얹는 순간 45도 꺾임이 생겨 기준선이 이미 6도다.
     실측 8.0 / 10.3도를 "8도 틀렸다"로 읽으면 안 되고 "하한 대비 2~4도 초과"로 읽어야 한다.
     """
+    # **조기 반환도 세 키를 다 채운다.** 예전엔 `median_deg`만 담아서, 경로가 퇴화한
+    # 에피소드가 하나라도 섞이면 호출부(`03_sample_gt_paths.py:875`의 `['p90_deg']`)가
+    # KeyError로 죽고 **씬 전체 결과가 저장되지 않았다**(실측: vln_pe 61씬 중 4씬).
+    nan3 = {'median_deg': float('nan'), 'p90_deg': float('nan'), 'max_deg': float('nan')}
     a, b = resample_by_arclength(ours_xy, n=n), resample_by_arclength(gt_xy, n=n)
     if len(a) < 2 or len(b) < 2:
-        return {'median_deg': float('nan')}
+        return dict(nan3)
     ta, tb = np.diff(a, axis=0), np.diff(b, axis=0)
     na, nb = np.linalg.norm(ta, axis=1), np.linalg.norm(tb, axis=1)
     ok = (na > 1e-9) & (nb > 1e-9)
     if not ok.any():
-        return {'median_deg': float('nan')}
+        return dict(nan3)
     cos = np.sum(ta[ok] * tb[ok], axis=1) / (na[ok] * nb[ok])
     deg = np.degrees(np.arccos(np.clip(cos, -1.0, 1.0)))
     return {'median_deg': float(np.median(deg)), 'p90_deg': float(np.percentile(deg, 90)),

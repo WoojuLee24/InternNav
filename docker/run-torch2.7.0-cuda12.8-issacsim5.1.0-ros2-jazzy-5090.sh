@@ -20,6 +20,7 @@ docker run --name internnav-torch2.7.0-cuda12.8-issacsim5.1.0-ros2-jazzy-5090 --
    -v /home/universe/git:/ws/git:rw \
    -v /home/universe/data:/datasets:ro \
    -v /media/TrainDataset:/ws/src/InternNav/data:rw \
+   -v /media/TrainDataset2:/ws/src/InternNav/data2:rw \
    -v /media/TrainDataset/InternData-N1-v0.5-mini/scene_data/mp3d_pe:/isaac-sim/Matterport3D/data/v1/scans:ro \
    -w /ws \
    dnwn24/internnav:torch2.7.0-cuda12.8-issacsim5.1.0-ros2-jazzy-5090
