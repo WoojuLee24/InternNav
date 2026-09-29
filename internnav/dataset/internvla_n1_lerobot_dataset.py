@@ -1088,6 +1088,12 @@ class NavPixelGoalDataset(Dataset):
         traj_depths = []  # optional
 
         for id in range(0, end_frame_id):
+            if id < start_frame_id and id not in history_id:
+                # frame is neither an S2 history/current image nor an S1 traj frame — every
+                # value loaded below would be discarded (3 file opens + a depth resize per
+                # frame; dominated __getitem__ for late-episode samples -> dataloader-bound
+                # training at ~48s/step instead of ~19s)
+                continue
             image_file = os.path.join(
                 video, f"observation.images.rgb.{height}cm_{pitch_1}deg", f"episode_{ep_id:06d}_{id}.jpg"
             )
