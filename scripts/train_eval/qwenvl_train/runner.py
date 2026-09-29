@@ -844,6 +844,13 @@ def main_cli() -> None:
         if args.checkpoints_root == "/home/irteam/data-vol2/checkpoints":  # still at default
             checkpoints_root = m["checkpoints_root"]
 
+    # relabel 실험: TRAIN_MACHINE 이 data_root 를 덮어쓴 뒤에 적용해야 한다(그 전에 하면 지워진다).
+    # train_label='gt'(기본)이면 labeled_data_root 가 인자를 그대로 돌려주므로 경로가 안 바뀐다.
+    # 평가 쪽 짝은 Params.eval_config_path (실험 config 가 relabel yaml 경로를 직접 지정),
+    # 평가 로그 분리는 run_eval 의 logs/<exp_slug>/ 가 이미 해 준다 — 여기서 더 할 일이 없다.
+    import default_config as _dc  # noqa: E402  (already on sys.path above)
+    params = replace(params, data_root=_dc.labeled_data_root(params.data_root, params.train_label))
+
     if args.data_root:
         params = replace(params, data_root=args.data_root)
     if args.nproc:

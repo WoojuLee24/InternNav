@@ -148,6 +148,12 @@ class Params:
     # benchmark/simulator settings (e.g. a different look_down tilt_angle) without touching the shared yamls.
     eval_config_path: Optional[str] = None
 
+    # 학습 instruction labeling. "gt" = 릴리스 GT labeling = 기존 동작.
+    # 그 외 값은 scripts/dataset_converters/relabel_vlnce/build_relabel_dataset.py 가 만든
+    # `<data_root>_<label>` 데이터셋을 가리킨다. 평가 쪽 짝은 위 `eval_config_path` 에
+    # relabel yaml 경로를 넣는 것이고, 둘을 따로 두어야 학습 GT/new x 평가 GT/new 2x2 가 된다.
+    train_label: str = "gt"
+
     # ---- distributed launcher ----
     nnodes: int = 1
     nproc_per_node: int = 8
@@ -290,6 +296,16 @@ class Params:
         if smoke:
             argv += ["--max_steps", str(self.max_steps)]
         return argv
+
+
+GT_LABEL = "gt"  # 기본 labeling. build_relabel_dataset.py 의 GT_LABEL 과 같은 문자열이어야 한다.
+
+
+def labeled_data_root(base_root: str, label: str) -> str:
+    """학습 데이터 루트. label='gt' 면 인자를 그대로 돌려준다 (기존 동작)."""
+    if label == GT_LABEL:
+        return base_root
+    return base_root.rstrip("/") + "_" + label  # .../vln_ce -> .../vln_ce_v6
 
 
 def _fmt_num(x: float) -> str:
