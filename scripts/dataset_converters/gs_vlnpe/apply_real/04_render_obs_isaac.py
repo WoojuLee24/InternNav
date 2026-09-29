@@ -388,6 +388,20 @@ def build_argparser() -> argparse.ArgumentParser:
                              'ambient만 켰을 때 렌더가 GT보다 밝은 쪽으로 치우치는 것을 낮춰 보정한다 '
                              '(vln_n1 6프레임 실측: iso 70/85/100/130 -> SSIM 0.852/0.859/0.856/0.836, '
                              '밝은대역 편차 +17/+28/+36/+48).')
+    # 씬 USD를 직접 지정하는 통로. 기본 None이면 아래 두 곳이 지금까지와 똑같이 원본을 찾는다
+    # (동작 무변화). 값을 주면 그 파일을 씬으로 쓴다 — 원본 usdz를 sublayer로 깔고 값만
+    # 덮어쓴 override 레이어(.usda)를 물릴 때 필요하다. 노은역의 경우
+    # `expose_collision_meshes_for_rendering`이 런타임에 하는 visibility 뒤집기를 그 레이어가
+    # 대신할 수 있다(S6-B에서 depth 유효비율 0.945로 동일함을 확인).
+    parser.add_argument('--usd_override', default=None,
+                        help='이 경로의 USD/USDZ/override 레이어(.usda)를 씬으로 쓴다. '
+                             '생략하면 기존대로 scene_meta 또는 mesh_root에서 찾는다(기본 동작).')
+    parser.add_argument('--frame_step_m', type=float, default=FRAME_STEP_M,
+                        help='2-B(생성 경로) 렌더 프레임 간격[m]. 기본 0.035(기존 동작 그대로). '
+                             'vln_pe GT 실측 간격은 0.141 m다. 노은역 기존 20ep는 기본값(0.035)으로 '
+                             '만들어져 중앙 412프레임/ep, 15/20(75%%)이 max_step=200을 넘겨 '
+                             '학습 시 뒷부분이 조용히 잘리고 progress가 중간에 멈춘다. '
+                             'GT와 같은 밀도로 맞추려면 0.14를 준다.')
     parser.add_argument('--rtx_ambient', type=float, default=0.0,
                         help='RTX 전역 간접광 세기(/rtx/sceneDb/ambientLightIntensity). 0=기존 동작. '
                              '**vln_pe 톤 정합의 핵심 노브** — raw isaacsim.SimulationApp으로 부팅하면 '
@@ -420,7 +434,7 @@ def validate_gt_replay(args) -> dict:
     episodes = [int(e) for e in str(args.episodes).split(',') if e != '']
 
     k, camera_and_sim = None, None
-    usd_path = load_scene_model(args.mesh_root, args.scene)
+    usd_path = override_scene_usd(args) or load_scene_model(args.mesh_root, args.scene)
 
     frames_out, all_depth_err, all_edge_corr, all_ssim = [], [], [], []
     for ep in episodes:
@@ -530,6 +544,20 @@ Isaac-ready USD. RGB 판정은 SSIM 기준(edge_corr는 엣지 픽셀 정합에 
     return save_gallery(log_dir, 'report.html', f'{SCRIPT_NAME} — {scene} (gt_replay 2-A)', summary, body)
 
 
+def override_scene_usd(args):
+    """`--usd_override`가 있으면 그 경로를, 없으면 None을 반환한다.
+
+    guard clause 위임용 — 인자를 안 주면 호출부가 이 함수 이전과 완전히 같은 경로를 탄다.
+    """
+    if not getattr(args, 'usd_override', None):
+        return None
+    path = Path(args.usd_override)
+    if not path.is_file():
+        raise FileNotFoundError(f'--usd_override 파일이 없다: {path}')
+    print(f'[{SCRIPT_NAME}] --usd_override 사용: {path}', flush=True)
+    return path
+
+
 def resolve_generate_scene(args) -> tuple:
     """2-B 렌더링용 USD와 validation mesh를 결정한다.
 
@@ -537,6 +565,13 @@ def resolve_generate_scene(args) -> tuple:
     `scene_type == "new_scene"`이면 Stage 01 scene_meta의 USD를
     render source와 mesh-anchor validation source로 함께 사용한다.
     """
+
+    ov = override_scene_usd(args)
+    if ov is not None:
+        # 레이어는 원본을 sublayer로 깔고 있으므로 mesh-anchor 검증도 같은 파일로 한다.
+        meta_path = Path(args.out_dir) / 'scene_meta' / f'{args.scene}.json'
+        scene_meta = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
+        return ov, load_scene_usd(str(ov)), scene_meta
 
     resolved = usdz_scene_utils.load_new_scene(
         args.out_dir, args.scene, load_scene_usd
@@ -674,11 +709,11 @@ def depth_m_to_raw16(
 
 
 def generate_episode(camera_and_sim, camera: RenderCameraConfig,
-                     ep_data: dict, ep_dir: Path) -> dict:
+                     ep_data: dict, ep_dir: Path, frame_step_m: float = FRAME_STEP_M) -> dict:
     """2-B 경로를 camera configuration에 따라 RGB/depth observation으로 렌더링한다."""
 
     k = camera.k
-    xy = resample_by_arclength(np.asarray(ep_data['trajectory'], dtype=np.float64), step_m=FRAME_STEP_M)
+    xy = resample_by_arclength(np.asarray(ep_data['trajectory'], dtype=np.float64), step_m=frame_step_m)
     action_poses = synthesize_action_poses(xy, ep_data['floor_z'], ep_data['h_b'], ep_data['pitch_deg'])
     poses_c2w = np.stack([action_to_c2w(a, 'cam2world_gl') for a in action_poses])
     rgb, depth_m = render_along(camera_and_sim, poses_c2w)
@@ -720,7 +755,7 @@ def generate_episode(camera_and_sim, camera: RenderCameraConfig,
     np.save(ep_dir / 'intrinsic.npy', np.asarray(k, dtype=np.float32))
 
     step = np.linalg.norm(np.diff(poses_c2w[:, :2, 3], axis=0), axis=1)
-    step_bad = int((step > FRAME_STEP_M * GEN_STEP_TOL_RATIO).sum())
+    step_bad = int((step > frame_step_m * GEN_STEP_TOL_RATIO).sum())
 
     rng = np.random.RandomState(0)
     anchor_d = []
@@ -738,6 +773,9 @@ def generate_episode(camera_and_sim, camera: RenderCameraConfig,
         anchor_d.append(pts_world)
     return {
         'n_frames': n, 'step_max_m': float(step.max()) if n > 1 else 0.0, 'step_bad_n': step_bad,
+        # 실제로 쓴 간격과 임계값을 같이 돌려준다 — 출력부가 모듈 상수를 다시 읽으면
+        # `--frame_step_m`을 줬을 때 **판정은 새 값으로 하면서 표시는 기본값**이 되어 어긋난다(실측).
+        'frame_step_m': float(frame_step_m), 'step_tol_m': float(frame_step_m * GEN_STEP_TOL_RATIO),
         'anchor_points_world': np.concatenate(anchor_d, axis=0) if anchor_d else np.empty((0, 3)),
         'rgb_first': rgb[0], 'depth_first': depth_m[0], 'valid_first': valid_all[0],
         'rgb_last': rgb[-1], 'depth_last': depth_m[-1], 'valid_last': valid_all[-1],
@@ -797,7 +835,7 @@ def run_generate(args) -> dict:
     results = []
     for i, ep_data in enumerate(episodes_data):
         ep_dir = obs_dir / f'episode_{i:06d}'
-        res = generate_episode(camera_and_sim, camera, ep_data, ep_dir)
+        res = generate_episode(camera_and_sim, camera, ep_data, ep_dir, frame_step_m=args.frame_step_m)
         anchor_dist = (compute_mesh_distance(res['anchor_points_world'], mesh)
                       if len(res['anchor_points_world']) else np.array([np.nan]))
         res['anchor_median_m'] = float(np.median(anchor_dist))
@@ -805,7 +843,7 @@ def run_generate(args) -> dict:
         results.append(res)
         ds = res['depth_stats']
         print(f'    ep {i:>3} (src episode_id={ep_data["episode_id"]}): {res["n_frames"]} frames, '
-              f'step max={res["step_max_m"]:.4f}m (기준 {FRAME_STEP_M * GEN_STEP_TOL_RATIO:.4f}m, '
+              f'step max={res["step_max_m"]:.4f}m (기준 {res["step_tol_m"]:.4f}m, '
               f'위반 {res["step_bad_n"]}건), mesh-anchor median={res["anchor_median_m"]:.5f}m')
         print(f'      depth: finite={ds["finite_frac"]*100:.2f}%, zero={ds["zero_frac"]*100:.2f}%, '
               f'min/median/max={ds["min_m"]:.3f}/{ds["median_m"]:.3f}/{ds["max_m"]:.3f} m -> {ep_dir}')
@@ -813,6 +851,8 @@ def run_generate(args) -> dict:
     stats = {
         'n_episodes': len(results),
         'step_bad_total': int(sum(r['step_bad_n'] for r in results)),
+        'frame_step_m': float(results[0]['frame_step_m']) if results else float('nan'),
+        'step_tol_m': float(results[0]['step_tol_m']) if results else float('nan'),
         'anchor_median_m': float(np.median([r['anchor_median_m'] for r in results])) if results else float('nan'),
         'anchor_worst_m': float(max(r['anchor_median_m'] for r in results)) if results else float('nan'),
     }
@@ -839,7 +879,7 @@ def render_generate_report(log_dir: Path, scene: str, mode: str, result: dict) -
   <div class="stat"><b>전체</b>{pill(stats["passed"])}</div>
   <div class="stat"><b>에피소드</b><span class="pill">{stats["n_episodes"]}개</span></div>
   <div class="stat"><b>인접 프레임 이동거리</b><span class="pill {"good" if stats["step_ok"] else "bad"}">
-      위반 {stats["step_bad_total"]}건 (기준 {FRAME_STEP_M * GEN_STEP_TOL_RATIO:.3f} m)</span></div>
+      위반 {stats["step_bad_total"]}건 (간격 {stats["frame_step_m"]:.3f} m, 기준 {stats["step_tol_m"]:.3f} m)</span></div>
   <div class="stat"><b>mesh-anchor</b><span class="pill {"good" if stats["anchor_ok"] else "bad"}">
       median {stats["anchor_median_m"]:.5f} m / worst {stats["anchor_worst_m"]:.5f} m
       (기준 {GEN_MESH_ANCHOR_TOL_M} m)</span></div>
