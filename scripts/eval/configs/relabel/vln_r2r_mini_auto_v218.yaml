@@ -1,6 +1,16 @@
 # 생성물 — build_relabel_dataset.py --labels auto_v218 --emit yaml
-# 원본: scripts/eval/configs/vln_r2r_mini.yaml (habitat.dataset.data_path 한 줄만 다름)
+# 원본: scripts/eval/configs/vln_r2r_mini_ld30.yaml (habitat.dataset.data_path 한 줄만 다름)
 # @package _global_
+#
+# VLN-CE R2R val_unseen (1839 episodes) — MINI data root, look-down 30 deg.
+#
+# Same benchmark as vln_r2r_full_ld30.yaml — the mini and full roots ship byte-identical
+# eval data (val_unseen.json.gz md5 and all 90 mp3d scene glb/navmesh md5 match). "mini"
+# refers to the *training* traj_data (no rxr/scalevln), not to the eval split.
+# The mini root nests the scenes one level deeper: scene_data/mp3d_ce/mp3d instead of
+# scene_data/mp3d, hence the extra /mp3d_ce in scenes_dir.
+#
+# See vln_r2r_full_ld30.yaml for why tilt_angle 15 == 30 deg effective (main parity).
 
 defaults:
   - /habitat: habitat_config_base
@@ -70,11 +80,11 @@ habitat:
         # agent_index: 0  # removed in habitat 0.3.x
       look_up:
         type: LookUpAction
-        tilt_angle: 30
+        tilt_angle: 15  # 2 x LOOKUP = 30 deg (main parity)
         # agent_index: 0  # removed in habitat 0.3.x
       look_down:
         type: LookDownAction
-        tilt_angle: 30
+        tilt_angle: 15  # 2 x LOOKDOWN = 30 deg (main parity)
         # agent_index: 0  # removed in habitat 0.3.x
 
   dataset:

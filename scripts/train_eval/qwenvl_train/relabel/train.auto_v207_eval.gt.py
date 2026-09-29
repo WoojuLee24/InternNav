@@ -19,5 +19,5 @@ EXP_NAME = "relabel/train.auto_v207_eval.gt"
 # 학습 쪽은 train_label 이 data_root 를 `<root>_<label>` 로 바꾼다.
 # 평가 쪽은 eval_config_path 에 relabel yaml 을 직접 지정한다 (None = 기존 GT yaml).
 # 평가 로그는 runner 가 logs/<EXP_NAME slug>/ 로 이미 나누므로 셀끼리 안 섞인다.
-PARAMS = replace(base.PARAMS, train_label="auto_v207", eval_config_path=None)
+PARAMS = replace(base.PARAMS, train_label="auto_v207", eval_config_path=relabel_base.eval_yaml("gt"))
 eval_cfg = base.make_eval_cfg(PARAMS)

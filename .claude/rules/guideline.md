@@ -73,6 +73,12 @@
 - **train, eval(habitat), eval(isaac) 세 경로 모두 동일한 조건·파라미터로 모델에 동일한 입력 형식이 들어가야 한다.** 한쪽만 바꾸고 다른 쪽을 누락하면 train==eval 불변식이 깨짐.
 - 예외적인 경우: 
 
+#### habitat 평가 yaml의 look-down 각도: 정본은 30도 (ld30)
+- 실제 각도 = `tilt_angle` x 2 (`habitat_vln_evaluator.py`가 LOOKDOWN/LOOKUP을 두 번씩 보낸다). 학습 데이터의 pitch가 최대 30도(`pitch_1 -> pitch_2` = 0 -> 30)라서 **`tilt_angle: 15`(=30도)가 정본**이다.
+- `tilt_angle: 30`(=60도, ld60)인 기존 yaml(`vln_r2r_mini.yaml`, `vln_r2r_mini_5090.yaml`, `vln_r2r_full_ld60.yaml` 등)은 고치지 않고 그대로 둔다.
+- **새 평가 yaml을 만들거나 복사/생성할 때 `tilt_angle`이 30(=60도)이면, 작업을 진행하기 전에 사용자에게 경고한다.** 원본으로는 ld30 yaml(`vln_r2r_mini_ld30.yaml`, `vln_r2r_full_ld30.yaml`)을 쓴다.
+- 2x2처럼 여러 셀을 비교할 때는 모든 셀의 yaml이 같은 각도인지 확인한다 (예: GT 셀이 `eval_config_path=None`이면 기본 yaml인 ld60으로 떨어진다).
+
 ### 5. 검증
 
 - 변경 후에는 반드시 명령어를 실행해 **기존 기능(default 경로)이 이전과 동일하게 동작하는지**, **신규 기능이 의도대로 동작하는지** 둘 다 확인한다.

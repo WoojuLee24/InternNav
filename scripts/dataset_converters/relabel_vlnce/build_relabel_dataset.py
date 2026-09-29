@@ -63,10 +63,13 @@ SPLITS = ("train", "val_seen", "val_unseen")
 TRAIN_SPLIT = "train"
 GT_LABEL = "gt"  # default_config.Params 의 기본값과 같은 문자열
 
-# 평가 yaml 원본 -> 복사본 이름 규칙은 default_config.labeled_eval_yaml() 과 맞춰야 한다.
+# 평가 yaml 원본 -> 복사본 stem. 복사본 이름 규칙은 relabel_base.BASE_YAML 과 맞춰야 한다.
+# h200 은 ld30(tilt_angle 15 x 2 = 30도, main parity) 이 정본이라 vln_r2r_mini_ld30.yaml 을 원본으로
+# 쓰되 복사본 이름은 기존 그대로(vln_r2r_mini_<label>.yaml) 둔다. 짝이 되는 GT 평가 yaml 은
+# relabel_base.GT_YAML["h200"] (= vln_r2r_mini_ld30.yaml) 이라 두 셀이 data_path 한 줄만 다르다.
 EVAL_YAMLS = (
-    "scripts/eval/configs/vln_r2r_mini_5090.yaml",
-    "scripts/eval/configs/vln_r2r_mini.yaml",
+    ("scripts/eval/configs/vln_r2r_mini_5090.yaml", "vln_r2r_mini_5090"),
+    ("scripts/eval/configs/vln_r2r_mini_ld30.yaml", "vln_r2r_mini"),
 )
 EVAL_PY_CONFIGS = (
     "scripts/eval/configs/habitat_dual_system_mini_5090_cfg.py",
@@ -276,11 +279,10 @@ def emit_yaml(gt_root, label):
     out_rel = os.path.relpath(out_root_for(gt_root, label), REPO_ROOT)
     written = []
     os.makedirs(os.path.join(REPO_ROOT, RELABEL_YAML_DIR), exist_ok=True)
-    for src_rel in EVAL_YAMLS:
+    for src_rel, stem in EVAL_YAMLS:
         src = os.path.join(REPO_ROOT, src_rel)
         if not os.path.isfile(src):
             continue
-        stem = os.path.splitext(os.path.basename(src))[0]
         dst = os.path.join(REPO_ROOT, RELABEL_YAML_DIR, f"{stem}_{label}.yaml")
         lines, hit = [], 0
         for line in open(src).read().splitlines(True):
@@ -369,10 +371,8 @@ def emit_configs(label, cells):
         path = os.path.join(out_dir, f"{name}.py")
         cfg_rel = os.path.join(EXP_CONFIG_DIR, f"{name}.py")
         # eval_config_path 는 머신별 yaml 을 골라야 하므로 리터럴이 아니라 헬퍼 호출로 적는다.
-        if eval_label == GT_LABEL:
-            eval_expr = "None"  # 기존 GT yaml 그대로
-        else:
-            eval_expr = f'relabel_base.eval_yaml("{eval_label}")'
+        # GT 셀도 헬퍼를 탄다: h200 은 relabel 복사본과 짝인 ld30 GT yaml, 5090 은 None(기존 GT yaml).
+        eval_expr = f'relabel_base.eval_yaml("{eval_label}")'
         with open(path, "w") as f:
             f.write(EXP_TEMPLATE.format(title=title, label=label, cfg_rel=cfg_rel,
                                         name=name, train_label=train_label,
