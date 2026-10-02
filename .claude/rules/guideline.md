@@ -132,6 +132,13 @@ else:
 - 시각화 및 디버깅 결과 보고
 - 결과 보고는 `.claude/memory/{task명}_result.md`에 작성해라.
 
+## 노드 로컬 데이터 (`data` = 노드별 data-vol1)
+- `data` 는 각 노드의 로컬 디스크(`/home/irteam/data-vol1`)라 **노드마다 내용이 다르다.** `data-vol2` 는 공유지만 scene 은 tar.gz 로만 있다.
+- mini habitat 평가는 `data/InternData-N1-v0.5-mini/scene_data/mp3d_ce/mp3d/<scene>/` 를 쓴다. `mp3d_ce.tar.gz` 의 최상위가 `mp3d/` 라서 tar 옆에 그냥 풀면(`extract_dataset.sh`) 한 단계 어긋난다.
+- **새 노드에서 mini 평가를 큐에 넣기 전에 반드시 실행** (검증 후 필요할 때만 `mp3d_ce/` 안에 푼다):
+  `bash scripts/dataset_converters/setup_scene_data.sh`
+- 증상: `ESP_CHECK failed: No Stage Attributes exists for requested scene '.../mp3d_ce/mp3d/<scene>/<scene>.glb'` 로 평가가 수십 초 만에 끝난다 (2026-10-01 node3, 그 전 node4).
+
 ## r2r_h1_replay 데이터 수집 (eval_r2r_h1_replay.py)
 ```bash
 /workspace/isaaclab/_isaac_sim/python.sh scripts/eval/eval_r2r_h1_replay.py --config scripts/eval/configs/h1_internvla_n1_async_cfg_orig.py --r2r_dir data/InternData-N1-v0.5-mini/vln_pe/traj_data/r2r --save_dir data/InternData-N1-v0.5-mini/vln_pe/traj_data/r2r_h1_replay --scenes <SCENE> --max_eps <N>
