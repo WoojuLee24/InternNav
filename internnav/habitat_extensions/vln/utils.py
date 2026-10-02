@@ -1,3 +1,5 @@
+import re
+
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from transformers.image_utils import to_numpy_array
@@ -75,6 +77,28 @@ def xyz_yaw_pitch_to_tf_matrix(xyz: np.ndarray, yaw: float, pitch: float) -> np.
     transformation_matrix[:3, :3] = rot1 @ rot2
     transformation_matrix[:3, 3] = xyz
     return transformation_matrix
+
+
+def parse_pixel_goal(llm_outputs, height, width):
+    '''
+    System2 출력 "x y" 를 pixel goal [v, u] (= [y, x]) 로 바꾼다. 무효 출력이면 None.
+
+    정상 출력(숫자 2개 이상, 0 <= x < width, 0 <= y < height)이면 기존 파싱
+    `[int(coord[1]), int(coord[0])]` 과 값이 완전히 같다. 무효 출력은 두 가지다:
+      - 숫자가 2개 미만        (예: "5")
+      - 이미지 밖 좌표         (예: "7 480" — 학습 데이터 범위는 x<=606, y<=455)
+    None 이면 호출부는 해석 불가 출력의 기존 경로(action 파싱 -> 없으면 STOP)로 보낸다.
+    좌표를 clip 해서 진행시키면 무효 출력에 점수를 주게 되므로 하지 않는다.
+    '''
+    coord = [int(c) for c in re.findall(r'\d+', llm_outputs)]
+    if len(coord) < 2:
+        print(f"[parse_pixel_goal] invalid pixel goal (numbers={coord}) in output {llm_outputs!r}", flush=True)
+        return None
+    v, u = coord[1], coord[0]
+    if v >= height or u >= width:
+        print(f"[parse_pixel_goal] invalid pixel goal (x={u}, y={v}) outside {width}x{height} in output {llm_outputs!r}", flush=True)
+        return None
+    return [v, u]
 
 
 def pixel_to_gps(pixel, depth, intrinsic, tf_camera_to_episodic):

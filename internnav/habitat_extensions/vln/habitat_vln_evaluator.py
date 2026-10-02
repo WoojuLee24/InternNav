@@ -36,6 +36,7 @@ from internnav.evaluator import DistributedEvaluator, Evaluator
 from internnav.habitat_extensions.vln.utils import (
     get_axis_align_matrix,
     get_intrinsic_matrix,
+    parse_pixel_goal,
     pixel_to_gps,
     preprocess_depth_image_v2,
     xyz_yaw_pitch_to_tf_matrix,
@@ -551,6 +552,7 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             done = False
             flag = False
             pixel_goal = None
+            invalid_outputs = 0  # 무효 pixel goal 출력 횟수 (progress.json 에 기록)
 
             # ---------- 2. Episode step loop -----------
             while (not done) and (step_id <= self.max_steps_per_episode):
@@ -679,11 +681,12 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                     )
                     print('step_id:', step_id, 'output text:', llm_outputs)
 
-                    if bool(re.search(r'\d', llm_outputs)):  # output pixel goal
+                    has_digit = bool(re.search(r'\d', llm_outputs))
+                    parsed_goal = parse_pixel_goal(llm_outputs, *depth.shape[:2]) if has_digit else None
+                    invalid_outputs += int(has_digit and parsed_goal is None)  # 무효 pixel goal -> 아래 else (STOP 경로)
+                    if parsed_goal is not None:  # output pixel goal
                         forward_action = 0
-                        coord = [int(c) for c in re.findall(r'\d+', llm_outputs)]
-
-                        pixel_goal = [int(coord[1]), int(coord[0])]
+                        pixel_goal = parsed_goal
                         draw_pixel_goal = True
 
                         # look down --> horizontal
@@ -858,6 +861,7 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                 "ne": metrics["distance_to_goal"],
                 "steps": step_id,
                 "episode_instruction": episode_instruction,
+                "invalid_outputs": invalid_outputs,
             }
             if 'ndtw' in metrics:
                 result['ndtw'] = metrics['ndtw']
@@ -955,6 +959,7 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             output_ids = None
             llm_outputs = ""
             goal = None
+            invalid_outputs = 0  # 무효 pixel goal 출력 횟수 (progress.json 에 기록)
             action = None
             messages = []
 
@@ -1052,11 +1057,12 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                     )
                     print('step_id:', step_id, 'output text:', llm_outputs)
 
-                    if bool(re.search(r'\d', llm_outputs)):  # output pixel goal
+                    has_digit = bool(re.search(r'\d', llm_outputs))
+                    parsed_goal = parse_pixel_goal(llm_outputs, *depth.shape[:2]) if has_digit else None
+                    invalid_outputs += int(has_digit and parsed_goal is None)  # 무효 pixel goal -> 아래 else (STOP 경로)
+                    if parsed_goal is not None:  # output pixel goal
                         forward_action = 0
-                        coord = [int(c) for c in re.findall(r'\d+', llm_outputs)]
-
-                        pixel_goal = [int(coord[1]), int(coord[0])]
+                        pixel_goal = parsed_goal
                         draw_pixel_goal = True
 
                         # look down --> horizontal
@@ -1183,6 +1189,7 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                 "ne": metrics["distance_to_goal"],
                 "steps": step_id,
                 "episode_instruction": episode_instruction,
+                "invalid_outputs": invalid_outputs,
             }
             if 'ndtw' in metrics:
                 result['ndtw'] = metrics['ndtw']
