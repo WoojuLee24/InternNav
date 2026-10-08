@@ -165,6 +165,8 @@ class DistributedEvaluator(Evaluator):
             # Kept out of result_all: that dict is logged to wandb as test/<k>.
             row = dict(result_all)
             row["timestamp"] = os.environ.get("EVAL_RUN_STAMP") or datetime.now().strftime("%Y%m%d_%H%M%S")
+            # ckpt / ckpt_step / config / machine / git_commit (runner.py), so a row is self-describing
+            row.update(json.loads(os.environ.get("EVAL_RUN_META") or "{}"))
             with open(out_path, "a") as f:
                 f.write(json.dumps(row) + "\n")
 
@@ -186,6 +188,13 @@ class DistributedEvaluator(Evaluator):
                     m = re.search(r"(\d+)$", best_checkpoint)
                     if m:
                         log_dict["test/best_checkpoint_step"] = int(m.group(1))
+                ckpt_step = json.loads(os.environ.get("EVAL_RUN_META") or "{}").get("ckpt_step")
+                if ckpt_step is not None:
+                    # x-axis for checkpoint-wise test curves (runner.py logs checkpoint-N evals
+                    # into the training run, so wandb's own step is not the checkpoint step)
+                    wandb.define_metric("test/ckpt_step")
+                    wandb.define_metric("test/*", step_metric="test/ckpt_step")
+                    log_dict["test/ckpt_step"] = ckpt_step
                 wandb.log(log_dict)
                 wandb.finish()
             except ImportError:

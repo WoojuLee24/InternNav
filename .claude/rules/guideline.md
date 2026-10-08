@@ -106,6 +106,16 @@ else:
   - 더 근본적인 해결: 애초에 A가 B보다 의미론적으로 넓은 범위를 표현한다면(A의 일부 인스턴스만 B 역할을 함), A는 B를 상속하지 말고 필요한 로직만 A 안에 직접 작성하거나 B의 하위 로직을 호출하는 방식으로 가져온다. "코드 재사용" 하나만으로 상속 여부를 정하지 말 것 — `isinstance`/타입 계층이 실제 동작을 정확히 반영하는지도 같이 판단해야 한다.
 
 
+### 8. eval 결과 파일(progress.json / raw/ / result_*.json) 분석 규칙
+- `progress.json`은 모든 rank가 **완료 순서대로** append한다 → 줄 순서 = rank·episode 순서가 아님. 한 log_dir에 resume/재실행 row가 **중복**될 수 있다.
+- 분석 코드는 반드시:
+  1. 줄 순서에 의존하지 않는다 ("앞에서 N개" 같은 부분집합 금지).
+  2. `(scene_id, episode_id)`를 key로 **dedupe** (같은 key면 최신 `run_stamp` row 사용).
+  3. checkpoint/run 비교는 **같은 episode 집합의 교집합**에서 한다 (episode 수 1839 확인, 1846처럼 초과하면 중복 섞임).
+  4. `run_stamp`/`ckpt` 필드로 어느 실행의 row인지 필터한다.
+- `raw/<run_stamp>/episodes/<scene>_<ep>.json`은 episode당 파일 1개 → 여러 stamp에 걸치면 최신 stamp 우선.
+- 분석 코드는 파일을 직접 파싱하지 말고 **`scripts/eval_dashboard/data.py`의 reader를 import**해서 쓴다 (`build_task` = result/progress/raw 병합·dedupe, `raw_episode_files` = stamp 병합). 읽는 규칙을 한 곳에만 둔다.
+
 ## Command
 ### Training & evaluation
 `python scripts/train_eval/qwenvl_train/runner.py --config scripts/train_eval/qwenvl_train/bev/base_s1.fpv_s2.fpv_rgb_gt.py --machine 5090` 

@@ -405,6 +405,39 @@ class HabitatVLNEvaluator(DistributedEvaluator):
         self._camera_fov = camera_fov_rad
         self._fx = self._fy = self.sim_sensors_config.depth_sensor.width / (2 * np.tan(camera_fov_rad / 2))
 
+        # raw per-episode output for the eval dashboard (eval_recorder.py); off by default
+        self._recorder = self._make_recorder() if cfg.eval_settings.get('save_raw', False) else None
+
+    def _make_recorder(self):
+        from datetime import datetime
+
+        from internnav.habitat_extensions.vln.eval_recorder import EvalRecorder
+
+        # runner.py relays the run identity through the env (same stamp as test_*_<stamp>.log)
+        stamp = os.environ.get("EVAL_RUN_STAMP") or datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_meta = {"run_stamp": stamp, **json.loads(os.environ.get("EVAL_RUN_META") or "{}")}
+        run_meta.setdefault("ckpt", self.model_args.model_path)
+        es = self.eval_config.eval_settings
+        recorder = EvalRecorder(self, os.path.join(self.output_path, "raw", stamp), run_meta,
+                                decision_metrics=es.get('decision_metrics', False),
+                                frames=es.get('raw_frames', "fail"), frame_scale=es.get('raw_frame_scale', 0.5),
+                                frame_sample=es.get('raw_frame_sample', 0.05))
+        recorder.install()
+        return recorder
+
+    def _write_progress(self, result: dict) -> None:
+        """Append one progress.json row from every rank (as on main). With save_raw, the row is
+        also tagged with ckpt/run_stamp/rank/tl/ndtw_ref and the episode's raw file is written."""
+        recorder = getattr(self, "_recorder", None)
+        if recorder is not None:
+            result.update(recorder.finish(result))
+            # rank: lets validate_raw.py rebuild the exact gather order (bit-exact aggregate check)
+            result.update({"ckpt": recorder.run_meta.get("ckpt"), "run_stamp": recorder.run_meta["run_stamp"],
+                           "rank": self.rank})
+        os.makedirs(self.output_path, exist_ok=True)
+        with open(os.path.join(self.output_path, 'progress.json'), 'a') as f:
+            f.write(json.dumps(result) + "\n")
+
     def eval_action(self):
         """
         Run local episodes on this rank.
@@ -463,6 +496,20 @@ class HabitatVLNEvaluator(DistributedEvaluator):
         if "ndtws" in global_metrics:
             ndtws_all = global_metrics["ndtws"]
             result_all["ndtws_all"] = float(ndtws_all.mean().item()) if denom > 0 else 0.0
+
+        if getattr(self, "_recorder", None) is not None:
+            from internnav.habitat_extensions.vln.eval_recorder import aggregate_progress
+
+            # tls_all / ndtw_refs_all over every episode in progress.json (incl. resumed ones)
+            result_all.update(aggregate_progress(os.path.join(self.output_path, 'progress.json')))
+
+        if self.eval_config.eval_settings.get('metrics_schema', False):
+            # parallel recompute with metrics_schema.py, exact comparison -> schema_check_<machine>.jsonl
+            from internnav.evaluator import metrics_schema
+
+            path = os.path.join(self.output_path, 'progress.json')
+            rows = [json.loads(line) for line in open(path)] if os.path.exists(path) else []
+            metrics_schema.write_report(self.output_path, metrics_schema.habitat_check(result_all, global_metrics, rows))
 
         return result_all
 
@@ -866,10 +913,7 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             if 'ndtw' in metrics:
                 result['ndtw'] = metrics['ndtw']
 
-            if self.rank == 0:
-                os.makedirs(self.output_path, exist_ok=True)
-                with open(os.path.join(self.output_path, 'progress.json'), 'a') as f:
-                    f.write(json.dumps(result) + "\n")
+            self._write_progress(result)
 
             # save video
             if self.save_video and metrics['success'] == 1.0:
@@ -1194,10 +1238,7 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             if 'ndtw' in metrics:
                 result['ndtw'] = metrics['ndtw']
 
-            if self.rank == 0:
-                os.makedirs(self.output_path, exist_ok=True)
-                with open(os.path.join(self.output_path, 'progress.json'), 'a') as f:
-                    f.write(json.dumps(result) + "\n")
+            self._write_progress(result)
             if self.save_video and metrics['success'] == 1.0:
                 images_to_video(
                     vis_frames,
