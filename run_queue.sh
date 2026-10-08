@@ -14,6 +14,8 @@ QDIR="$(cd "$(dirname "$QUEUE_FILE")" && pwd)"
 QNAME="$(basename "$QUEUE_FILE" .txt)"
 LOG_FILE="${2:-$QDIR/run_queue_$QNAME.log}"
 STATUS_FILE="$QDIR/status_$QNAME.txt"
+# 명령이 이 시간 안에 0이 아닌 코드로 죽으면 그만큼 대기한 뒤 다음 루프로 간다.
+FAIL_BACKOFF="${FAIL_BACKOFF:-60}"
 
 # 한 줄 요약 갱신. 로그는 길어서 훑기 어려우므로 현재 상태만 따로 남긴다.
 status() {
@@ -64,19 +66,32 @@ while true; do
         log "Running: $NEXT"
         log "========================================"
 
-        # 줄 번호 기반으로 comment out (특수문자 안전)
-        sed -i "${LINE_NUM}s|.*|# ${NEXT}|" "$QUEUE_FILE"
+        # 줄 번호 기반으로 "# " 를 앞에 붙이기만 한다.
+        # 명령 내용을 sed 식에 넣으면 안 된다 - 명령에 '|' 가 들어가면
+        # (예: STAGE1_CKPT=$(ls -dt ... | head -1) ...) 구분자가 깨져
+        #   sed: -e expression #1, char 127: unknown option to `s'
+        # 로 실패하고, 줄이 comment out 되지 않아 같은 명령을 무한 재실행한다.
+        sed -i "${LINE_NUM}s/^/# /" "$QUEUE_FILE"
     else
         log "Running (last, repeating): $NEXT"
         log "========================================"
         # 마지막 라인은 done 처리 없이 반복 실행
     fi
 
+    START_TS=$(date +%s)
     eval "$NEXT" 2>&1 | tee -a "$LOG_FILE"
     # 파이프라인이라 $? 는 tee 의 것이다. job 자체의 종료코드는 PIPESTATUS[0].
     RC=${PIPESTATUS[0]}
+    ELAPSED=$(( $(date +%s) - START_TS ))
 
-    status "FINISHED rc=$RC (남은 job $((REMAINING-1)))  $NEXT"
-    log "Finished (rc=$RC): $NEXT"
+    status "FINISHED rc=$RC ${ELAPSED}s (남은 job $((REMAINING-1)))  $NEXT"
+    log "Finished (rc=$RC, ${ELAPSED}s): $NEXT"
     log "========================================"
+
+    # 즉시 실패(설정/데이터 오류 등)한 명령을 곧바로 다시 돌리면 로그가 폭주한다.
+    # 마지막 라인은 comment out 되지 않고 반복되므로 특히 위험하다.
+    if [ "$RC" -ne 0 ] && [ "$ELAPSED" -lt "$FAIL_BACKOFF" ]; then
+        log "Failed in ${ELAPSED}s (<${FAIL_BACKOFF}s) -> ${FAIL_BACKOFF}s 대기 후 계속"
+        sleep "$FAIL_BACKOFF"
+    fi
 done

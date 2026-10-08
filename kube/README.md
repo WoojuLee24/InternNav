@@ -50,7 +50,7 @@ bash kube/download.sh internnav-train1-1-0 /workspace/data ./data
 ## 사용법: rclone + Google Drive
 
 대상: `gdrive` remote 계정의 **My Drive 루트** (`https://drive.google.com/drive/u/1/my-drive`), 그 아래
-`InternNav/checkpoints/` 폴더 (스크립트의 `DRIVE_PREFIX` 기본값이 자동으로 붙음, `cloud_rel`에는 그 아래 상대경로만 적으면 됨).
+`InternNav/checkpoints/` 폴더. `cloud_rel`은 **My Drive 루트 기준 전체 경로**로 적는다 (prefix 자동 추가 없음, 예: `InternNav/checkpoints/image_base/`).
 `gdrive` remote는 `~/.config/rclone/rclone.conf`에 저장되며, 이 remote를 만드는 계정이 곧 대상 My Drive 계정입니다.
 
 ### 1. 최초 1회 인증 (헤드리스 환경 + 브라우저 있는 PC)
@@ -86,7 +86,7 @@ bash kube/download_checkpoints_rclone.sh <local_path> <cloud_rel>
 # 예시
 bash kube/download_checkpoints_rclone.sh \
   /ws/src/InternNav/checkpoints/image_base/base_s1.fpv_s2.fpv_20260709_130547 \
-  image_base/
+  InternNav/checkpoints/image_base/
 ```
 
 ### 3. 업로드 (pod/로컬 → Drive)
@@ -97,7 +97,7 @@ bash kube/upload_checkpoints_rclone.sh <local_path> <cloud_rel>
 # 예시
 bash kube/upload_checkpoints_rclone.sh \
   /home/irteam/data-vol2/checkpoints/image_base/base_s1.fpv_s2.fpv_20260709_130547 \
-  image_base/
+  InternNav/checkpoints/image_base/
 ```
 - 인자 순서 무관 (절대경로 쪽이 자동으로 local로 인식), `cloud_rel`이 `/`로 끝나면 로컬 폴더명 자동 부착
 - 재실행 시 이미 전송된 파일은 크기/해시 비교로 skip (resume)

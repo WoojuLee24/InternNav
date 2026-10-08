@@ -83,6 +83,10 @@ class Params:
     # 'channels_last' = Conv3d 유지 + 입력만 channels_last_3d (cuDNN 경로 293x, forward는 conv와 다름).
     # 세 경우 모두 파라미터 이름/shape 불변 -> checkpoint/ZeRO/resume 무영향.
     patch_embed_impl: str = "conv"
+    # System2 decision metrics (STOP P/R, action/coord accuracy, per-type CE) from the training forward
+    # -> train/dec_*, eval/dec_* (+ val_metrics/*.jsonl when val_ratio > 0). Runs
+    # internvla_n1_metrics_trainer.py; False = the base trainer, unchanged.
+    decision_metrics: bool = False
 
     # ---- BEV visual input (bev=False => plain trainer + fpv eval, unchanged) ----
     bev: bool = False              # master toggle for the BEV pipeline (train + eval)
@@ -122,6 +126,21 @@ class Params:
     use_wandb: bool = True  # False -> no wandb run created/resumed for this eval (runner.py sets this False for --max-steps/--debugpy smoke runs)
 
     # ---- Habitat eval ----
+    # per-episode raw JSON (trajectory, actions, S2 text, top-down map) under
+    # <log_dir>/raw/<run_stamp>/ for the eval dashboard; see habitat_extensions/vln/eval_recorder.py
+    eval_save_raw: bool = True
+    # front-view JPEG per frame inside raw/ (only with eval_save_raw): which episodes keep them --
+    # "fail" (success == 0, i.e. not stopped within 3 m) | "fail+sample" (+ eval_raw_frame_sample of the
+    # successes as a fixed control group) | "all" | "none" -- and the downscale (0.5 -> 320x240)
+    eval_raw_frames: str = "fail"
+    eval_raw_frame_scale: float = 0.5
+    eval_raw_frame_sample: float = 0.05
+    # recompute SR/SPL/OS/NE/... with internnav/evaluator/metrics_schema.py and compare exactly with
+    # the evaluator's own values -> schema_check_<machine>.jsonl (habitat + h1). Off = unchanged.
+    eval_metrics_schema: bool = False
+    # per-S2-decision metrics during habitat eval (STOP vs 3 m oracle, ShortestPathFollower action,
+    # reference pixel goal) in raw/ + progress rows; needs eval_save_raw. Off = unchanged.
+    eval_decision_metrics: bool = False
     # 0 = render on the model's GPU (unchanged). N>0 = render on (local_rank+N) % device_count.
     # Driver 580.126.16 (2026-07-31) aborts in libnvidia-eglcore and silently corrupts frames
     # when GL renders on a GPU whose CUDA context is busy in the same process -> use 1 on h200.
@@ -166,6 +185,10 @@ class Params:
     def trainer(self) -> str:
         """Trainer entry script. BEV / unified image provider swap in their own
         provider trainer (base file untouched); at most one is active per run."""
+        if self.decision_metrics:
+            assert not (self.bev or self.image_provider), \
+                "decision_metrics cannot be combined with bev/image_provider (one trainer entry per run)"
+            return "internnav/trainer/internvla_n1_metrics_trainer.py"
         if self.bev:
             return "internnav/trainer/internvla_n1_bev_provider_trainer.py"
         if self.image_provider:
@@ -509,6 +532,12 @@ def build_habitat_eval_cfg(p: Params, machine: str = "h200"):
             "use_wandb": m["use_wandb"] and p.use_wandb,
             "wandb_entity": WANDB_ENTITY,
             "wandb_project": m["wandb_project"],
+            "save_raw": p.eval_save_raw,
+            "raw_frames": p.eval_raw_frames,
+            "raw_frame_scale": p.eval_raw_frame_scale,
+            "raw_frame_sample": p.eval_raw_frame_sample,
+            "metrics_schema": p.eval_metrics_schema,
+            "decision_metrics": p.eval_decision_metrics,
             **m["extra_eval"],
         },
     )
@@ -659,6 +688,7 @@ def build_h1_eval_cfg(p: Params, model_path: str = EVAL_MACHINE["h1"]["model_pat
             "use_wandb": p.use_wandb,
             "wandb_entity": WANDB_ENTITY,
             "wandb_project": WANDB_PROJECT,
+            "metrics_schema": p.eval_metrics_schema,
         },
     )
 

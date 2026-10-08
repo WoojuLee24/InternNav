@@ -653,10 +653,7 @@ class HabitatVLNEvaluatorBEV(_HabitatVLNEvaluator):
             if 'ndtw' in metrics:
                 result['ndtw'] = metrics['ndtw']
 
-            if self.rank == 0:
-                os.makedirs(self.output_path, exist_ok=True)
-                with open(os.path.join(self.output_path, 'progress.json'), 'a') as f:
-                    f.write(json.dumps(result) + "\n")
+            self._write_progress(result)
 
             # save video
             if self.save_video and metrics['success'] == 1.0:

@@ -227,6 +227,14 @@ class VLNDistributedEvaluator(DistributedEvaluator):
                     )
                 # json format result
                 result = self.result_logger.finalize_all_results(self.rank, self.world_size)
+                if self.eval_config.eval_settings.get('metrics_schema', False):
+                    # parallel recompute with metrics_schema.py, exact comparison -> schema_check_<machine>.jsonl
+                    from internnav.evaluator import metrics_schema
+
+                    rl = self.result_logger
+                    metrics_schema.write_report(
+                        os.environ.get("EVAL_OUTPUT_DIR") or rl.lmdb_path,
+                        metrics_schema.isaac_check(result, rl.lmdb_path, rl.split_map, self.world_size), append=False)
                 if self._wandb_active and result:
                     try:
                         import wandb
