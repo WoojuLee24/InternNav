@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>InternNav Eval Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">
+      <span class="brand-mark">◇</span>
+      <span class="brand-text">InternNav&nbsp;Eval</span>
+    </a>
+    <nav id="crumbs" class="crumbs"></nav>
+    <div class="topbar-right">
+      <span id="host" class="host"></span>
+      <button id="refresh" class="ghost-btn" title="Rescan eval logs">⟳</button>
+    </div>
+  </header>
+
+  <main id="app" class="app"><div class="loading">loading…</div></main>
+
+  <!-- STATIC_DATA_SLOT (build_static.py injects the pre-rendered API here) -->
+  <script src="js/api.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/video-sync.js"></script>
+  <script src="js/scene-view.js"></script>
+  <script src="js/pages/leaderboard.js"></script>
+  <script src="js/pages/task.js"></script>
+  <script src="js/pages/episode.js"></script>
+  <script src="js/router.js"></script>
+</body>
+</html>
