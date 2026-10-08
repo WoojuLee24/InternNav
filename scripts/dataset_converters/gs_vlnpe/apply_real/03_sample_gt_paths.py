@@ -1,4 +1,4 @@
-"""M1.3 — GT path를 재현해 경로 생성 알고리즘을 검증한다.
+r"""M1.3 — GT path를 재현해 경로 생성 알고리즘을 검증한다.
 
     00: vln_n1 데이터 -> "어떻게 읽고 쓰나"  -> target_schema.json      (전체에 1개)
     01: 씬 mesh/USD    -> "이 씬 써도 되나"    -> scene_meta/<scene>.json (씬마다 1개)
@@ -124,8 +124,8 @@ from viz_utils import (  # noqa: E402
 )
 
 DEFAULT_DATA_ROOT = 'data/InternData-N1-v0.5-mini/vln_n1/traj_data/matterport3d_d435i'
-DEFAULT_OUT_DIR = 'scripts/dataset_converters/gs_vlnpe'
-DEFAULT_LOG_DIR = 'logs/gs-vlnpe'
+DEFAULT_OUT_DIR = 'scripts/dataset_converters/gs_vlnpe/apply_real'
+DEFAULT_LOG_DIR = 'logs/gs-vlnpe/apply_real'
 DEFAULT_SCENE = '17DRP5sb8fy'
 SCRIPT_NAME = '03_sample_gt_paths'
 
@@ -166,13 +166,6 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument('--mode', default='reproduce', choices=['reproduce', 'random'],
                         help='reproduce는 GT에서 h_b/pitch/start/goal을 전부 복사한다. random은 C2에서 구현.')
     parser.add_argument('--num_episodes', type=int, default=20)
-    # 경로 계획 설정 묶음을 이름으로 고른다. 개별 인자를 명시하면 그 인자가 이긴다.
-    # 프로파일 정의와 각 값의 근거는 path_profiles.py 참고.
-    parser.add_argument('--path_profile', default=None,
-                        help="경로 계획 프로파일 이름 (path_profiles.py). "
-                             "'legacy'=2026-09-09까지 쓴 설정, "
-                             "'reproduce_v1'=현재 baseline. "
-                             '생략하면 아래 개별 기본값을 그대로 쓴다(종전 동작).')
     parser.add_argument('--r_b', type=float, default=ROBOT_RADIUS_M)
     parser.add_argument('--h_nav_ratio', type=float, default=None,
                         help='주면 h_nav = ratio * h_b 로 쓴다(--h_nav 무시). 논문의 "h_nav는 로봇 키에 '
@@ -786,25 +779,8 @@ def main_random(args) -> int:
     return 0 if stats['passed'] else 1
 
 
-def apply_path_profile(parser, args) -> list:
-    """`--path_profile`이 주어지면 프로파일 값으로 **명시하지 않은 인자만** 채운다.
-
-    판정과 채우기는 `profiles.apply_to_args`가 한다(04의 렌더 프로파일과 같은 로직 — 예전엔
-    두 스크립트에 복붙돼 있었다). 프로파일을 안 주면 아무것도 하지 않아 종전 동작이 유지된다.
-    """
-    if not getattr(args, 'path_profile', None):
-        return []
-    import path_profiles
-    import profiles
-
-    return profiles.apply_to_args(parser, args, path_profiles.get(args.path_profile))
-
-
 def main() -> int:
-    parser = build_argparser()
-    args = parser.parse_args()
-    for name, val in apply_path_profile(parser, args):
-        print(f'[{SCRIPT_NAME}] --path_profile {args.path_profile}: {name} = {val}', flush=True)
+    args = build_argparser().parse_args()
     if args.data_root is None:
         args.data_root = dataset_utils.default_data_root(args.dataset)
     print(f'[{SCRIPT_NAME}] scene={args.scene} dataset={args.dataset} mode={args.mode} smooth={args.smooth} '

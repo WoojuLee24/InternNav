@@ -74,7 +74,7 @@ from pxr import Gf, UsdGeom, UsdLux  # noqa: E402
 import omni.usd  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from esdf_utils import resample_by_arclength  # noqa: E402
+from esdf_utils import load_scene_usd, resample_by_arclength  # noqa: E402
 from geometry_utils import (  # noqa: E402
     DEPTH_SCALE_RAW_TO_M,
     action_to_c2w,
@@ -87,14 +87,16 @@ from geometry_utils import (  # noqa: E402
     synthesize_action_poses,
 )
 from viz_utils import blink_widget_html, save_gallery  # noqa: E402
+import camera_profiles  # noqa: E402
 import dataset_utils  # noqa: E402
+import usdz_scene_utils  # noqa: E402
 
 DEFAULT_DATA_ROOT = 'data/InternData-N1-v0.5-mini/vln_n1/traj_data/matterport3d_d435i'
 # Open3D 버전은 mp3d_n1(원본 raw obj)을 쓰지만, Isaac 버전은 Isaac-ready USD가 필요해 mp3d_pe를
 # 쓴다 — 실측으로 두 자산이 같은 world 좌표계(bbox 거의 일치)임을 확인했다.
 DEFAULT_MESH_ROOT = 'data/scene_data/mp3d_pe'
-DEFAULT_OUT_DIR = 'scripts/dataset_converters/gs_vlnpe'
-DEFAULT_LOG_DIR = 'logs/gs-vlnpe'
+DEFAULT_OUT_DIR = 'scripts/dataset_converters/gs_vlnpe/apply_real'
+DEFAULT_LOG_DIR = 'logs/gs-vlnpe/apply_real'
 DEFAULT_SCENE = '17DRP5sb8fy'
 SCRIPT_NAME = '04_render_obs_isaac'
 
@@ -123,29 +125,14 @@ GT_REPLAY_DEPTH_P95_TOL_M = 0.05
 # 참고용으로만 계속 표시한다. 임계값 0.5는 SSIM 문헌에서 흔히 쓰는 "중간 이상 일치" 기준.
 GT_REPLAY_RGB_EDGE_CORR_MIN = 0.5
 GT_REPLAY_RGB_SSIM_MIN = 0.5
-# Isaac RTX 톤매퍼의 노출 기본값. 이 값 그대로면 설정을 아예 건드리지 않아 기존 경로가
-# 100% 동일하게 돈다.
-#
-# **주의 — 예전 주석의 "op = 6은 Iray"는 틀렸다.** Isaac Sim RTX 설정 UI 소스의 열거형은
-# 0 Clamp · 1 Linear · 2 Reinhard · 3 ReinhardMod · 4 HejlHableAlu · 5 HableUc2 ·
-# **6 Aces** · **7 Iray** 다. 즉 기본값 6은 ACES이고 Iray는 7이다.
-# `irayReinhard/crushBlacks`·`burnHighlights`가 "무반응"이었던 것도 이 때문 —
-# 그 노브는 **op 7 전용**이고 op 6은 읽지 않는다(UI 소스에 `if tonemapOpIdx == 7:`로 확인).
+# Isaac RTX 톤매퍼(`/rtx/post/tonemap/op = 6`, Iray)의 노출 기본값. 이 값 그대로면 설정을 아예
+# 건드리지 않아 기존 경로가 100% 동일하게 돈다. 같은 톤매퍼의 crushBlacks/burnHighlights는
+# RTX Real-Time 경로에서 무반응임을 실측 확인했다(04d_tonemap_sweep.py 참고).
 DEFAULT_FILM_ISO = 100.0
 
-# 렌더 설정의 단일 출처는 **`render_profiles.py`** 다. 여기서는 하위 호환을 위해 같은 이름의
-# dict 뷰만 만들어 둔다 — `05_export_vlnpe.py` 등이 `MEASURED_RENDER_PRESET[dataset]`으로
-# 읽고 있으므로 그 접근 방식을 깨지 않는다. 값을 고칠 때는 render_profiles.py를 고친다.
-def _measured_render_preset() -> dict:
-    import render_profiles
 
-    return {ds: {k: v for k, v in render_profiles.for_dataset(ds).values().items() if k != 'name'}
-            for ds in render_profiles.MEASURED_BY_DATASET}
-
-
-MEASURED_RENDER_PRESET = _measured_render_preset()
-
-
+RenderCameraConfig = camera_profiles.CameraProfile
+SYNTHETIC_CAMERAS = camera_profiles.PROFILES
 def ensure_texture_symlink(mesh_root, scene: str) -> None:
     """mp3d_pe USD의 텍스처 절대경로를 로컬 파일로 심링크(멱등 — 이미 있으면 건너뜀)."""
     target = MATTERPORT_TEXTURE_ROOT / scene / 'matterport_mesh'
@@ -171,26 +158,11 @@ def load_scene_model(mesh_root, scene: str) -> Path:
     return find_scene_usd(mesh_root, scene)
 
 
-def resolve_scene_usd(args) -> Path:
-    """`--usd_override`가 있으면 그 파일을, 없으면 기존대로 원본을 찾는다.
-
-    guard clause 한 줄 위임이라 `--usd_override`를 안 주면 이 함수 이전과 완전히 같은 경로를 탄다.
-    override 레이어를 쓸 때는 심링크 준비(`ensure_texture_symlink`)를 하지 않는다 —
-    레이어가 텍스처 경로를 직접 갖고 있거나, 원본을 sublayer로 깔아 그대로 물려받기 때문이다.
-    """
-    if args.usd_override:
-        path = Path(args.usd_override)
-        if not path.is_file():
-            raise FileNotFoundError(f'--usd_override 파일이 없다: {path}')
-        print(f'[{SCRIPT_NAME}] --usd_override 사용: {path}', flush=True)
-        return path
-    return load_scene_model(args.mesh_root, args.scene)
-
-
 def build_renderer(width: int, height: int, k: np.ndarray, usd_path: Path,
                    light: str = 'dome', tl: dict = None, rtx_ambient: float = 0.0,
                    film_iso: float = DEFAULT_FILM_ISO,
-                   tonemap_op: int = None, tonemap_crush: float = None) -> tuple:
+                   render_near_m: float = RENDER_NEAR_M,
+                   render_far_m: float = RENDER_FAR_M) -> tuple:
     """`(width,height,K)` + 씬 USD -> `(camera, sim, lights)`. `render_along`이 매 프레임 재사용.
     `lights`는 three_light일 때만 translate op dict(그 외 None — 위치 갱신 불필요).
 
@@ -206,6 +178,15 @@ def build_renderer(width: int, height: int, k: np.ndarray, usd_path: Path,
     cfg = sim_utils.UsdFileCfg(usd_path=str(usd_path),
                                collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=False))
     cfg.func('/World/Scene', cfg)
+
+    # Collision capture asset은 geometry가 존재해도 RTX sensor에서 숨겨져
+    # 있을 수 있으므로 source asset을 건드리지 않고 runtime stage만 보정한다.
+    changed = usdz_scene_utils.expose_collision_meshes_for_rendering(
+        stage, usd_path, UsdGeom
+    )
+    if changed:
+        print(f'[scene-render] enabled {changed} hidden collision mesh(es)', flush=True)
+
     lights = _add_lights(stage, light, tl)
 
     camera_cfg = CameraCfg(
@@ -214,7 +195,7 @@ def build_renderer(width: int, height: int, k: np.ndarray, usd_path: Path,
         width=width,
         data_types=['rgb', 'distance_to_image_plane'],
         spawn=sim_utils.PinholeCameraCfg(focal_length=24.0, horizontal_aperture=20.955,
-                                         clipping_range=(RENDER_NEAR_M, RENDER_FAR_M)),
+                                         clipping_range=(render_near_m, render_far_m)),
     )
     camera = Camera(cfg=camera_cfg)
     sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=0.01))
@@ -227,13 +208,6 @@ def build_renderer(width: int, height: int, k: np.ndarray, usd_path: Path,
     # 남은 유일한 실효 노브 — 같은 이유로 rtx_ambient와 함께 씬 로드 이후에 건다.
     if film_iso != DEFAULT_FILM_ISO:
         carb.settings.get_settings().set_float('/rtx/post/tonemap/filmIso', float(film_iso))
-    # 톤맵 커브와 그 하위 노브. **둘 다 None이면 설정을 건드리지 않아 기존 경로와 100% 동일하다.**
-    # crushBlacks는 op 7에서만 읽히므로, op를 7로 바꾸지 않고 crush만 주는 것은 효과가 없다.
-    if tonemap_op is not None:
-        carb.settings.get_settings().set_int('/rtx/post/tonemap/op', int(tonemap_op))
-    if tonemap_crush is not None:
-        carb.settings.get_settings().set_float('/rtx/post/tonemap/irayReinhard/crushBlacks',
-                                               float(tonemap_crush))
     camera.set_intrinsic_matrices(torch.tensor(np.asarray(k, dtype=np.float32), device=sim.device).unsqueeze(0))
     # 씬 참조 직후 애노테이터 파이프라인이 아직 안 돌아서 첫 프레임에 빈 텐서가 나오는 것을
     # 실측으로 확인했다(RuntimeError: shape invalid for input of size 0) — 워밍업 스텝으로 흡수한다.
@@ -388,6 +362,13 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument('--scene', default=DEFAULT_SCENE)
     parser.add_argument('--dataset', default='vln_n1', choices=['vln_n1', 'vln_pe'],
                         help='GT 데이터셋. vln_pe면 입출력에 _vlnpe 태그, 렌더 해상도 256x256')
+    parser.add_argument(
+        '--camera',
+        default='dataset',
+        choices=['dataset', *SYNTHETIC_CAMERAS],
+        help='2-B observation camera. dataset=기존 GT camera, '
+             'd455_nominal=D455 RGB FOV 기반 nominal synthetic camera.',
+    )
     parser.add_argument('--light', default='dome',
                         choices=['dome', 'three_light', 'dome_three', 'ambient_only'],
                         help='dome(기본, 기존 동작)=DomeLight 2M 균일광. three_light=VLN-PE 실제 '
@@ -407,36 +388,19 @@ def build_argparser() -> argparse.ArgumentParser:
                              'ambient만 켰을 때 렌더가 GT보다 밝은 쪽으로 치우치는 것을 낮춰 보정한다 '
                              '(vln_n1 6프레임 실측: iso 70/85/100/130 -> SSIM 0.852/0.859/0.856/0.836, '
                              '밝은대역 편차 +17/+28/+36/+48).')
-    parser.add_argument('--tonemap_op', type=int, default=None,
-                        help='RTX 톤맵 커브 번호(/rtx/post/tonemap/op). 생략=건드리지 않음(기존 동작). '
-                             '0 Clamp · 1 Linear · 2 Reinhard · 3 ReinhardMod · 4 HejlHableAlu · '
-                             '5 HableUc2 · 6 Aces(Isaac 기본) · 7 Iray. '
-                             '126씬 실측: vln_n1은 7이 65씬 중 62씬 우세(+0.021), '
-                             'vln_pe는 7이 61씬 중 40씬 열세(-0.013)라 6을 유지한다.')
-    parser.add_argument('--tonemap_crush', type=float, default=None,
-                        help='op 7 전용 노브(/rtx/post/tonemap/irayReinhard/crushBlacks). '
-                             '생략=건드리지 않음. **op를 7로 바꾸지 않으면 효과가 없다** '
-                             '(op 6은 이 값을 읽지 않는다).')
-    parser.add_argument('--render_profile', default=None,
-                        help='렌더 프로파일 이름 (render_profiles.py). 주면 --preset보다 우선한다. '
-                             "'isaac_default' / 'vln_pe_measured' / 'vln_n1_measured'")
-    parser.add_argument('--preset', choices=['none', 'measured'], default='none',
-                        help="'measured'면 MEASURED_RENDER_PRESET(126씬 전수 측정 결과)을 적용한다. "
-                             '직접 지정한 인자는 그대로 두고 **손대지 않은 인자만** 채운다. '
-                             "기본 'none'은 기존 동작.")
-    # 씬 USD를 직접 지정하는 통로. 기본 None이면 아래 두 호출부가 지금까지와 똑같이
-    # `load_scene_model`로 원본을 찾는다(동작 무변화). 값을 주면 그 파일을 씬으로 쓴다 —
-    # 원본을 sublayer로 깔고 값만 덮어쓴 override 레이어(.usda)를 물릴 때 필요하다.
-    # 렌더러가 원본을 glob으로 직접 찾기 때문에, 이 인자가 없으면 레이어를 옆에 둬도 무시된다.
+    # 씬 USD를 직접 지정하는 통로. 기본 None이면 아래 두 곳이 지금까지와 똑같이 원본을 찾는다
+    # (동작 무변화). 값을 주면 그 파일을 씬으로 쓴다 — 원본 usdz를 sublayer로 깔고 값만
+    # 덮어쓴 override 레이어(.usda)를 물릴 때 필요하다. 노은역의 경우
+    # `expose_collision_meshes_for_rendering`이 런타임에 하는 visibility 뒤집기를 그 레이어가
+    # 대신할 수 있다(S6-B에서 depth 유효비율 0.945로 동일함을 확인).
     parser.add_argument('--usd_override', default=None,
                         help='이 경로의 USD/USDZ/override 레이어(.usda)를 씬으로 쓴다. '
-                             '생략하면 기존대로 mesh_root에서 isaacsim_<hash>.usd를 찾는다(기본 동작).')
+                             '생략하면 기존대로 scene_meta 또는 mesh_root에서 찾는다(기본 동작).')
     parser.add_argument('--frame_step_m', type=float, default=FRAME_STEP_M,
                         help='2-B(생성 경로) 렌더 프레임 간격[m]. 기본 0.035(기존 동작 그대로). '
-                             'vln_pe GT는 0.141 m 간격(에피소드당 중앙 81프레임)인데 기본값 0.035로 '
-                             '같은 길을 가면 4배 촘촘해져 에피소드가 300+ 프레임이 되고, '
-                             'cma/rdp의 max_step=200 절단에 90%가 걸려 뒷부분이 조용히 잘린다 '
-                             '(실측 — 노은역 기존 20ep 중 15ep가 이미 200을 넘는다). '
+                             'vln_pe GT 실측 간격은 0.141 m다. 노은역 기존 20ep는 기본값(0.035)으로 '
+                             '만들어져 중앙 412프레임/ep, 15/20(75%%)이 max_step=200을 넘겨 '
+                             '학습 시 뒷부분이 조용히 잘리고 progress가 중간에 멈춘다. '
                              'GT와 같은 밀도로 맞추려면 0.14를 준다.')
     parser.add_argument('--rtx_ambient', type=float, default=0.0,
                         help='RTX 전역 간접광 세기(/rtx/sceneDb/ambientLightIntensity). 0=기존 동작. '
@@ -470,16 +434,14 @@ def validate_gt_replay(args) -> dict:
     episodes = [int(e) for e in str(args.episodes).split(',') if e != '']
 
     k, camera_and_sim = None, None
-    usd_path = resolve_scene_usd(args)
+    usd_path = override_scene_usd(args) or load_scene_model(args.mesh_root, args.scene)
 
     frames_out, all_depth_err, all_edge_corr, all_ssim = [], [], [], []
     for ep in episodes:
         gt = dataset_utils.load_gt_episode(args.data_root, args.scene, ep, args.dataset)
         if k is None:
             k = gt['k']
-            camera_and_sim = build_renderer(RENDER_W, RENDER_H, k, usd_path, args.light, _tl_params(args),
-                                            args.rtx_ambient, args.film_iso,
-                                            args.tonemap_op, args.tonemap_crush)
+            camera_and_sim = build_renderer(RENDER_W, RENDER_H, k, usd_path, args.light, _tl_params(args), args.rtx_ambient, args.film_iso)
         n = len(gt['poses_c2w'])
         frame_idx = np.unique(np.linspace(0, n - 1, args.n_frames).astype(int)).tolist()
         poses_c2w = [gt['poses_c2w'][f] for f in frame_idx]
@@ -582,32 +544,213 @@ Isaac-ready USD. RGB 판정은 SSIM 기준(edge_corr는 엣지 픽셀 정합에 
     return save_gallery(log_dir, 'report.html', f'{SCRIPT_NAME} — {scene} (gt_replay 2-A)', summary, body)
 
 
-def depth_m_to_raw16(depth_m: np.ndarray, valid_mask: np.ndarray) -> np.ndarray:
+def override_scene_usd(args):
+    """`--usd_override`가 있으면 그 경로를, 없으면 None을 반환한다.
+
+    guard clause 위임용 — 인자를 안 주면 호출부가 이 함수 이전과 완전히 같은 경로를 탄다.
+    """
+    if not getattr(args, 'usd_override', None):
+        return None
+    path = Path(args.usd_override)
+    if not path.is_file():
+        raise FileNotFoundError(f'--usd_override 파일이 없다: {path}')
+    print(f'[{SCRIPT_NAME}] --usd_override 사용: {path}', flush=True)
+    return path
+
+
+def resolve_generate_scene(args) -> tuple:
+    """2-B 렌더링용 USD와 validation mesh를 결정한다.
+
+    기존 Matterport scene은 기존 loader를 그대로 사용한다.
+    `scene_type == "new_scene"`이면 Stage 01 scene_meta의 USD를
+    render source와 mesh-anchor validation source로 함께 사용한다.
+    """
+
+    ov = override_scene_usd(args)
+    if ov is not None:
+        # 레이어는 원본을 sublayer로 깔고 있으므로 mesh-anchor 검증도 같은 파일로 한다.
+        meta_path = Path(args.out_dir) / 'scene_meta' / f'{args.scene}.json'
+        scene_meta = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
+        return ov, load_scene_usd(str(ov)), scene_meta
+
+    resolved = usdz_scene_utils.load_new_scene(
+        args.out_dir, args.scene, load_scene_usd
+    )
+    if resolved is not None:
+        return resolved
+
+    meta_path = Path(args.out_dir) / 'scene_meta' / f'{args.scene}.json'
+    scene_meta = {}
+    if meta_path.is_file():
+        with open(meta_path) as f:
+            scene_meta = json.load(f)
+
+    if scene_meta.get('scene_type') == 'new_scene':
+        if not scene_meta.get('passed', False):
+            raise ValueError(
+                f'new_scene이 scene preparation을 통과하지 못했다: {meta_path}'
+            )
+
+        usd_path = Path(scene_meta['usd_path'])
+        if not usd_path.is_file():
+            raise FileNotFoundError(
+                f'new_scene USD 없음: {usd_path}'
+            )
+
+        validation_mesh = load_scene_usd(
+            str(usd_path)
+        )
+        return usd_path, validation_mesh, scene_meta
+
+    usd_path = load_scene_model(
+        args.mesh_root,
+        args.scene,
+    )
+    validation_mesh = load_scene_mesh(
+        args.mesh_root,
+        args.scene,
+    )
+
+    return usd_path, validation_mesh, scene_meta
+
+
+def dataset_camera_config(args) -> RenderCameraConfig:
+    """기존 2-B의 dataset GT camera 설정을 그대로 구성한다."""
+
+    gt = dataset_utils.load_gt_episode(
+        args.data_root,
+        args.scene,
+        0,
+        args.dataset,
+    )
+
+    width, height = dataset_utils.render_wh(
+        args.dataset
+    )
+
+    return RenderCameraConfig(
+        name=f'{args.dataset}_gt',
+        width=width,
+        height=height,
+        k=np.asarray(gt['k'], dtype=np.float64),
+
+        # 아래 값들은 기존 04의 2-B 저장 규약 그대로다.
+        depth_scale_m=DEPTH_SCALE_RAW_TO_M,
+        depth_min_m=DEPTH_CLIP_MIN_M,
+        depth_max_m=DEPTH_CLIP_MAX_M,
+        render_near_m=RENDER_NEAR_M,
+        render_far_m=RENDER_FAR_M,
+    )
+
+
+def resolve_generate_camera(
+    args,
+    scene_meta: dict,
+) -> RenderCameraConfig:
+    """2-B observation camera를 선택한다.
+
+    Scene source와 camera source는 독립이다. 따라서 Matterport scene도
+    D455로 렌더할 수 있고, new_scene도 향후 다른 synthetic camera를
+    선택할 수 있다.
+    """
+
+    if args.camera == 'dataset':
+        if scene_meta.get('scene_type') == 'new_scene':
+            raise ValueError(
+                'new_scene에는 dataset GT camera가 없다. '
+                '--camera로 synthetic camera를 지정할 것'
+            )
+
+        return dataset_camera_config(args)
+
+    return SYNTHETIC_CAMERAS[args.camera]
+
+
+def depth_m_to_raw16(
+    depth_m: np.ndarray,
+    valid_mask: np.ndarray,
+    depth_scale_m: float,
+) -> np.ndarray:
+    """Metric depth를 uint16 Z16 encoding으로 변환한다.
+
+    표현 범위를 넘는 값은 saturation하지 않는다. 잘못된 depth scale 때문에
+    geometry가 한 거리로 뭉개지는 silent corruption을 즉시 오류로 처리한다.
+    """
+
+    if depth_scale_m <= 0:
+        raise ValueError(
+            f'depth_scale_m must be positive: {depth_scale_m}'
+        )
+
     raw = np.zeros(depth_m.shape, dtype=np.uint16)
-    scaled = np.clip(np.round(depth_m / DEPTH_SCALE_RAW_TO_M), 1, 65534)
-    raw[valid_mask] = scaled[valid_mask].astype(np.uint16)
+
+    if not valid_mask.any():
+        return raw
+
+    scaled = np.rint(
+        depth_m[valid_mask] / depth_scale_m
+    )
+
+    if np.any(scaled < 1) or np.any(scaled > 65534):
+        depth_max = float(
+            np.max(depth_m[valid_mask])
+        )
+        representable_max = 65534 * depth_scale_m
+
+        raise ValueError(
+            'depth uint16 encoding overflow: '
+            f'valid max={depth_max:.3f} m, '
+            f'representable max={representable_max:.3f} m, '
+            f'scale={depth_scale_m:g} m/raw'
+        )
+
+    raw[valid_mask] = scaled.astype(np.uint16)
     return raw
 
 
-def generate_episode(camera_and_sim, k: np.ndarray, ep_data: dict, ep_dir: Path,
-                     frame_step_m: float = FRAME_STEP_M) -> dict:
-    """(`04_render_obs.py`의 `generate_episode`와 완전히 같은 로직 — 렌더러 호출부만 다르다.)"""
+def generate_episode(camera_and_sim, camera: RenderCameraConfig,
+                     ep_data: dict, ep_dir: Path, frame_step_m: float = FRAME_STEP_M) -> dict:
+    """2-B 경로를 camera configuration에 따라 RGB/depth observation으로 렌더링한다."""
+
+    k = camera.k
     xy = resample_by_arclength(np.asarray(ep_data['trajectory'], dtype=np.float64), step_m=frame_step_m)
     action_poses = synthesize_action_poses(xy, ep_data['floor_z'], ep_data['h_b'], ep_data['pitch_deg'])
     poses_c2w = np.stack([action_to_c2w(a, 'cam2world_gl') for a in action_poses])
     rgb, depth_m = render_along(camera_and_sim, poses_c2w)
     n = len(action_poses)
 
+    finite_depth = depth_m[np.isfinite(depth_m)]
+    depth_stats = {
+        'finite_frac': float(np.isfinite(depth_m).mean()),
+        'zero_frac': float((depth_m == 0).mean()),
+        'min_m': float(finite_depth.min()) if finite_depth.size else float('nan'),
+        'median_m': float(np.median(finite_depth)) if finite_depth.size else float('nan'),
+        'max_m': float(finite_depth.max()) if finite_depth.size else float('nan'),
+    }
+
     (ep_dir / 'rgb').mkdir(parents=True, exist_ok=True)
     (ep_dir / 'depth').mkdir(parents=True, exist_ok=True)
     (ep_dir / 'extrinsic').mkdir(parents=True, exist_ok=True)
-    valid_all = np.zeros((n, RENDER_H, RENDER_W), dtype=bool)
+    valid_all = np.zeros(depth_m.shape, dtype=bool)
     for i in range(n):
         save_jpg(rgb[i], ep_dir / 'rgb' / f'frame_{i:04d}.jpg')
-        valid = (np.isfinite(depth_m[i]) & (depth_m[i] < RENDER_FAR_M * 0.99)
-                & (depth_m[i] >= DEPTH_CLIP_MIN_M) & (depth_m[i] <= DEPTH_CLIP_MAX_M))
+        valid = (
+            np.isfinite(depth_m[i])
+            & (depth_m[i] < camera.render_far_m * 0.99)
+            & (depth_m[i] >= camera.depth_min_m)
+            & (depth_m[i] <= camera.depth_max_m)
+        )
         valid_all[i] = valid
-        cv2.imwrite(str(ep_dir / 'depth' / f'frame_{i:04d}.png'), depth_m_to_raw16(depth_m[i], valid))
+
+        depth_raw = depth_m_to_raw16(
+            depth_m[i],
+            valid,
+            camera.depth_scale_m,
+        )
+        cv2.imwrite(
+            str(ep_dir / 'depth' / f'frame_{i:04d}.png'),
+            depth_raw,
+        )
         np.save(ep_dir / 'extrinsic' / f'frame_{i:04d}.npy', action_poses[i].astype(np.float32))
     np.save(ep_dir / 'intrinsic.npy', np.asarray(k, dtype=np.float32))
 
@@ -636,6 +779,7 @@ def generate_episode(camera_and_sim, k: np.ndarray, ep_data: dict, ep_dir: Path,
         'anchor_points_world': np.concatenate(anchor_d, axis=0) if anchor_d else np.empty((0, 3)),
         'rgb_first': rgb[0], 'depth_first': depth_m[0], 'valid_first': valid_all[0],
         'rgb_last': rgb[-1], 'depth_last': depth_m[-1], 'valid_last': valid_all[-1],
+        'depth_stats': depth_stats,
     }
 
 
@@ -649,27 +793,60 @@ def run_generate(args) -> dict:
     paths = json.load(open(json_path))
     episodes_data = paths['episodes'][:args.num_episodes]
 
-    k = dataset_utils.load_gt_episode(args.data_root, args.scene, 0, args.dataset)['k']
+    try:
+        usd_path, mesh, scene_meta = resolve_generate_scene(args)
+        camera = resolve_generate_camera(args, scene_meta)
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        print(f'  [ERROR] {exc}')
+        return {'error': str(exc)}
 
-    usd_path = resolve_scene_usd(args)
-    camera_and_sim = build_renderer(RENDER_W, RENDER_H, k, usd_path, args.light, _tl_params(args),
-                                    args.rtx_ambient, args.film_iso,
-                                    args.tonemap_op, args.tonemap_crush)
-    mesh = load_scene_mesh(args.mesh_root, args.scene)
+    camera_and_sim = build_renderer(
+        camera.width,
+        camera.height,
+        camera.k,
+        usd_path,
+        args.light,
+        _tl_params(args),
+        args.rtx_ambient,
+        args.film_iso,
+        camera.render_near_m,
+        camera.render_far_m,
+    )
 
-    obs_dir = Path(args.out_dir) / 'obs' / f'{args.scene}{tag}_{args.mode}_isaac'
+    camera_tag = (
+        ''
+        if args.camera == 'dataset'
+        else f'_{args.camera}'
+    )
+
+    obs_dir = (
+        Path(args.out_dir)
+        / 'obs'
+        / f'{args.scene}{tag}_{args.mode}_isaac{camera_tag}'
+    )
+    obs_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(obs_dir / 'camera_config.json', 'w') as f:
+        json.dump(
+            camera.to_dict(),
+            f,
+            indent=2,
+        )
     results = []
     for i, ep_data in enumerate(episodes_data):
         ep_dir = obs_dir / f'episode_{i:06d}'
-        res = generate_episode(camera_and_sim, k, ep_data, ep_dir, frame_step_m=args.frame_step_m)
+        res = generate_episode(camera_and_sim, camera, ep_data, ep_dir, frame_step_m=args.frame_step_m)
         anchor_dist = (compute_mesh_distance(res['anchor_points_world'], mesh)
                       if len(res['anchor_points_world']) else np.array([np.nan]))
         res['anchor_median_m'] = float(np.median(anchor_dist))
         res['episode_id'] = ep_data['episode_id']
         results.append(res)
+        ds = res['depth_stats']
         print(f'    ep {i:>3} (src episode_id={ep_data["episode_id"]}): {res["n_frames"]} frames, '
               f'step max={res["step_max_m"]:.4f}m (기준 {res["step_tol_m"]:.4f}m, '
-              f'위반 {res["step_bad_n"]}건), mesh-anchor median={res["anchor_median_m"]:.5f}m -> {ep_dir}')
+              f'위반 {res["step_bad_n"]}건), mesh-anchor median={res["anchor_median_m"]:.5f}m')
+        print(f'      depth: finite={ds["finite_frac"]*100:.2f}%, zero={ds["zero_frac"]*100:.2f}%, '
+              f'min/median/max={ds["min_m"]:.3f}/{ds["median_m"]:.3f}/{ds["max_m"]:.3f} m -> {ep_dir}')
 
     stats = {
         'n_episodes': len(results),
@@ -682,11 +859,17 @@ def run_generate(args) -> dict:
     stats['step_ok'] = bool(stats['step_bad_total'] == 0)
     stats['anchor_ok'] = bool(stats['anchor_worst_m'] <= GEN_MESH_ANCHOR_TOL_M)
     stats['passed'] = bool(stats['step_ok'] and stats['anchor_ok'] and len(results) == len(episodes_data))
-    return {'stats': stats, 'episodes': results, 'obs_dir': obs_dir}
+    return {
+        'stats': stats,
+        'episodes': results,
+        'obs_dir': obs_dir,
+        'camera': camera.to_dict(),
+    }
 
 
 def render_generate_report(log_dir: Path, scene: str, mode: str, result: dict) -> Path:
     stats = result['stats']
+    camera = result['camera']
 
     def pill(ok: bool) -> str:
         return f'<span class="pill {"good" if ok else "bad"}">{"PASS" if ok else "FAIL"}</span>'
@@ -703,6 +886,10 @@ def render_generate_report(log_dir: Path, scene: str, mode: str, result: dict) -
 </div>
 <p>2-B(Isaac Sim 버전) — 2-A로 검증된 같은 렌더러로 <code>03_sample_gt_paths.py --mode {mode}</code>가
 만든 경로를 따라 실제 rgb/depth/extrinsic을 생성했다. 산출물: <code>{result["obs_dir"]}</code>.</p>
+<p>카메라 <code>{camera["name"]}</code> —
+{camera["width"]}x{camera["height"]},
+depth scale <code>{camera["depth_scale_m"]} m/raw</code>,
+저장 범위 {camera["depth_min_m"]}~{camera["depth_max_m"]} m.</p>
 '''
     body = ''
     for r in result['episodes']:
@@ -722,42 +909,22 @@ def render_generate_report(log_dir: Path, scene: str, mode: str, result: dict) -
     return save_gallery(log_dir, 'report.html', f'{SCRIPT_NAME} — {scene} ({mode} 2-B)', summary, body)
 
 
-def apply_preset(parser, args) -> list:
-    """프로파일 값으로 **사용자가 명시하지 않은 인자만** 채운다. 판정과 채우기는
-    `profiles.apply_to_args`가 하고(03과 같은 로직), 여기서는 **어느 프로파일인지만** 고른다.
-
-    - `--render_profile <이름>`  : 그 프로파일
-    - `--preset measured`        : 데이터셋에 맞는 측정 프로파일 (하위 호환)
-    - `--preset none`(기본)      : 아무것도 안 함 -> 종전 동작 100% 유지
-    """
-    import profiles
-    import render_profiles
-
-    if getattr(args, 'render_profile', None):
-        prof = render_profiles.get(args.render_profile)
-    elif args.preset == 'measured':
-        prof = render_profiles.for_dataset(args.dataset)
-    elif args.preset == 'none':
-        return []
-    else:
-        assert False, f'unreachable preset={args.preset!r}'
-    return profiles.apply_to_args(parser, args, prof)
-
-
 def main() -> int:
-    parser = build_argparser()
-    args = parser.parse_args()
-    for name, value in apply_preset(parser, args):
-        print(f'[{SCRIPT_NAME}] --preset {args.preset}: {name} = {value}', flush=True)
+    args = build_argparser().parse_args()
     if args.data_root is None:
         args.data_root = dataset_utils.default_data_root(args.dataset)
     # 렌더 해상도는 데이터셋의 GT 해상도를 따른다(vln_n1 480x270, vln_pe 256x256) — vln_n1은
     # 기존 값 그대로라 기본 경로 동작 불변.
     global RENDER_W, RENDER_H
     RENDER_W, RENDER_H = dataset_utils.render_wh(args.dataset)
-    print(f'[{SCRIPT_NAME}] scene={args.scene} dataset={args.dataset} mode={args.mode}')
+    print(f'[{SCRIPT_NAME}] scene={args.scene} dataset={args.dataset} '
+          f'mode={args.mode} camera={args.camera}')
 
     if args.mode == 'gt_replay':
+        if args.camera != 'dataset':
+            print('  [ERROR] gt_replay는 dataset GT camera만 사용한다 '
+                  '(--camera dataset).')
+            return 2
         result = validate_gt_replay(args)
         stats = result['stats']
         log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}'
@@ -772,7 +939,12 @@ def main() -> int:
     if 'error' in result:
         return 2
     stats = result['stats']
-    log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}_{args.mode}'
+    camera_tag = '' if args.camera == 'dataset' else f'_{args.camera}'
+    log_dir = (
+        Path(args.log_dir)
+        / SCRIPT_NAME
+        / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}_{args.mode}{camera_tag}'
+    )
     report = render_generate_report(log_dir, args.scene, args.mode, result)
     print(f'  obs -> {result["obs_dir"]}')
     print(f'  report html -> {report}')
