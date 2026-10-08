@@ -38,3 +38,4 @@
 - [gs_vlnpe 02 ESDF 맵](260803_gs_vlnpe_02_esdf_result.md) — M1.2 완료; occupancy 저장 + GT 궤적 clearance 게이트, h_nav/h_obs 밴드, 입력은 obj
 - [gs_vlnpe 01_prepare_scene 씬 정합 게이트](260802_gs_vlnpe_01_prepare_scene_result.md) — M1.1 완료; USD/정규화 불필요로 게이트만 남김, mesh 표면거리 <1mm, negative test 포함. **camera_extrinsic = 에피소드별 로봇 키 h_b + 카메라 pitch**(2026-08-03 정정)
 - [h1 eval hang 원인 조사](260724_h1_eval_hang_investigation_result.md) — env.step() 내부 Isaac stall, system memory 초과 아님(배제), watchdog 대응
+- [dataset_converters 현황 정리 (vln-ce/vln-pe/노은역)](261008_dataset_converters_status_result.md) — 2026-10-08 복원 기록. gs_vlnpe 본체는 `feature/embaug_v0.1`(ad6a2d9) push 완료이나 **2dloader_vlnce/3dloader_vlnce/docs/gs-vlnpe-l1-l2a.md는 어떤 브랜치에도 미커밋**. 남은 일: gs_vlnpe Phase C(action 이산화 + 07_render_paths_to_vlnpe.py), 노은역 L1/L2a 신규 4파일, 3dloader 학습코드 이식, 2dloader W5 FAIL(20.7ms)
