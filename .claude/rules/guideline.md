@@ -73,6 +73,12 @@
 - **train, eval(habitat), eval(isaac) 세 경로 모두 동일한 조건·파라미터로 모델에 동일한 입력 형식이 들어가야 한다.** 한쪽만 바꾸고 다른 쪽을 누락하면 train==eval 불변식이 깨짐.
 - 예외적인 경우: 
 
+#### habitat 평가 yaml의 look-down 각도: 정본은 30도 (ld30)
+- 실제 각도 = `tilt_angle` x 2 (`habitat_vln_evaluator.py`가 LOOKDOWN/LOOKUP을 두 번씩 보낸다). 학습 데이터의 pitch가 최대 30도(`pitch_1 -> pitch_2` = 0 -> 30)라서 **`tilt_angle: 15`(=30도)가 정본**이다.
+- `tilt_angle: 30`(=60도, ld60)인 기존 yaml(`vln_r2r_mini.yaml`, `vln_r2r_mini_5090.yaml`, `vln_r2r_full_ld60.yaml` 등)은 고치지 않고 그대로 둔다.
+- **새 평가 yaml을 만들거나 복사/생성할 때 `tilt_angle`이 30(=60도)이면, 작업을 진행하기 전에 사용자에게 경고한다.** 원본으로는 ld30 yaml(`vln_r2r_mini_ld30.yaml`, `vln_r2r_full_ld30.yaml`)을 쓴다.
+- 2x2처럼 여러 셀을 비교할 때는 모든 셀의 yaml이 같은 각도인지 확인한다 (예: GT 셀이 `eval_config_path=None`이면 기본 yaml인 ld60으로 떨어진다).
+
 ### 5. 검증
 
 - 변경 후에는 반드시 명령어를 실행해 **기존 기능(default 경로)이 이전과 동일하게 동작하는지**, **신규 기능이 의도대로 동작하는지** 둘 다 확인한다.
@@ -100,6 +106,16 @@ else:
   - 더 근본적인 해결: 애초에 A가 B보다 의미론적으로 넓은 범위를 표현한다면(A의 일부 인스턴스만 B 역할을 함), A는 B를 상속하지 말고 필요한 로직만 A 안에 직접 작성하거나 B의 하위 로직을 호출하는 방식으로 가져온다. "코드 재사용" 하나만으로 상속 여부를 정하지 말 것 — `isinstance`/타입 계층이 실제 동작을 정확히 반영하는지도 같이 판단해야 한다.
 
 
+### 8. eval 결과 파일(progress.json / raw/ / result_*.json) 분석 규칙
+- `progress.json`은 모든 rank가 **완료 순서대로** append한다 → 줄 순서 = rank·episode 순서가 아님. 한 log_dir에 resume/재실행 row가 **중복**될 수 있다.
+- 분석 코드는 반드시:
+  1. 줄 순서에 의존하지 않는다 ("앞에서 N개" 같은 부분집합 금지).
+  2. `(scene_id, episode_id)`를 key로 **dedupe** (같은 key면 최신 `run_stamp` row 사용).
+  3. checkpoint/run 비교는 **같은 episode 집합의 교집합**에서 한다 (episode 수 1839 확인, 1846처럼 초과하면 중복 섞임).
+  4. `run_stamp`/`ckpt` 필드로 어느 실행의 row인지 필터한다.
+- `raw/<run_stamp>/episodes/<scene>_<ep>.json`은 episode당 파일 1개 → 여러 stamp에 걸치면 최신 stamp 우선.
+- 분석 코드는 파일을 직접 파싱하지 말고 **`scripts/eval_dashboard/data.py`의 reader를 import**해서 쓴다 (`build_task` = result/progress/raw 병합·dedupe, `raw_episode_files` = stamp 병합). 읽는 규칙을 한 곳에만 둔다.
+
 ## Command
 ### Training & evaluation
 `python scripts/train_eval/qwenvl_train/runner.py --config scripts/train_eval/qwenvl_train/bev/base_s1.fpv_s2.fpv_rgb_gt.py --machine 5090` 
@@ -125,6 +141,13 @@ else:
 - command 명령을 작성하고 각 argument의 의미
 - 시각화 및 디버깅 결과 보고
 - 결과 보고는 `.claude/memory/{task명}_result.md`에 작성해라.
+
+## 노드 로컬 데이터 (`data` = 노드별 data-vol1)
+- `data` 는 각 노드의 로컬 디스크(`/home/irteam/data-vol1`)라 **노드마다 내용이 다르다.** `data-vol2` 는 공유지만 scene 은 tar.gz 로만 있다.
+- mini habitat 평가는 `data/InternData-N1-v0.5-mini/scene_data/mp3d_ce/mp3d/<scene>/` 를 쓴다. `mp3d_ce.tar.gz` 의 최상위가 `mp3d/` 라서 tar 옆에 그냥 풀면(`extract_dataset.sh`) 한 단계 어긋난다.
+- **새 노드에서 mini 평가를 큐에 넣기 전에 반드시 실행** (검증 후 필요할 때만 `mp3d_ce/` 안에 푼다):
+  `bash scripts/dataset_converters/setup_scene_data.sh`
+- 증상: `ESP_CHECK failed: No Stage Attributes exists for requested scene '.../mp3d_ce/mp3d/<scene>/<scene>.glb'` 로 평가가 수십 초 만에 끝난다 (2026-10-01 node3, 그 전 node4).
 
 ## r2r_h1_replay 데이터 수집 (eval_r2r_h1_replay.py)
 ```bash

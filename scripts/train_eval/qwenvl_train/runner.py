@@ -29,9 +29,11 @@ This file is NEW and touches no existing code.
 """
 
 import argparse
+import fcntl
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import replace
@@ -437,6 +439,61 @@ def _save_wandb_run_id(output_dir: str) -> None:
             f.write(run_id)
 
 
+def _parent_wandb_run_id(ckpt_dir: str) -> Optional[str]:
+    """Training run ID for an intermediate `<run>/checkpoint-N` (None for anything else).
+
+    Only once training has FINISHED (final weights saved in <run>/): resuming a run that is
+    still training from a second process makes the two writers' wandb steps collide and
+    wandb drops the training's own rows. Mid-training evals keep the old separate run."""
+    ckpt_dir = os.path.abspath(ckpt_dir)
+    if not re.fullmatch(r"checkpoint-\d+", os.path.basename(ckpt_dir)):
+        return None
+    if not _has_model_weights(os.path.dirname(ckpt_dir)):
+        return None
+    f = os.path.join(os.path.dirname(ckpt_dir), _WANDB_RUN_ID_FILE)
+    if not os.path.exists(f):
+        return None
+    with open(f) as fp:
+        return fp.read().strip() or None
+
+
+def _ckpt_step(model_path: str) -> Optional[int]:
+    """Training step of a checkpoint: `checkpoint-N` -> N, else trainer_state.json global_step."""
+    m = re.fullmatch(r"checkpoint-(\d+)", os.path.basename(os.path.abspath(model_path)))
+    if m:
+        return int(m.group(1))
+    try:
+        with open(os.path.join(model_path, "trainer_state.json")) as f:
+            return int(json.load(f)["global_step"])
+    except (OSError, KeyError, ValueError):
+        return None
+
+
+def _list_checkpoints(run_dir: str, spec: str) -> List[str]:
+    """--eval-ckpts: 'all' -> every checkpoint-N (+ the final model at run_dir unless it is the
+    last checkpoint-N), or a list like '30000,40000'.
+
+    'final' in the list means the model saved at run_dir itself (after training ends).
+    """
+    by_step = {int(m.group(1)): d for d in glob.glob(os.path.join(run_dir, "checkpoint-*"))
+               if (m := re.fullmatch(r"checkpoint-(\d+)", os.path.basename(d))) and _has_model_weights(d)}
+    final = [run_dir] if _has_model_weights(run_dir) else []
+    if spec == "all":
+        if final and _ckpt_step(run_dir) in by_step:
+            final = []  # the final save == the last checkpoint-N (same weights): evaluate once
+        return [by_step[s] for s in sorted(by_step)] + final
+    out = []
+    for tok in spec.split(","):
+        tok = tok.strip()
+        if tok == "final":
+            assert final, f"--eval-ckpts final: no model weights at {run_dir}"
+            out += final
+        else:
+            assert int(tok) in by_step, f"--eval-ckpts: checkpoint-{tok} not found (have {sorted(by_step)})"
+            out.append(by_step[int(tok)])
+    return out
+
+
 def _ckpt_run_name(model_path: str) -> str:
     """wandb run name for an eval-only run: the checkpoint path below `checkpoints/`.
 
@@ -533,6 +590,15 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
     else:
         log_dir = os.path.join(output_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
+    # One eval per (ckpt, config) at a time: two runs in one log_dir interleave progress.json
+    # (2026-09-29: node2+node4 both evaluated checkpoint-30000). data-vol2 is Lustre mounted
+    # with `flock`, so this lock holds across nodes. Released when this process exits.
+    lock_fp = open(os.path.join(log_dir, ".eval.lock"), "w")
+    try:
+        fcntl.flock(lock_fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"[eval] SKIP: another eval of this ckpt+config is running ({log_dir}/.eval.lock)", flush=True)
+        return 1
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     write_repro(log_dir, stamp, "eval",
                 {"machine": machine, "ckpt": model_path, "config": config_path})
@@ -568,6 +634,12 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
                     one_shot_run_id = run.id
             except Exception as e:
                 print(f"[wandb] init failed: {e}", flush=True)
+        elif not os.path.exists(id_file) and _parent_wandb_run_id(output_dir):
+            # intermediate checkpoint-N of a training run: log into the TRAINING run so
+            # test/* plots against test/ckpt_step (distributed_base.py) across checkpoints.
+            one_shot_run_id = _parent_wandb_run_id(output_dir)
+            resuming = True  # never rename the training run
+            print(f"[wandb] checkpoint eval -> training run {one_shot_run_id}", flush=True)
         elif not os.path.exists(id_file):
             # old checkpoint without txt: create run and save for future evals
             ckpt_name = os.path.basename(output_dir.rstrip('/'))
@@ -589,6 +661,11 @@ def run_eval(config_path: str, model_path: str, run_name: str, output_dir: str,
     env["EVAL_OUTPUT_DIR"] = os.path.abspath(log_dir)
     # stamps this run's row in the append-only result_<machine>.json (distributed_base.py)
     env["EVAL_RUN_STAMP"] = stamp
+    # run identity for result rows / progress.json / raw output / wandb x-axis
+    env["EVAL_RUN_META"] = json.dumps({
+        "ckpt": os.path.abspath(model_path), "ckpt_step": _ckpt_step(model_path),
+        "config": exp_name or config_path, "machine": machine, "git_commit": _git("rev-parse", "HEAD"),
+    })
     env["WANDB_DIR"] = output_dir
     env.update(_wandb_env())
     if debugpy:
@@ -647,7 +724,8 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
                    wandb_new_run: bool = False,
                    watchdog: bool = False,
                    watchdog_idle_min: int = 10,
-                   vis: bool = False) -> None:
+                   vis: bool = False,
+                   eval_ckpts: Optional[str] = None) -> None:
     """End-to-end driver. ``exp_name`` e.g. 'batch_size/b4_eff128_base'.
 
     ``in_process=True`` runs train/eval in THIS process (no torchrun) for VSCode
@@ -687,6 +765,16 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
     if p.node_rank != 0:
         return
 
+    if eval_ckpts:
+        # --eval-ckpts: evaluate several checkpoints of one run (output_dir = the run dir)
+        for ckpt in _list_checkpoints(output_dir, eval_ckpts):
+            print(f"[eval] --eval-ckpts {eval_ckpts}: {ckpt}", flush=True)
+            _eval_one(p, exp_name, config_path, ckpt, "explicit --eval-ckpts", _ckpt_run_name(ckpt), ckpt,
+                      machine=machine, do_train=do_train, output_dir_for_aux=output_dir,
+                      in_process=in_process, debugpy=debugpy, wandb_run_id=None, wandb_new_run=False,
+                      watchdog=watchdog, watchdog_idle_min=watchdog_idle_min, vis=vis)
+        return
+
     # Deliberately NO fallback to EVAL_MACHINE[machine]["model_path"]: with val_ratio=0
     # there is no best_metric, and that fallback silently evaluated the RELEASED checkpoint.
     if model_path:
@@ -700,9 +788,21 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
             f"[eval] no checkpoint found under {output_dir}. Pass --model-path <ckpt> to "
             f"evaluate an existing checkpoint, or check that training actually saved one."
         )
+    _eval_one(p, exp_name, config_path, best, how, run_name, output_dir,
+              machine=machine, do_train=do_train, output_dir_for_aux=output_dir,
+              in_process=in_process, debugpy=debugpy, wandb_run_id=wandb_run_id, wandb_new_run=wandb_new_run,
+              watchdog=watchdog, watchdog_idle_min=watchdog_idle_min, vis=vis)
+
+
+def _eval_one(p: Params, exp_name: str, config_path: str, best: str, how: str, run_name: str,
+              output_dir: str, *, machine: str, do_train: bool, output_dir_for_aux: str,
+              in_process: bool, debugpy: Optional[str], wandb_run_id: Optional[str],
+              wandb_new_run: bool, watchdog: bool, watchdog_idle_min: int, vis: bool) -> None:
+    """Evaluate one checkpoint `best`, writing logs under `output_dir` (unchanged body of
+    train_and_eval's eval tail; also called per checkpoint by --eval-ckpts)."""
     print(f"[eval] machine={machine}  checkpoint={best}  ({how})")
     if do_train:
-        _prep_ckpt_aux_files(output_dir, best, p.system2_ckpt)
+        _prep_ckpt_aux_files(output_dir_for_aux, best, p.system2_ckpt)
     else:
         _backfill_chat_template(best, p.system2_ckpt)
     os.makedirs(output_dir, exist_ok=True)
@@ -786,6 +886,11 @@ def main_cli() -> None:
                          "runner: pauses at start; trainer/eval: pauses after model load.")
     ap.add_argument("--debug-dir", default=None,
                     help="BEV debug image output dir (auto-set to output/bev_debug when --debugpy is given)")
+    ap.add_argument("--eval-ckpts", default=None,
+                    help="evaluate several checkpoints of one run instead of only the last/best: "
+                         "'all' (every checkpoint-N + the final model) or a list like '30000,40000,final'. "
+                         "With --no-train, --model-path is the RUN dir (parent of checkpoint-N). "
+                         "Default: unchanged (one checkpoint).")
     ap.add_argument("--vis", action="store_true",
                     help="save per-episode visualizations under <ckpt>/logs/<config>/ "
                          "(habitat: vis_debug mp4, h1: vis_output frames+video). Off by default — "
@@ -907,6 +1012,7 @@ def main_cli() -> None:
         watchdog=args.watchdog,
         watchdog_idle_min=args.watchdog_idle_min,
         vis=args.vis,
+        eval_ckpts=args.eval_ckpts,
     )
 
 

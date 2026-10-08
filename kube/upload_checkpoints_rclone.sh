@@ -6,7 +6,7 @@
 # run on the pod (or wherever SRC_DATA_ROOT lives), e.g. via `kubectl exec -it <pod> -- bash`.
 #
 # Convenient 2-arg form: give a LOCAL path (absolute — the one you know) and a CLOUD path
-# (relative to the fixed Drive folder). Order does not matter: whichever arg is an absolute/
+# (relative to My Drive root; nothing is prepended unless DRIVE_PREFIX is set). Order does not matter: whichever arg is an absolute/
 # explicit path (/ ./ ../) is the local side, the other is the cloud side. If the cloud path
 # ends in "/" (or is empty), the local basename is appended so the folder name is preserved.
 #
@@ -19,17 +19,17 @@
 # Defaults:
 #   SRC_DATA_ROOT=/home/irteam/data-vol2/checkpoints   (local/pod; = $CKPT_OUT)
 #   DST_DATA_ROOT=gdrive:  (My Drive root, no folder ID needed)
-#   DRIVE_PREFIX=InternNav/checkpoints  (subfolder under My Drive root; prepended to rel_dst)
+#   DRIVE_PREFIX=""  (optional subfolder prepended to rel_dst; empty = none)
 #
 # Arguments:
 #   local_path     Local dir to upload. Absolute/explicit (/ ./ ../) -> used verbatim; otherwise
 #                  a plain name is joined under src_data_root.
-#   cloud_rel      Path under DRIVE_PREFIX to write. Ending in "/" -> append local basename.
+#   cloud_rel      Path under My Drive root (or DRIVE_PREFIX if set) to write. Ending in "/" -> append local basename.
 #
-# Upload an image_base checkpoint into a Drive "image_base/" subfolder:
+# Upload an image_base checkpoint into Drive "InternNav/checkpoints/image_base/":
 #   ./upload_checkpoints_rclone.sh \
 #     /home/irteam/data-vol2/checkpoints/image_base/base_s1.fpv_s2.fpv_20260709_130547 \
-#     image_base/
+#     InternNav/checkpoints/image_base/
 #   # -> Drive: My Drive/InternNav/checkpoints/image_base/base_s1.fpv_s2.fpv_20260709_130547
 #
 # First-time auth, if needed:
@@ -44,7 +44,7 @@ RCLONE_BIN="${RCLONE_BIN:-}"
 REMOTE="${RCLONE_REMOTE:-gdrive}"
 SRC_DATA_ROOT="${SRC_DATA_ROOT:-${CKPT_OUT:-/home/irteam/data-vol2/checkpoints}}"
 DST_DATA_ROOT="${DST_DATA_ROOT:-${REMOTE}:}"
-DRIVE_PREFIX="${DRIVE_PREFIX:-InternNav/checkpoints}"
+DRIVE_PREFIX="${DRIVE_PREFIX-}"
 TRANSFERS="${TRANSFERS:-2}"
 CHECKERS="${CHECKERS:-8}"
 FOLDER_ID="${FOLDER_ID:-}"
@@ -68,8 +68,7 @@ Environment:
   DST_DATA_ROOT    Default destination root (Drive). Default: $DST_DATA_ROOT
   DRIVE_PREFIX     Subfolder prepended to rel_dst for root-scoped destinations (bare "remote:",
                     URL/drive-folder:/bare ID), so multiple projects can share one Drive root.
-                    Default: $DRIVE_PREFIX
-                    Set to "" to disable. Ignored for explicit "remote:path" overrides.
+                    Default: "" (none). Ignored for explicit "remote:path" overrides.
   RCLONE_BIN       Explicit rclone binary path.
   RCLONE_REMOTE    Default remote name. Default: gdrive
   RCLONE_VERSION   Auto-downloaded rclone version. Default: v1.74.3
@@ -374,7 +373,7 @@ ensure_auth() {
 }
 
 # List folders under the Drive dest root (optional REL subpath to drill down; defaults to
-# DRIVE_PREFIX so the InternNav checkpoints subfolder is what shows up without extra args).
+# DRIVE_PREFIX, i.e. My Drive root unless DRIVE_PREFIX is set).
 list_dirs() {
   resolve_dst_root "$DST_DATA_ROOT"
   local rel; rel="$(trim_slashes "${1:-$DRIVE_PREFIX}")"
