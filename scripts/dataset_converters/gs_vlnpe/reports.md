@@ -1,7 +1,7 @@
-# gs_vlnpe 파이프라인 리포트 링크 모음 (00~04, vln_n1 + vln_pe)
+# gs_vlnpe 파이프라인 리포트 링크 모음 (00~04, vln_n1 + vln_pe + 노은역 usdz)
 
 각 스크립트가 만든 `report.html`의 Artifact 링크 + 로컬 경로. 로컬 경로는 repo 루트 기준.
-최종 갱신 2026-08-10 (ambient_only + film_iso 70 재렌더 반영). 상세 경위·수치는
+최종 갱신 2026-09-03 (노은역 usdz 절 추가). 상세 경위·수치는
 `.claude/memory/260804_gs_vlnpe_04_render_obs_result.md`(Open3D),
 `.claude/memory/260805_gs_vlnpe_04_render_obs_isaac_result.md`(Isaac),
 `.claude/memory/260807_gs_vlnpe_vlnpe_dataset_result.md`(VLN-PE 지원) 참고.
@@ -84,6 +84,72 @@ report.html/이미지는 `main()` 반환 시점에 이미 저장 완료다. 로�
 03 씬1 20/20 성공·**같은루트 19/20**(chamfer 0.130, `--refine_radius 0.20`) / 씬2 14/16·9/14 ·
 03e 계획GT 대비 씬1 19/20 · 04 Isaac 재현 경로 렌더 mesh-anchor 0.0033~0.0079 m ·
 롤아웃 자체 성공률(R2R 3 m 기준) 씬1 25/25, 씬2 7/15.
+
+---
+
+# 노은역 usdz (`apply_real/`, GT 없는 GS 씬)
+
+`data/GS_USDZ/Subway/noeun_station_collision.usdz`(NuRec Gaussian-splat + 충돌 mesh, 2.2 GB)의
+**중간층**(`floor_z = -0.05 m`)에서 만든 데이터셋. 위 두 절과 달리 **기존 GT 궤적이 없어**
+02가 geometry만으로 맵을 만들고 03이 경로 GT를 생성한다(`--mode random` 전용, `gt_replay` 불가).
+`noeun_station_mid`는 잘라낸 새 usdz가 아니라 원본 안의 범위를 적어둔 **논리 scene ID**다.
+
+개별 단계 report는 Artifact로 발행하지 않았고, 아래 통합 리포트 하나에 5단계 대조 결과가 모여 있다:
+**[노은역 00→04 실행 결과](https://claude.ai/code/artifact/e42ce9d3-f8f2-41f3-b4bb-9dd889459abc)**
+(카메라·depth 범위 3종 다이어그램, rgb↔depth 전환 위젯, 10 m vs 30 m 비교 포함)
+
+| 단계 | 로컬 경로 (`logs/gs-vlnpe/apply_real/` 이하) | 판정 | 주요 수치 |
+|---|---|---|---|
+| 00 자산 계약 검사 | `00_inspect_vln_n1/noeun_station_mid/` | PASS | 6 gate, triangle 665,812, 중간층 후보 면 14,618 |
+| 01 중간층 논리 ROI | `01_prepare_scene/noeun_station_mid/` | PASS | 면 14,618, 면적 798.1859255685 m² |
+| 02 occupancy·ESDF | `02_build_freemap_esdf/noeun_station_mid/` | UNVERIFIED | grid 1345×1308×40, occ 0.010131462, navigable 0.879639166, maxESDF 27.6688 m |
+| 03 경로 GT 20개 | `03_sample_gt_paths/noeun_station_mid_random/` | PASS | 20/20, 충돌 0, 길이 median 14.41 m (2.26~31.90), min clearance 0.158 m |
+| 04 렌더 (`d455_nominal`) | `04_render_obs_isaac/noeun_station_mid_random_d455_nominal/` | PASS | 20/20, **8,378 frame**, mesh-anchor median 0.00462 m / worst 0.00727 m |
+| 04 렌더 (`d455_30m`) | `04_render_obs_isaac/noeun_station_mid_random_d455_30m/` | PASS | 2 episode(비교용), 값없음 7.6 %→0.1 % |
+
+02가 **UNVERIFIED**인 이유는 실패가 아니다 — GT 궤적이 없어 독립 clearance 검증을 건너뛴 것이고
+geometry sanity 게이트는 통과했다.
+
+## 실행 커맨드 (전부 한 줄, repo 루트에서)
+
+```
+timeout --signal=KILL 1800 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/apply_real/00_inspect_vln_n1.py --scene noeun_station_mid --usd_path data/GS_USDZ/Subway/noeun_station_collision.usdz --floor_z -0.05 --out_dir scripts/dataset_converters/gs_vlnpe/apply_real --log_dir logs/gs-vlnpe/apply_real
+```
+```
+timeout --signal=KILL 1800 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/apply_real/01_prepare_scene.py --scene noeun_station_mid --usd_path data/GS_USDZ/Subway/noeun_station_collision.usdz --floor_z -0.05 --out_dir scripts/dataset_converters/gs_vlnpe/apply_real --log_dir logs/gs-vlnpe/apply_real
+```
+```
+timeout --signal=KILL 3600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/apply_real/02_build_freemap_esdf.py --scene noeun_station_mid --geometry usd --ref_h_b 0.875 --scene_meta_dir scripts/dataset_converters/gs_vlnpe/apply_real --out_dir scripts/dataset_converters/gs_vlnpe/apply_real --log_dir logs/gs-vlnpe/apply_real
+```
+```
+timeout --signal=KILL 3600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/apply_real/03_sample_gt_paths.py --scene noeun_station_mid --mode random --num_episodes 20 --esdf_dir scripts/dataset_converters/gs_vlnpe/apply_real/esdf --out_dir scripts/dataset_converters/gs_vlnpe/apply_real --log_dir logs/gs-vlnpe/apply_real
+```
+```
+timeout --signal=KILL 14400 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/apply_real/04_render_obs_isaac.py --scene noeun_station_mid --mode random --num_episodes 20 --camera d455_nominal --out_dir scripts/dataset_converters/gs_vlnpe/apply_real --log_dir logs/gs-vlnpe/apply_real
+```
+
+**노은역 전용 인자**: `--usd_path`(기본 `None`=기존 Matterport 경로) · `--floor_z -0.05`(수동 지정,
+자동 검출 아님) · `--geometry usd`(obj가 없어 필수) · `--ref_h_b 0.875`(GT가 없어 `--ref_episode`로
+못 얻음) · `--camera`(new_scene에서 기본값 `dataset`은 exit 2, 반드시 프로파일 지정).
+
+## 새 카메라 프로파일 (`camera_profiles.py`)
+
+| | 해상도 | hfov | depth 한 칸 | 저장 범위 | 렌더 near/far | uint16 상한 |
+|---|---|---|---|---|---|---|
+| `dataset` (vln_n1 GT) | 480×270 | 68.0° | 0.0001 m | 0.1~3 m | 0.05/10 m | 6.5534 m |
+| `d455_nominal` | 480×270 | 90.0° | 0.001 m | 0.1~10 m | 0.05/12 m | 65.534 m |
+| `d455_30m` | 480×270 | 90.0° | 0.001 m | 0.1~30 m | 0.05/35 m | 65.534 m |
+
+**불변식**: `render_far_m > depth_max_m / 0.99` — `generate_episode`의 유효 조건이
+`depth < render_far × 0.99`라서 far를 안 올리면 저장 상한을 올려도 담기지 않는다.
+
+⚠️ **far plane 변경은 rgb도 바꾼다**(실측). 같은 프로파일로 재렌더하면 rgb·depth가 픽셀 단위
+완전 동일(렌더러 결정론적)임을 확인해 원인을 far plane으로 확정했다. 따라서 **10 m와 30 m
+데이터셋의 rgb는 같은 장면의 다른 데이터이므로 섞어 쓸 수 없다.**
+
+상세 경위·수치는 `.claude/memory/260820_gs_vlnpe_noeun_run_result.md`,
+실행 순서·기대 수치는 `apply_real/README.md`, 설계 근거는
+`.claude/memory/codex/codex_noeun_usdz_mid_00_to_04_complete_reproduction_guide.md` 참고.
 
 ---
 
@@ -184,3 +250,141 @@ iso 70 행들은 이번에 `gt_replay`로 재렌더해 얻은 값이다(SSIM은 
 이 파일이 **리포트 링크의 단일 소스**다. 다음 두 파일은 Isaac 렌더러만 다루던 부분집합이라
 여기 내용에 포함돼 있다(참고용으로만 남겨둠):
 `04_render_obs_isaac_reports.md`, `.claude/memory/260805_gs_vlnpe_04_render_obs_isaac_links.md`.
+
+---
+
+# 05~06 · 설정 프로파일 (2026-09-08 ~ 09-10 추가)
+
+위 00~04는 **씬 2개**에서 검증한 기록이다. 이 절은 그것을 **61씬 전수**로 넓히면서 만든
+스크립트와 커맨드다. 상세 경위·수치는 `.claude/memory/260910_vlnpe_render_and_reproduce_result.md`.
+
+## 설정은 프로파일로 관리한다
+
+설정값이 예전엔 세 곳(코드 상수 / argparse 기본값 / 이 문서의 커맨드 문자열)에 흩어져
+**서로 달랐다.** 이제 이름 붙인 프로파일로 한 곳에 있다.
+
+| 영역 | 정의 파일 | 스위치 | 프로파일 |
+|---|---|---|---|
+| 경로 계획 | `path_profiles.py` | `--path_profile` | `legacy` · **`reproduce_v1`**(현재) |
+| 렌더 (조명·톤맵) | `render_profiles.py` | `--render_profile` / `--preset` | `isaac_default` · **`vln_pe_measured`** · **`vln_n1_measured`** |
+| 카메라 | `camera_profiles.py` | `--camera` | `dataset` · `d455_nominal` · `d455_30m` |
+
+공용 규약은 `profiles.py`. 우선순위는 **개별 인자 > 프로파일 > 스크립트 기본값**이고,
+프로파일을 안 주면 종전 동작이 유지된다.
+
+```
+/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/path_profiles.py --diff legacy reproduce_v1
+```
+```
+/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/render_profiles.py
+```
+
+## 05 표본 비교 — GT와 렌더를 나란히 보기
+
+씬 여러 개를 한 페이지에서 눈으로 비교한다. 프레임마다 GT·기존설정·확정설정을 정적 이미지로
+나란히 놓는다(blink 위젯만 쓰면 스크립트 없는 뷰어에서 빈칸으로 보인다 — 실측).
+
+```
+timeout --signal=KILL 3600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/04e_sample_compare.py --dataset vln_pe --n_scenes 6 --both_settings --n_frames 4 --log_dir logs/gs-vlnpe
+```
+
+`--both_settings` = 기존/확정 설정 둘 다 렌더해 같은 프레임에서 비교(씬당 렌더 2회).
+출력: `logs/gs-vlnpe/04e_sample_compare/<dataset>_<n>scenes/report.html`
+
+## 06 전수 재렌더 — GT pose 재생 → vln_pe 구조로 저장
+
+**목적**: 우리 렌더러가 GT 이미지를 재현하는지 61씬 전수로 검증. GT parquet의 카메라 pose를
+그대로 재생하고 **이미지만** 우리 렌더로 바꾼다. parquet·`meta/`는 GT에서 **바이트 복사**하므로
+구조 동일성이 보장되고 프레임 단위 대조가 된다.
+
+```
+timeout --signal=KILL 3600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/05_export_vlnpe.py --dataset vln_pe --scenes 17DRP5sb8fy --max_episodes 3 --out_root data/InternData-N1-v0.5-mini/vln_pe_render --log_dir logs/gs-vlnpe
+```
+```
+timeout --signal=KILL 86400 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/05_export_vlnpe.py --dataset vln_pe --n_scenes 0 --out_root data/InternData-N1-v0.5-mini/vln_pe_render --log_dir logs/gs-vlnpe
+```
+
+전수 실측: **61씬 · 2,813 에피소드 · 271,252 프레임 · 116 GB · 5.2시간.** 씬당 프로세스 1개
+(한 프로세스에서 `build_renderer` 2회는 `/World/RenderCamera` 충돌로 죽는다).
+시작 시 npy 헤더로 프레임 수를 세어 용량을 가드하고, 성공 판정은 종료코드가 아니라
+sentinel 파일로 한다(Isaac은 정상 종료에도 세그폴트를 낸다).
+
+## 06b 구조 검증 + GT 대조
+
+```
+/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/05b_verify_vlnpe.py --render_root data/InternData-N1-v0.5-mini/vln_pe_render/traj_data/r2r --gt_root data/InternData-N1-v0.5-mini/vln_pe/traj_data/r2r --scenes all --require_complete --negative --deep --log_dir logs/gs-vlnpe
+```
+
+게이트 V1~V5(트리·npy dtype/shape·parquet 스키마+`huggingface` 메타·depth 값역·로더 왕복) +
+V7 GT 대비 SSIM(보고용) + negative 5종. 주요 인자:
+
+| 인자 | 뜻 |
+|---|---|
+| `--require_complete` | GT에 있는데 빠진 에피소드도 잡는다. **전수 검사에 필수** |
+| `--deep` | parquet·meta의 sha256까지 GT와 비교(복사가 맞는지 확실히) |
+| `--negative` | 산출물 복사본을 5가지로 망가뜨려 게이트가 잡는지 확인 |
+| `--self_test` | GT를 산출물 자리에 넣어 검증기 자체를 검사(전 게이트 PASS가 기준선) |
+
+전수 실측: **구조 게이트 61/61 PASS · negative 5/5 검출 · GT 대비 SSIM 중앙값 0.8295**
+(최악 씬 0.6669, 0.75 이상 56/61). 톤맵 전수 측정값 0.8232와 일치.
+
+## 03f 경로 재현 — GT 궤적을 안 보고 같은 길 만들기
+
+**목적**: start/goal·`h_b`·pitch만 GT에서 받고 **궤적은 안 보고** 경로를 계획해, GT와 같은
+루트인지 잰다(`same_route` = Fréchet < 0.8 m = 문 너비). 같은 루트면 GT 지시문이 그대로 유효하다.
+
+`01`(scene_meta) → `02`(ESDF) → `03`(경로+GT대조)를 필요한 것만 돌린다. **전부 CPU.**
+
+```
+timeout --signal=KILL 21600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/03f_reproduce_batch.py --dataset vln_pe --n_scenes 0 --path_profile reproduce_v1 --work_dir scripts/dataset_converters/gs_vlnpe/logs --log_dir logs/gs-vlnpe/03f_v1
+```
+
+한 축만 바꿔 실험(프로파일 위에 개별 인자를 얹는다. `scene_meta`·`esdf`를 하드링크로 재사용하면
+씬당 3초):
+
+```
+/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/03f_reproduce_batch.py --dataset vln_pe --n_scenes 0 --path_profile reproduce_v1 --refine_radius 0.40 --work_dir logs/gs-vlnpe/sweep/r0.40 --log_dir logs/gs-vlnpe/sweep/r0.40
+```
+
+⚠️ **`--r_b`·`--h_nav_ratio`는 이 방식으로 스윕하면 안 된다** — 그 값은 `02`가 만든 ESDF에
+박혀 있어서, 기존 `esdf/`를 하드링크로 재사용하면 **옛 지도로 계획**하게 된다(조용히 틀린다).
+그 두 축은 ESDF부터 다시 만들어야 한다(값당 15분).
+
+전수 실측(45씬 2,274 ep — 61씬 중 15씬은 `01`이 vln_n1 GT의 `camera_extrinsic`을 읽어 제외,
+1씬은 GT가 1프레임):
+
+| | legacy | reproduce_v1 |
+|---|---|---|
+| chamfer / Fréchet 중앙값 | 0.191 / 0.553 | **0.167 / 0.480** |
+| Fréchet p90 | 1.446 | **1.295** |
+| 같은 루트 | 73.1 % | **78.8 %** |
+| 하드 충돌 에피소드 | 18 | **0** |
+| r_b 침범 에피소드 | 427 | **113** |
+| `no_collision` 게이트 통과 씬 | 36/45 | **45/45** |
+| 쓸 수 있는 ep (충돌 0 + 같은 루트) | 1,649 | **1,700** |
+
+**파라미터 천장은 78~79%다** — 시험한 30여 조합이 전부 73~79%에 있었다. 더 올리려면 A* 비용
+함수를 바꿔야 한다(회전 벌점 등). 남는 21%는 위상이 다른 경우(4.5%, GT가 36% 더 긴 길로
+돌아감)와 "A*는 최단경로, 사람은 아님"의 차이다.
+
+## vlnpe_writer — vln_pe 레이아웃 라이터
+
+새로 뽑은 경로를 저장할 때 쓴다(GT pose 재생인 06은 복사로 끝나므로 필요 없다).
+릴리스와 어긋나기 쉬운 5곳을 맞춘다: `timestamp = fi/6.0`(30이 아님) · `observation.step = fi*50` ·
+`episodes_stats.stats` 9키 · 에피소드당 지시문 **3개** · parquet `huggingface` 스키마 메타.
+마지막 것은 `pa.table({...})`만으로는 안 붙어서 **릴리스 parquet에서 스키마를 읽어 그대로 쓴다.**
+
+자기검사(GPU 불필요 — GT를 읽어 다시 쓰고 GT와 비교):
+```
+/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/vlnpe_writer.py --self_test
+```
+
+## 아직 없는 것 — Phase C
+
+`reproduce_v1` 경로 1,700개를 **렌더해서 저장**하는 스크립트가 없다. 두 조각이 필요하다:
+
+1. **action 이산화** — 우리 경로는 연속(프레임당 0.035 m)인데 vln_pe는 action 1개 = step 1개다.
+   프레임마다 라벨을 붙이면 300 step이 되어 `cma.py`의 `max_step=200`에서 절반이 조용히
+   잘리고 `progress`가 0.5에서 멈춘다. 알고리즘은 `docs/gs-vlnpe-l1-l2a.md` §5.2에 확정돼 있다.
+2. `07_render_paths_to_vlnpe.py` — 이산화 + 렌더 + `vlnpe_writer`로 조립. 지시문은 GT에서
+   복사한다(start/goal이 GT와 같고 같은 루트인 에피소드만 쓰므로 유효).
