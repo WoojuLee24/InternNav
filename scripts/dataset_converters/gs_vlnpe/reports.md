@@ -66,6 +66,26 @@ report.html/이미지는 `main()` 반환 시점에 이미 저장 완료다. 로�
 
 ---
 
+# vln_ce (`--dataset vln_ce`) — 경로 재현
+
+2026-10-11 추가. 10씬 × 로봇 키 2종(1.25 m / 0.60 m) · 400 ep 생성 · 326 ep 채점.
+
+**[vln_ce 경로 재현 — GT 대비 검증 (10씬)](https://claude.ai/code/artifact/1b683a44-df00-4f4a-978e-c6a03317ddd1)**
+
+| | 계획 GT 대비 | GT 실행 대비 | 참고선(GT실행↔계획) |
+|---|---|---|---|
+| 키 1.25 m (167 ep) | chamfer 0.217 · 같은루트 **73.7 %** | 0.192 · 73.1 % | 0.135 · 80.8 % |
+| 키 0.60 m (159 ep) | chamfer 0.215 · 같은루트 **72.3 %** | 0.191 · 71.7 % | 0.131 · 83.0 % |
+
+vln_pe 전수(76.0 %)와 같은 수준이다. ⚠️ **`--downsample_mode majority` 필수** — 빠뜨리면
+`r_b=0.10`이 작아 낙관적 0.2 m 다운샘플이 막힌 칸을 통과시켜 충돌 에피소드가 8/20까지 오른다
+(majority 적용 시 0/20, chamfer 0.203→0.086).
+
+렌더(`apply_real/05_export_vlnce.py` + Matterport USD)까지 확인했으나 2 ep·rig 1종 규모다.
+`05b_verify_vlnce`의 V3·V7은 GT pose 재생용이라 재현 산출물에는 적용되지 않는다(리포트 참고).
+
+---
+
 # vln_pe (`--dataset vln_pe`)
 
 | 단계 | 씬1 17DRP5sb8fy | 씬2 s8pcmisQ38h |
