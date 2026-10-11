@@ -60,6 +60,14 @@ DATASETS = {
         render_wh=(256, 256),
         tag='_vlnpe',
     ),
+    # vln_ce는 pose가 에피소드 start 기준 상대좌표라 GT 로딩 경로가 다르다 -> vlnce_gt.py 로 위임.
+    # 씬(집)과 mesh는 vln_pe와 같고, 달라지는 것은 로봇(키 1.25/0.60 m)과 rig·해상도다.
+    'vln_ce': dict(
+        data_root='data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r',
+        render_wh=(640, 480),
+        tag='_vlnce',
+        raw_root='data/InternData-N1-v0.5-mini/vln_ce/raw_data/r2r',
+    ),
 }
 
 # vln_pe 카메라 intrinsic — parquet에 없음. h1_vln_pointcloud.usd의 h1_pano_camera_0에서 실측:
@@ -110,7 +118,7 @@ def vlnpe_orientation_to_c2w_rotation(q_wxyz: np.ndarray) -> np.ndarray:
     return np.column_stack([-r[:, 1], -r[:, 2], r[:, 0]])
 
 
-def load_gt_episode(data_root: str, scene: str, episode: int, dataset: str = 'vln_n1') -> dict:
+def load_gt_episode(data_root: str, scene: str, episode: int, dataset: str = 'vln_n1', **kwargs) -> dict:
     """에피소드 하나의 GT를 데이터셋 무관 공통 형태로 반환.
 
     Returns dict:
@@ -127,6 +135,15 @@ def load_gt_episode(data_root: str, scene: str, episode: int, dataset: str = 'vl
     - floor_z:   median(cam_z) - h_b — 02의 클리어런스 게이트용 근사 바닥 높이
     - k:         (3,3) 카메라 intrinsic
     """
+    if dataset == 'vln_ce':
+        # vln_ce는 상대좌표 pose + raw_data 해석적 변환이라 읽는 방식이 통째로 다르다.
+        # 기존 분기를 건드리지 않고 전용 모듈에 위임한다(계약은 같은 dict).
+        import vlnce_gt
+        return vlnce_gt.load_gt_episode_vlnce(
+            data_root, scene, episode,
+            rig=kwargs.get('rig', vlnce_gt.DEFAULT_RIG),
+            raw_root=kwargs.get('raw_root') or DATASETS['vln_ce']['raw_root'])
+
     path = Path(data_root) / scene / 'data' / 'chunk-000' / f'episode_{episode:06d}.parquet'
     if dataset == 'vln_n1':
         table = pq.read_table(path, columns=['observation.camera_extrinsic',

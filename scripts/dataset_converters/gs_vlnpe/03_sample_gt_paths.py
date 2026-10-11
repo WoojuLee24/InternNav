@@ -152,7 +152,7 @@ RANDOM_MAX_RESAMPLE_TRIES = 30
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--scene', default=DEFAULT_SCENE)
-    parser.add_argument('--dataset', default='vln_pe', choices=['vln_n1', 'vln_pe'],
+    parser.add_argument('--dataset', default='vln_pe', choices=['vln_n1', 'vln_pe', 'vln_ce'],
                         help='GT 궤적 데이터셋. vln_pe면 esdf/paths/log에 _vlnpe 태그 사용')
     parser.add_argument('--mode', default='reproduce', choices=['reproduce', 'random'],
                         help='reproduce는 GT에서 h_b/pitch/start/goal을 전부 복사한다. random은 C2에서 구현.')
@@ -193,6 +193,9 @@ def build_argparser() -> argparse.ArgumentParser:
                              '3배 많이 회전한다 — 0.8에서 GT 스무드니스와 일치. 0이면 솎지 않는다.')
     parser.add_argument('--smooth_step', type=float, default=0.05)
     parser.add_argument('--data_root', default=None, help='생략 시 --dataset의 기본 경로')
+    parser.add_argument('--rig', default=None,
+                        help="--dataset vln_ce 전용 카메라 rig. 경로를 가르는 것은 높이뿐이다 "
+                             "(125cm_* -> 1.25 m, 60cm_* -> 0.60 m). 생략 시 125cm_30deg")
     parser.add_argument('--esdf_dir', default=None, help='기본값은 <out_dir>/esdf')
     parser.add_argument('--out_dir', default=DEFAULT_OUT_DIR)
     parser.add_argument('--log_dir', default=DEFAULT_LOG_DIR)
@@ -206,12 +209,14 @@ def build_argparser() -> argparse.ArgumentParser:
     return parser
 
 
-def load_gt_episode(data_root: str, scene: str, episode: int, dataset: str = 'vln_n1'):
+def load_gt_episode(data_root: str, scene: str, episode: int, dataset: str = 'vln_n1',
+                    rig: str = None):
     """(로봇 몸통 궤적 (T,3) world, h_b, pitch_down, floor_z) — dataset_utils.load_gt_episode의
     body_xyz를 쓴다(vln_pe 카메라는 몸통보다 0.2m 앞이라 회전 시 가짜 경로가 생김 — 그쪽 주석 참고).
     floor_z는 **카메라 높이 기준**으로 계산된 값을 그대로 받는다 — body_xyz의 z(토르소, 바닥 위
     0.95 m)에서 h_b(카메라 높이 1.66 m)를 빼면 바닥이 0.7 m 아래로 잡힌다(실측으로 겪은 버그)."""
-    ep = dataset_utils.load_gt_episode(data_root, scene, episode, dataset)
+    kw = {'rig': rig} if rig else {}
+    ep = dataset_utils.load_gt_episode(data_root, scene, episode, dataset, **kw)
     return ep['body_xyz'], ep['h_b'], ep['pitch_deg'], ep['floor_z']
 
 
@@ -812,7 +817,7 @@ def main() -> int:
     n_avail = len(sorted((Path(args.data_root) / args.scene / 'data' / 'chunk-000').glob('*.parquet')))
     episodes, failures = [], {}
     for ep in range(min(args.num_episodes, n_avail)):
-        gt_xyz, h_b, pitch, ep_floor = load_gt_episode(args.data_root, args.scene, ep, args.dataset)
+        gt_xyz, h_b, pitch, ep_floor = load_gt_episode(args.data_root, args.scene, ep, args.dataset, args.rig)
         if len(gt_xyz) < 5:
             # vln_pe s8pcmisQ38h에 2프레임짜리 퇴화 에피소드가 실재한다 — start~goal이 붙어
             # 있어 재현 비교가 무의미하므로 거른다(vln_n1은 최소 36프레임이라 걸릴 일 없음).

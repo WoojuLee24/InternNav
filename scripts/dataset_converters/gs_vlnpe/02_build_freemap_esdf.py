@@ -99,13 +99,16 @@ FLOORPLAN_MIN_PX = 700
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--scene', default=DEFAULT_SCENE)
-    parser.add_argument('--dataset', default='vln_pe', choices=['vln_n1', 'vln_pe'],
+    parser.add_argument('--dataset', default='vln_pe', choices=['vln_n1', 'vln_pe', 'vln_ce'],
                         help='GT 궤적을 읽을 데이터셋. vln_pe면 출력(npz/json/log)에 _vlnpe 태그가 붙는다')
     parser.add_argument('--geometry', default='obj', choices=['obj', 'usd', 'both'],
                         help='occupancy를 만들 mesh. Stage 1은 obj(논문과 동일), Stage 2(Isaac)는 usd.')
     parser.add_argument('--data_root', default=None,
                         help='traj_data 루트. 생략 시 --dataset의 기본 경로')
     parser.add_argument('--mesh_root', default=DEFAULT_MESH_ROOT)
+    parser.add_argument('--rig', default=None,
+                        help="--dataset vln_ce 전용 카메라 rig. 경로를 가르는 것은 높이뿐이다 "
+                             "(125cm_* -> 1.25 m, 60cm_* -> 0.60 m). 생략 시 125cm_30deg")
     parser.add_argument('--cell_m', type=float, default=VOXEL_SIZE_M)
     parser.add_argument('--h_nav', type=float, default=H_NAV_M,
                         help='지면 여유고. 이 아래 점유는 밟고 넘는 지면으로 본다.')
@@ -137,10 +140,12 @@ def build_argparser() -> argparse.ArgumentParser:
 # GT 읽기
 # ---------------------------------------------------------------------------
 
-def load_gt_episode(data_root: str, scene: str, episode: int, dataset: str = 'vln_n1'):
+def load_gt_episode(data_root: str, scene: str, episode: int, dataset: str = 'vln_n1',
+                    rig: str = None):
     """(로봇 몸통 궤적 (T,3) world, h_b, pitch_down, floor_z) — dataset_utils.load_gt_episode의
     body_xyz를 쓴다(vln_pe 카메라는 몸통보다 0.2m 앞이라 회전 시 가짜 경로가 생김 — 그쪽 주석 참고)."""
-    ep = dataset_utils.load_gt_episode(data_root, scene, episode, dataset)
+    kw = {'rig': rig} if rig else {}
+    ep = dataset_utils.load_gt_episode(data_root, scene, episode, dataset, **kw)
     return ep['body_xyz'], ep['h_b'], ep['pitch_deg'], ep['floor_z']
 
 
@@ -160,7 +165,7 @@ def check_gt_clearance(occupancy, origin, args, n_available: int) -> dict:
     episodes = list(range(min(args.num_check_episodes, n_available)))
     per_episode, medians, mins = {}, [], []
     for ep in episodes:
-        cam_xyz, h_b, _, floor_z = load_gt_episode(args.data_root, args.scene, ep, args.dataset)
+        cam_xyz, h_b, _, floor_z = load_gt_episode(args.data_root, args.scene, ep, args.dataset, args.rig)
         h_nav = args.h_nav_ratio * h_b if args.h_nav_ratio else args.h_nav
         esdf = compute_esdf_2d(derive_obstacle_2d(occupancy, origin, floor_z, h_b,
                                                   args.cell_m, h_nav), args.cell_m)
@@ -190,8 +195,14 @@ def check_gt_clearance(occupancy, origin, args, n_available: int) -> dict:
         #    실측 zero_frac 5~19%). 이 게이트의 본질 목적(좌표계/맵 파손 검출 — 파손이면 궤적
         #    대부분이 벽 안=zero_frac 수십%%)에 맞는 약한 기준으로 판정한다.
         passed = bool(medians) and overall_median > 0.10 and worst_zero_frac < 0.30
-    else:
+    elif args.dataset == 'vln_ce':
+        # vln_ce 의 원본 로봇 반경은 0.10 m 라 vln_n1 의 min>0.15 를 그대로 쓰면 정상 궤적도
+        # 떨어진다(17DRP5sb8fy 실측: median 0.45 m 로 범위 안인데 worst_min 0.141 m 로 탈락).
+        passed = bool(medians) and lo < overall_median < hi and worst_min > VLNCE_CLEARANCE_MIN_M
+    elif args.dataset == 'vln_n1':
         passed = bool(medians) and lo < overall_median < hi and worst_min > GT_CLEARANCE_MIN_M
+    else:
+        assert False, f'unreachable dataset={args.dataset!r}'
     return {
         'episodes_tested': episodes,
         'median_m': overall_median,
@@ -200,8 +211,7 @@ def check_gt_clearance(occupancy, origin, args, n_available: int) -> dict:
         'median_range_m': list(GT_CLEARANCE_MEDIAN_RANGE_M),
         'typical_range_m': list(GT_CLEARANCE_TYPICAL_RANGE_M),
         'min_floor_m': GT_CLEARANCE_MIN_M,
-        'criterion': ('vln_pe: median>0.10 & max zero_frac<30%' if args.dataset == 'vln_pe'
-                      else f'vln_n1: median in {list(GT_CLEARANCE_MEDIAN_RANGE_M)} & min>{GT_CLEARANCE_MIN_M}'),
+        'criterion': _clearance_criterion_text(args.dataset, lo, hi),
         'per_episode': per_episode,
         'passed': passed,
     }
@@ -224,6 +234,23 @@ def check_map_sanity(occupancy, origin, esdf_ref, obstacle_ref, mesh_bounds, arg
         'navigable_frac': float(truncate_navigable(esdf_ref, args.r_b).mean()),
         'passed': obstacle_zero and free_positive,
     }
+
+
+# vln_ce 의 원본 로봇 반경(3dloader_vlnce/README.md 실측 기준).
+# vln_n1 의 GT_CLEARANCE_MIN_M(0.15)은 더 큰 로봇 기준이라 vln_ce 에 그대로 쓰면 안 된다.
+VLNCE_CLEARANCE_MIN_M = 0.10
+
+
+def _clearance_criterion_text(dataset: str, lo: float, hi: float) -> str:
+    """리포트에 적을 판정 기준 문구 — 데이터셋마다 다르다."""
+    if dataset == 'vln_pe':
+        return 'vln_pe: median>0.10 & max zero_frac<30%'
+    elif dataset == 'vln_ce':
+        return f'vln_ce: median in {[lo, hi]} & min>{VLNCE_CLEARANCE_MIN_M}'
+    elif dataset == 'vln_n1':
+        return f'vln_n1: median in {[lo, hi]} & min>{GT_CLEARANCE_MIN_M}'
+    else:
+        assert False, f'unreachable dataset={dataset!r}'
 
 
 def check_ply_overlap(scene_dir: Path, obstacle_ref, origin, floor_z, args) -> dict:
@@ -391,10 +418,10 @@ def main() -> int:
               f'(XOR {int((occupancy_alt ^ occupancy).sum())} voxels)')
 
     # --- 참조 2D (시각화·검증용) ---
-    cam_xyz, ref_h_b, _, _ = load_gt_episode(args.data_root, args.scene, args.ref_episode, args.dataset)
+    cam_xyz, ref_h_b, _, _ = load_gt_episode(args.data_root, args.scene, args.ref_episode, args.dataset, args.rig)
 
     # h_nav가 로봇 키보다 크면 밴드가 비어 맵이 무의미해진다 — assert 트레이스백 대신 명확히 거른다.
-    h_b_list = [load_gt_episode(args.data_root, args.scene, ep, args.dataset)[1]
+    h_b_list = [load_gt_episode(args.data_root, args.scene, ep, args.dataset, args.rig)[1]
                 for ep in range(min(args.num_check_episodes, n_eps))]
     _min_hb = min(h_b_list + [ref_h_b])
     _eff_h_nav = args.h_nav_ratio * _min_hb if args.h_nav_ratio else args.h_nav
@@ -412,12 +439,15 @@ def main() -> int:
     gt_clearance = check_gt_clearance(occupancy, origin, args, n_eps)
     sanity = check_map_sanity(occupancy, origin, esdf_ref, obstacle_ref,
                               np.asarray(mesh.bounds), args)
-    if args.dataset == 'vln_pe':
-        # vln_pe에는 meta/pointcloud.ply가 없다(실측 확인 — meta엔 info.json/episodes*.jsonl뿐).
-        # 이 검사는 원래도 판정에 안 들어가는 정황 확인이라 건너뛴다.
-        ply_overlap = {'skipped': 'vln_pe has no meta/pointcloud.ply'}
-    else:
+    # meta/pointcloud.ply 는 vln_n1 에만 있다(실측: vln_pe·vln_ce 의 meta 는
+    # info.json/episodes*.jsonl/tasks.jsonl 뿐). 이 검사는 원래도 판정에 안 들어가는
+    # 정황 확인이라, 없는 데이터셋에서는 건너뛴다.
+    if args.dataset == 'vln_n1':
         ply_overlap = check_ply_overlap(Path(args.data_root) / args.scene, obstacle_ref, origin, floor_z, args)
+    elif args.dataset in ('vln_pe', 'vln_ce'):
+        ply_overlap = {'skipped': f'{args.dataset} has no meta/pointcloud.ply'}
+    else:
+        assert False, f'unreachable dataset={args.dataset!r}'
     passed = bool(gt_clearance['passed'] and sanity['passed'])
     checks = {'gt_clearance': gt_clearance, 'sanity': sanity, 'ply_overlap': ply_overlap, 'passed': passed}
 

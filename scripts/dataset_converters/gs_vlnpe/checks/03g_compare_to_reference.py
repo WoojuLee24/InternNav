@@ -40,6 +40,7 @@ for _p in (str(HERE.parent), str(HERE)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import dataset_utils  # noqa: E402
 from esdf_utils import chamfer_distance, discrete_frechet_distance, resample_by_arclength  # noqa: E402
 
 SCRIPT_NAME = '03g_compare_to_reference'
@@ -79,8 +80,10 @@ def pair(a_xy, b_xy) -> dict:
             'len_ratio': length(a) / max(length(b), 1e-9)}
 
 
-def scene_rows(scene: str, paths_json: Path, gt_root: Path, raw: dict) -> list:
+def scene_rows(scene: str, paths_json: Path, gt_root: Path, raw: dict,
+               dataset: str = 'vln_pe', rig: str = None) -> list:
     """그 씬의 에피소드별 {우리↔계획, 실행↔계획} 비교."""
+    gt_root_s = str(gt_root)
     import pyarrow.parquet as pq
 
     by_instr = raw.get(scene)
@@ -108,8 +111,10 @@ def scene_rows(scene: str, paths_json: Path, gt_root: Path, raw: dict) -> list:
                 break
         if not cands:
             continue
-        exec_xy = np.asarray(pq.read_table(
-            pq_path, columns=['observation.camera_position'])['observation.camera_position'].to_pylist())[:, :2]
+        # 실행 궤적을 읽는 방식은 데이터셋마다 다르다(vln_pe 는 절대좌표 컬럼, vln_ce 는
+        # start 상대 pose + raw_data 해석적 변환). 공용 로더에 맡긴다.
+        kw = {'rig': rig} if rig else {}
+        exec_xy = dataset_utils.load_gt_episode(gt_root_s, scene, ep, dataset, **kw)['cam_xyz'][:, :2]
         # 같은 지시문이 여러 raw 에피소드에 있을 수 있어 start가 가장 가까운 것을 고른다
         starts = np.stack([habitat_to_zup(np.array(c['start_position']))[:2] for c in cands])
         ref_xy = habitat_to_zup(np.array(cands[int(np.argmin(np.linalg.norm(starts - exec_xy[0], axis=1)))]
@@ -212,11 +217,23 @@ def main() -> int:
                     help='하드 충돌 에피소드는 제외 (기본 켬)')
     ap.add_argument('--include_collisions', dest='clean_only', action='store_false')
     ap.add_argument('--log_dir', default='logs/gs-vlnpe')
+    ap.add_argument('--rig', default=None, help='--dataset vln_ce 전용 카메라 rig')
+    ap.add_argument('--dataset', default='vln_pe', choices=['vln_pe', 'vln_ce'],
+                    help='어느 데이터셋의 03 산출물을 읽을지. paths json 접미사와 '
+                         '기본 gt_root/raw_root 를 정한다. 기본 vln_pe = 종전 동작')
     args = ap.parse_args()
+
+    if args.dataset == 'vln_ce':
+        # 명시하지 않았으면 vln_ce 쪽 기본 경로로 돌린다(기본값 문자열이 vln_pe 라서).
+        if 'vln_pe' in args.gt_root:
+            args.gt_root = dataset_utils.default_data_root('vln_ce')
+        if 'vln_pe' in args.raw_root:
+            args.raw_root = dataset_utils.DATASETS['vln_ce']['raw_root']
 
     raw = load_raw(Path(args.raw_root))
     print(f'[{SCRIPT_NAME}] raw_data 씬 {len(raw)}개', flush=True)
-    files = sorted(glob.glob(str(Path(args.paths_dir) / '*_vlnpe.json')))
+    tag = dataset_utils.dataset_tag(args.dataset)      # vln_pe -> '_vlnpe', vln_ce -> '_vlnce'
+    files = sorted(glob.glob(str(Path(args.paths_dir) / f'*{tag}.json')))
     if not files:
         print(f'[{SCRIPT_NAME}] paths json이 없다: {args.paths_dir}', file=sys.stderr)
         return 2
@@ -224,7 +241,7 @@ def main() -> int:
     rows = []
     for f in files:
         scene = json.loads(Path(f).read_text())['scene_id']
-        r = scene_rows(scene, Path(f), Path(args.gt_root), raw)
+        r = scene_rows(scene, Path(f), Path(args.gt_root), raw, args.dataset, args.rig)
         rows += r
         if r:
             ok = [x for x in r if x['hard_ok']]
