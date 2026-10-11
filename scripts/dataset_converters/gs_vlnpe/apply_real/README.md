@@ -153,13 +153,13 @@ gate의 FAIL이 아니다.
 > 둘 다 생략하면 종전 mp3d 동작 그대로다.
 
 ```bash
-$ISAAC_PY $GS/03b_verify_reproduction.py \
+$ISAAC_PY $GS/checks/03b_verify_reproduction.py \
   --scene $SCENE --mode random --scan_coverage --num_episodes 20 --out_dir $PIPE --log_dir $LOG
 
-$ISAAC_PY $GS/03c_compare_refine.py \
+$ISAAC_PY $GS/checks/03c_compare_refine.py \
   --scene $SCENE --mode random --scan_coverage --num_episodes 20 --out_dir $PIPE --log_dir $LOG
 
-$ISAAC_PY $GS/03d_grid_search_params.py \
+$ISAAC_PY $GS/checks/03d_grid_search_params.py \
   --scenes $SCENE --mode random --num_episodes 20 --out_dir $PIPE --log_dir $LOG
 
 $ISAAC_PY $PIPE/03e_compare_reference_path.py \

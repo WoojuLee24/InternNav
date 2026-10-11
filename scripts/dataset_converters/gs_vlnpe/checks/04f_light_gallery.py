@@ -48,6 +48,9 @@ from pxr import Gf, UsdGeom, UsdLux  # noqa: E402
 import omni.usd  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
+# 공용 라이브러리·파이프라인 모듈은 상위 gs_vlnpe/ 에 있다.
+# insert(0, ...)는 나중에 넣은 것이 앞이므로 checks/ 안의 모듈이 우선한다.
+sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 import camera_profiles  # noqa: E402
 import dataset_utils  # noqa: E402
@@ -60,7 +63,7 @@ DEFAULT_LOG_DIR = 'logs/gs-vlnpe'
 MESH_ROOT = 'data/scene_data/mp3d_pe'
 MATTERPORT_TEXTURE_ROOT = Path('/ssd/share/Matterport3D/data/v1/scans')
 DATA_ROOT = 'data/InternData-N1-v0.5-mini'
-APPLY_REAL_DIR = HERE / 'apply_real'
+APPLY_REAL_DIR = HERE.parent / 'apply_real'
 
 DOME_LIGHT_INTENSITY = 2_000_000
 THREE_LIGHT_DISTANT_INTENSITY = 1000

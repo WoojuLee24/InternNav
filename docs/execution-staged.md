@@ -164,7 +164,7 @@ scripts/dataset_converters/gs_vlnpe/
 
 ### `00_inspect_vln_n1.py` — GT 데이터 구조 확인 (✅ 구현·검증 완료)
 
-실제 파일: `scripts/dataset_converters/gs_vlnpe/00_inspect_vln_n1.py`. 실행 인터프리터는 `/workspace/isaaclab/_isaac_sim/python.sh`(pandas/pyarrow/cv2/numpy 확인됨; `lerobot`/`av`/`open3d`는 미설치라 의존하지 않음 — parquet은 `pyarrow`, 이미지/영상은 `cv2`만 사용).
+실제 파일: `scripts/dataset_converters/gs_vlnpe/checks/00_inspect_vln_n1.py`. 실행 인터프리터는 `/workspace/isaaclab/_isaac_sim/python.sh`(pandas/pyarrow/cv2/numpy 확인됨; `lerobot`/`av`/`open3d`는 미설치라 의존하지 않음 — parquet은 `pyarrow`, 이미지/영상은 `cv2`만 사용).
 
 - **하는 일**: 로컬 `vln_n1` 데이터셋에서 씬 1개·에피소드 1개를 읽어, parquet 컬럼/메타 파일의 dtype·shape을 빠짐없이 기록하고, **depth를 `action`(pose)으로 재투영해 rgb와 겹쳐보는 photometric sanity check**로 두 가지를 실증 확인한다: ① `action[t]`이 camera-to-world인지 world-to-camera인지, ② depth의 실제 단위 스케일. 이후 모든 스크립트가 따라야 할 GT 스키마를 고정하는 단계.
 - **입력**

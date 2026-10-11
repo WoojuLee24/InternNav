@@ -207,14 +207,14 @@ $ISAAC_PY $GS/05b_verify_vlnpe.py --render_root data/InternData-N1-v0.5-mini/vln
 | `--negative` | 복사본을 5가지로 망가뜨려 해당 게이트만 FAIL 하는지 확인 |
 | `--self_test` | GT를 산출물 자리에 넣어 검증기 자체를 검사 |
 
-**전수 실측** (`logs/gs-vlnpe/06b_verify_vlnpe_render/verify.json`): V1~V5 **61/61 PASS** ·
+**전수 실측** (`logs/gs-vlnpe/05b_verify_vlnpe/verify.json`): V1~V5 **61/61 PASS** ·
 V7 SSIM 씬 중앙값 **0.8295**(최악 0.6669, ≥0.75가 56/61) · negative **5/5 검출**.
 에피소드별 값은 `scenes.<씬>.V7.per_episode`에 있다.
 
 ### 5.2 눈으로 비교 — `04e_sample_compare.py`
 
 ```
-timeout --signal=KILL 3600 $ISAAC_PY $GS/04e_sample_compare.py --dataset vln_pe --n_scenes 6 --both_settings --n_frames 4 --log_dir logs/gs-vlnpe
+timeout --signal=KILL 3600 $ISAAC_PY $GS/checks/04e_sample_compare.py --dataset vln_pe --n_scenes 6 --both_settings --n_frames 4 --log_dir logs/gs-vlnpe
 ```
 `--both_settings` = 기존·확정 설정을 둘 다 렌더해 같은 프레임에서 비교.
 
@@ -246,10 +246,20 @@ $ISAAC_PY $GS/vlnce_rig.py            # pixel goal 투영식 V1 — N=1701, MAE 
 
 ## 6. 파일 지도
 
-**파이프라인 — 돌리는 것**
+**파이프라인 — 돌리는 것** (`gs_vlnpe/` 최상위)
 
-`01_prepare_scene` · `02_build_freemap_esdf` · `03_sample_gt_paths` · `03f_reproduce_batch` ·
-`04_render_obs_isaac` · `05_export_vlnce` / `05_export_vlnpe` · `05b_verify_vlnce` / `05b_verify_vlnpe`
+| 스크립트 | 무엇 |
+|---|---|
+| `01_prepare_scene` | 씬 자산이 GT와 같은 world 프레임인지 판정 → `scene_meta/` |
+| `02_build_freemap_esdf` | 씬을 occupancy + ESDF 지도로 → `esdf/` |
+| `03_sample_gt_paths` | 그 지도 위에서 A\*로 경로 생성 → `paths/` |
+| **`03f_reproduce_batch`** | **61씬 배치 드라이버.** `01`→`02`→`03`을 필요한 것만 돌려 "같은 루트 비율"을 잰다. 전부 CPU |
+| `04_render_obs_isaac` | 경로를 따라 Isaac으로 rgb/depth 렌더 → `obs/` |
+| `05_export_vlnce` / `05_export_vlnpe` | 데이터셋 레이아웃으로 저장 |
+| **`05b_verify_vlnce` / `05b_verify_vlnpe`** | **export 직후 돌리는 생산 게이트.** 구조 V1~V6 + GT 대조 V7 (§5.1) |
+
+`03f`와 `05b`는 이름이 보조처럼 보이지만 **파이프라인**이다 — `03f`는 전수 실행의 진입점이고,
+`05b`는 내보낸 데이터셋이 로더에 실제로 먹히는지 확인하는 마지막 관문이다.
 
 **라이브러리 — import 대상**
 
@@ -266,11 +276,26 @@ $ISAAC_PY $GS/vlnce_rig.py            # pixel goal 투영식 V1 — N=1701, MAE 
 | `vlnce_align.py` | vln_ce start-relative pose → mesh 절대좌표 |
 | `usdz_scene_utils.py` | usdz(NuRec) 전용 헬퍼 |
 
-**근거 — 이미 답이 나온 일회성 실험**
+**`checks/` — 검증·근거 (12개, 2026-10-11에 분리)**
 
-`00_inspect_vln_n1` · `03b` · `03c` · `03d` · `03e` · `03g` · `04_render_obs`(Open3D) ·
-`04c_light_explorer` · `04d_tonemap_sweep` · `04e_sample_compare` · `04f_light_gallery` ·
-`05c_compare_vlnce` · `usd_study/`
+| 스크립트 | 무엇을 물었나 |
+|---|---|
+| `00_inspect_vln_n1` | 자산 계약 — 데이터를 어떻게 읽고 쓰나 |
+| `03b_verify_reproduction` | `03`이 낸 거리값이 **좋은 값인지** |
+| `03c_compare_refine` | refine 해석이 `argmax`인가 `min_move`인가 |
+| `03d_grid_search_params` | 8축 중 어디를 더 만질 수 있나 (51조합) |
+| `03e` / `03g_compare_*` | 계획 GT(`reference_path`) 대비 커버리지 / 거리 |
+| `04_render_obs` | **Open3D 대체 렌더러** — depth 정확도 검증 |
+| `04c_light_explorer` · `04d_tonemap_sweep` | 조명·톤맵 스윕 |
+| `04e_sample_compare` · `04f_light_gallery` | 씬 여러 개를 한 페이지에서 비교 |
+| `05c_compare_vlnce` | vln_ce GT와 우리 렌더 토글 비교 |
+
+`usd_study/`도 같은 성격이다(USD composition 실습).
+
+다시 안 돌려도 되지만 **지우면 "왜 이 값인가"의 근거가 사라진다**. 예: `--light ambient_only
+--film_iso 70`의 근거는 `04c`/`04d`가 만든 리포트에만 있다.
+
+커맨드는 `$GS/checks/<이름>.py` 로 부른다. 라이브러리는 상위 `gs_vlnpe/` 것을 쓴다.
 
 다시 안 돌려도 되지만 **지우면 "왜 이 값인가"의 근거가 사라진다**. 예: `--light ambient_only
 --film_iso 70`의 근거는 `04c`/`04d`가 만든 리포트에만 있다.
