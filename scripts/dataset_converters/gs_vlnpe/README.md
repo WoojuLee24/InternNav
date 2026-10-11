@@ -19,14 +19,17 @@ GS=scripts/dataset_converters/gs_vlnpe
 | | **vln_ce** | **vln_pe** | **노은역** |
 |---|---|---|---|
 | 씬 자산 | Matterport3D `.obj` | Matterport3D `.obj` | 3DGS `.usdz` (NuRec) |
-| 시뮬레이터 규약 | Habitat | Isaac Sim (H1 휴머노이드) | — (GT 없음) |
+| 데이터 규약 | Habitat | Isaac Sim (H1 휴머노이드) | — (GT 없음) |
 | 기존 GT 궤적 | 있음 | 있음 | **없음** |
 | 이미지 | 640×480 | 256×256 | 480×270 |
 | action | 이산 0.25 m / 15° | 이산(물리 롤아웃) | 이산화해서 생성 |
 | 쓰는 모델 | InternVLA-N1 | CMA / Seq2Seq / RDP | (vln_ce로 내보냄) |
 | 스크립트 위치 | `$GS/` | `$GS/` | `$GS/apply_real/` |
 
-`vln_n1`은 네 번째 대상이 아니라 **`$GS`가 읽는 원본 데이터셋**이다(`--dataset vln_n1`, 기본값).
+`vln_n1`은 네 번째 대상이 아니라 **`$GS`가 읽을 수 있는 또 하나의 원본 데이터셋**이다.
+`--dataset`의 기본값은 **`vln_pe`**다(2026-10-11 변경). `apply_real/`만 `vln_n1`을 유지한다 —
+노은역은 둘 중 어느 쪽도 아니고, `--dataset`이 정하는 렌더 해상도(480×270)와 출력 접미사('')를
+그대로 써야 기존 산출물과 맞기 때문이다.
 
 **노은역만 다른 점** — GT가 없어서:
 - `02`가 geometry만으로 지도를 만든다 (`--geometry usd` 필수, `--ref_h_b`로 로봇 키를 직접 준다)
@@ -48,6 +51,7 @@ GS=scripts/dataset_converters/gs_vlnpe
 | 02 | `02_build_freemap_esdf.py` | 씬 mesh/USD | `<out>/esdf/<scene>.npz` (occupancy + ESDF) |
 | 03 | `03_sample_gt_paths.py` | ESDF (+ GT의 start/goal) | `<out>/paths/<scene>.json` (경로 + GT 대조 지표) |
 | 04 | `04_render_obs_isaac.py` | 경로 + 씬 | `<out>/obs/<scene>_<mode>_isaac_<cam>/` (rgb/depth) |
+| 04' | `04_render_obs.py` (Open3D) | 경로 + 씬 | `<out>/obs/<scene>/episode_%06d/` — **검증용 대체 렌더러** |
 | 05 | `05_export_vlnce.py` / `05_export_vlnpe.py` | 경로 + 씬 | `data/.../vln_{ce,pe}_render/` (데이터셋) |
 | 05b | `05b_verify_vlnce.py` / `05b_verify_vlnpe.py` | 산출물 + GT | 게이트 판정 + `verify.json` |
 
@@ -78,6 +82,22 @@ $ISAAC_PY $GS/03_sample_gt_paths.py --scene noeun_station_mid --mode random --nu
 timeout --signal=KILL 14400 $ISAAC_PY $AR/04_render_obs_isaac.py --scene noeun_station_mid --mode random --num_episodes 20 --camera d455_nominal --out_dir $AR --log_dir logs/gs-vlnpe/apply_real
 ```
 
+### 렌더러는 두 개다 — 생산은 Isaac
+
+| | `04_render_obs.py` | `04_render_obs_isaac.py` |
+|---|---|---|
+| 엔진 | Open3D (mesh 래스터) | **Isaac Sim (RTX)** |
+| 조명·톤맵 | 없음 | 있음 (`--preset measured`) |
+| 쓰임 | depth 정확도 검증 | **생산** |
+
+`05_export_vlnce` · `05_export_vlnpe` · `04e_sample_compare` 셋 다 `04_render_obs_isaac.py`를
+모듈로 로드한다. **`vln_ce`도 Isaac으로 렌더한다**(`05_export_vlnce.py`가
+`apply_real/04_render_obs_isaac.py`를 쓴다).
+
+> **habitat은 쓰지 않는다.** `gs_vlnpe` 전체가 habitat을 import하지 않는다 — 코드에 나오는
+> `habitat`은 전부 좌표계 설명 주석이다. habitat은 평가(eval)와 `3dloader_vlnce/`의 navmesh
+> 검증에서만 쓴다.
+
 ### 61씬 전수로 경로만 (CPU, Isaac 안 띄움)
 
 `01` → `02` → `03`을 필요한 것만 돌려 **같은 루트 비율**을 잰다.
@@ -97,7 +117,7 @@ timeout --signal=KILL 21600 $ISAAC_PY $GS/03f_reproduce_batch.py --dataset vln_p
 
 | 인자 | 어디 | 뜻 |
 |---|---|---|
-| `--dataset {vln_n1,vln_pe}` | 02·03·04 | GT를 읽는 방식. 기본 `vln_n1` |
+| `--dataset {vln_n1,vln_pe}` | 02·03·04 | GT를 읽는 방식. 기본 **`vln_pe`**. 출력 접미사·렌더 해상도도 여기서 정해진다 |
 | `--mode {reproduce,random}` | 03 | `reproduce`=GT의 start/goal로 재계획 · `random`=임의 start/goal |
 | `--mode {gt_replay,reproduce,random}` | 04 | `gt_replay`=GT pose 그대로(검증용, §4) |
 | `--path_profile` | 03·03f | `legacy` / **`reproduce_v1`**(현재). 생략 시 개별 기본값 |

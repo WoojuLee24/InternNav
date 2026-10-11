@@ -99,7 +99,7 @@ FLOORPLAN_MIN_PX = 700
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--scene', default=DEFAULT_SCENE)
-    parser.add_argument('--dataset', default='vln_n1', choices=['vln_n1', 'vln_pe'],
+    parser.add_argument('--dataset', default='vln_pe', choices=['vln_n1', 'vln_pe'],
                         help='GT 궤적을 읽을 데이터셋. vln_pe면 출력(npz/json/log)에 _vlnpe 태그가 붙는다')
     parser.add_argument('--geometry', default='obj', choices=['obj', 'usd', 'both'],
                         help='occupancy를 만들 mesh. Stage 1은 obj(논문과 동일), Stage 2(Isaac)는 usd.')

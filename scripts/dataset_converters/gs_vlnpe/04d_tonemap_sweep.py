@@ -232,7 +232,7 @@ def make_composite(real_rgb, render_rgb, diff_rgb, label: str) -> np.ndarray:
 
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--dataset', default='vln_n1', choices=['vln_n1', 'vln_pe'])
+    parser.add_argument('--dataset', default='vln_pe', choices=['vln_n1', 'vln_pe'])
     parser.add_argument('--scene', default=DEFAULT_SCENE)
     parser.add_argument('--data_root', default=None, help='생략하면 --dataset 기본 경로')
     parser.add_argument('--mesh_root', default=DEFAULT_MESH_ROOT)
