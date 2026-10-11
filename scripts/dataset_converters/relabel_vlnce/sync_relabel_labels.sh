@@ -17,6 +17,8 @@ cd "$(dirname "$0")/../../.."   # InternNav repo root
 SRC=/home/irteam/data-vol2/relabel_half/labels
 DST=data/vln/mp3d/r2r/v1
 MINI=data/InternData-N1-v0.5-mini
+echo "label dir: $DST -> $(readlink -f $DST)"
+echo "mini root: $MINI -> $(readlink -f $MINI)"
 
 echo "== 1. git pull"
 git pull --ff-only origin feature/input_v0.1
