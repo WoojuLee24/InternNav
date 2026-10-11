@@ -20,15 +20,7 @@
 `--negative`를 주면 산출물 **복사본**에 5개 변형을 넣어 해당 게이트만 FAIL 하는지 확인한다.
 원본 산출물과 GT는 절대 수정하지 않는다.
 
-커맨드
-------
-한 씬:
-/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/05b_verify_vlnpe.py --render_root data/InternData-N1-v0.5-mini/vln_pe_render/traj_data/r2r --gt_root data/InternData-N1-v0.5-mini/vln_pe/traj_data/r2r --scenes 17DRP5sb8fy --negative --log_dir logs/gs-vlnpe
-
-전수:
-/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/05b_verify_vlnpe.py --render_root data/InternData-N1-v0.5-mini/vln_pe_render/traj_data/r2r --gt_root data/InternData-N1-v0.5-mini/vln_pe/traj_data/r2r --scenes all --negative --log_dir logs/gs-vlnpe
-
-Isaac Sim을 띄우지 않는다 — 디스크만 읽는다.
+커맨드·인자·입출력 규칙은 README.md 참고.
 """
 
 import argparse

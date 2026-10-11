@@ -51,13 +51,7 @@
       사람은 아님"의 차이다(GT 회전량이 우리의 4배: 130 vs 34 °/m). 더 올리려면 비용
       함수를 바꿔야 한다.
 
-커맨드
-------
-프로파일 목록과 값:
-/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/path_profiles.py
-
-두 프로파일의 차이만:
-/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/path_profiles.py --diff legacy reproduce_v1
+커맨드·인자·입출력 규칙은 README.md 참고.
 """
 
 from dataclasses import dataclass

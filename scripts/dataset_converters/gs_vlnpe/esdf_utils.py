@@ -1,7 +1,5 @@
 """M1.2~M1.3 — mesh를 "어디로 갈 수 있는가" 맵(ESDF)으로 바꾸고 그 위에서 경로를 만드는 공용 모듈.
 
-    00 : vln_n1 데이터 -> "어떻게 읽고 쓰나"  -> target_schema.json      (전체에 1개)
-    01 : 씬 mesh/USD   -> "이 씬 써도 되나"    -> scene_meta/<scene>.json (씬마다 1개)
     이 모듈: mesh      -> "어디로 갈 수 있나"  -> 02가 esdf/<scene>.npz로 저장
              ESDF      -> "어떤 경로로 가나"   -> 03이 paths/<scene>.json으로 저장
 

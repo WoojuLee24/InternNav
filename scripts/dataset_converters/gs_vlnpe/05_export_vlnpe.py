@@ -26,15 +26,7 @@ GT와 프레임 단위로 대응돼 SSIM 대조가 정확해진다. (새로 뽑�
 씬을 3번 올리면 애노테이터가 떨어진다(`AnnotatorRegistryError`, 둘 다 실측).
 `04e_sample_compare.py`·`usd_study/s9_tonemap_batch.py`와 같은 회피책을 쓴다.
 
-커맨드
-------
-한 씬 스모크 (전수 전에 반드시 먼저):
-timeout --signal=KILL 3600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/05_export_vlnpe.py --dataset vln_pe --scenes 17DRP5sb8fy --out_root data/InternData-N1-v0.5-mini/vln_pe_render --log_dir logs/gs-vlnpe
-
-전수 (61씬 · 2813 에피소드 · 271,252 프레임 · 약 3시간 · 115 GiB):
-timeout --signal=KILL 86400 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/05_export_vlnpe.py --dataset vln_pe --n_scenes 0 --out_root data/InternData-N1-v0.5-mini/vln_pe_render --log_dir logs/gs-vlnpe
-
-에피소드 수를 제한해 먼저 보려면 `--max_episodes 5`.
+커맨드·인자·입출력 규칙은 README.md 참고.
 """
 
 import argparse

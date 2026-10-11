@@ -22,11 +22,7 @@
 | V7 | **GT 대조** — rig별 SSIM (보고용, FAIL 아님) |
 | NEG | 복사본을 5가지로 망가뜨려 해당 게이트가 잡는지 |
 
-커맨드
-------
-/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/05b_verify_vlnce.py --render_root data/InternData-N1-v0.5-mini/vln_ce_render/traj_data/r2r --gt_root data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r --scenes all --negative --deep --log_dir logs/gs-vlnpe
-
-Isaac Sim을 띄우지 않는다 — 디스크만 읽는다.
+커맨드·인자·입출력 규칙은 README.md 참고.
 """
 
 import argparse

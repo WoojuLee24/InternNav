@@ -1,8 +1,5 @@
 """8축 파라미터 그리드서치 — GT / 기준선ⓒ / 생성 경로 세 쌍을 비교한다.
 
-    03 : ESDF + GT 조건  -> "경로를 만든다"          -> paths/<scene>.json
-    03b: 03의 결과       -> "왜 이만큼 다른가"        -> verify/<scene>.json
-    03c: 두 refine 해석  -> "어느 해석이 맞나"        -> compare/<scene>.json
     03d: 8개 파라미터 축 -> "**어디를 더 만질 수 있나**" -> gridsearch/results.json
 
 지금까지 `h_nav`/`refine_radius`/`r_b`/다운샘플/원점을 매번 다른 시점에 다른 임시 코드로 스윕했다.

@@ -1,9 +1,5 @@
 """M1.3 역검증 — "생성 경로가 gt_path와 거의 동일한가"를 논문 단계별로 되짚는다.
 
-    00 : vln_n1 데이터   -> "어떻게 읽고 쓰나"   -> target_schema.json      (전체에 1개)
-    01 : 씬 mesh/USD     -> "이 씬 써도 되나"     -> scene_meta/<scene>.json (씬마다 1개)
-    02 : 씬 mesh         -> "어디로 갈 수 있나"   -> esdf/<scene>.npz        (씬마다 1개)
-    03 : ESDF + GT 조건  -> "경로를 만든다"       -> paths/<scene>.json      (씬마다 1개)
     03b: 03의 결과       -> "**왜 이만큼 다른가**" -> verify/<scene>.json     (씬마다 1개)
 
 03은 "얼마나 다른가"(chamfer/Fréchet)를 재고, **03b는 "그 값이 좋은 값인지"에 답한다.**

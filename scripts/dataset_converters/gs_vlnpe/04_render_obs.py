@@ -1,9 +1,5 @@
 """M1.4 — 씬 mesh를 렌더링해 rgb/depth/extrinsic을 만든다.
 
-    00: vln_n1 데이터 -> "어떻게 읽고 쓰나"  -> target_schema.json      (전체에 1개)
-    01: 씬 mesh/USD    -> "이 씬 써도 되나"    -> scene_meta/<scene>.json (씬마다 1개)
-    02: 씬 mesh        -> "어디로 갈 수 있나"  -> esdf/<scene>.npz        (씬마다 1개)
-    03: occupancy      -> "어떤 경로로 가나"   -> paths/<scene>.json      (씬마다 1개)
     04: 경로            -> "그 경로에서 뭐가 보이나" -> obs/<scene>/episode_%06d/  (에피소드마다)
 
 ## 두 단계 (`--mode`)
@@ -37,10 +33,7 @@
 `read_triangle_mesh` + 단일 `MaterialRecord`는 텍스처가 날아가 회색 평면이 된다 — 실제로 겪음)로
 로드하고 `defaultLit`/조명은 `set_indirect_light_intensity` + `enable_sun_light(False)`로 맞춘다.
 
-실행 예시:
-    /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/04_render_obs.py \\
-        --scene 17DRP5sb8fy --mode gt_replay --episodes 0,1,2 --n_frames 6
-"""
+커맨드는 README.md 참고."""
 
 import argparse
 import json

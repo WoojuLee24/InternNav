@@ -7,10 +7,7 @@ traj 에피소드를 instruction 텍스트로 raw 에피소드와 매칭하고(�
 y-up 좌표를 z-up으로 변환해(`(x,y,z)_hab -> (x,-z,y)`, start 오차 0.01~0.17m로 검증),
 03이 계획한 경로 vs reference_path를 비교한다.
 
-실행:
-    /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/03e_compare_reference_path.py \\
-        --scene 17DRP5sb8fy --out_dir scripts/dataset_converters/gs_vlnpe/logs
-"""
+커맨드는 README.md 참고."""
 
 import argparse
 import gzip

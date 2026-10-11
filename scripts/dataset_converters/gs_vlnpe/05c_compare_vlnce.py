@@ -15,11 +15,7 @@ uint16 밀리미터라 육안으로 구분이 안 된다. `geometry_utils.colori
 **GT와 우리가 같은 범위로 정규화**해야 비교가 된다 — 각자 min/max로 정규화하면 실제 차이가
 사라진다. 그래서 두 이미지의 유효 픽셀을 합쳐 공통 범위를 먼저 구한다.
 
-커맨드
-------
-/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/05c_compare_vlnce.py --render_root data/InternData-N1-v0.5-mini/vln_ce_render/traj_data/r2r --gt_root data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r --scenes all --rigs 125cm_30deg,60cm_15deg --n_frames 4 --log_dir logs/gs-vlnpe
-
-Isaac Sim을 띄우지 않는다 — 디스크만 읽는다.
+커맨드·인자·입출력 규칙은 README.md 참고.
 """
 
 import argparse

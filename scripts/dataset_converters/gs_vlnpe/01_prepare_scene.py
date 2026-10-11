@@ -1,6 +1,5 @@
 """M1.1 — 씬 자산이 GT와 같은 world 프레임인지 판정하는 게이트.
 
-    00: vln_n1 데이터 -> "어떻게 읽고 쓰나"  -> target_schema.json      (전체에 1개)
     01: 씬 mesh/USD    -> "이 씬 써도 되나"    -> scene_meta/<scene>.json (씬마다 1개)
 둘 다 `check_against_scene_mesh`를 쓰지만 00은 규약 후보 3개 중 고르고(한 번), 01은 그 규약으로
 씬을 검사한다(새 씬마다).

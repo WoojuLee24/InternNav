@@ -1,7 +1,6 @@
 """M1.0 — 정답지 데이터를 읽어 파이프라인 규약을 확정한다.
 
     00: vln_n1 데이터 -> "어떻게 읽고 쓰나"  -> target_schema.json      (전체에 1개)
-    01: 씬 mesh/USD    -> "이 씬 써도 되나"    -> scene_meta/<scene>.json (씬마다 1개)
 둘 다 `check_against_scene_mesh`를 쓰지만 00은 규약 후보 3개 중 고르고(한 번), 01은 그 규약으로
 씬을 검사한다(새 씬마다).
 
