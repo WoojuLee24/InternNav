@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
+# 공용 라이브러리는 상위 gs_vlnpe/ 것을 쓴다 (apply_real 전용 모듈이 우선하도록 뒤에 넣는다).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from viz_utils import image_to_data_uri, save_gallery
 
