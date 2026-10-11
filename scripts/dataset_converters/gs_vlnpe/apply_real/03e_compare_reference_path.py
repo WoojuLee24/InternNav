@@ -21,6 +21,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+# 공용 라이브러리(geometry/esdf/dataset/viz/usdz_scene_utils)는 상위 gs_vlnpe/ 것을 쓴다.
+# insert(0, ...)는 나중에 넣은 것이 앞이므로, apply_real 전용 모듈이 계속 우선한다.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dataset_utils  # noqa: E402
 from geometry_utils import save_jpg  # noqa: E402

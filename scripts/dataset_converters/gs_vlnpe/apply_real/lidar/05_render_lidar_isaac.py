@@ -36,6 +36,8 @@ from pxr import Gf, UsdGeom  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 APPLY_REAL_ROOT = REPO_ROOT / 'scripts/dataset_converters/gs_vlnpe/apply_real'
+# 공용 라이브러리는 상위 gs_vlnpe/ 것을 쓴다 (apply_real 전용 모듈이 우선하도록 뒤에 넣는다).
+sys.path.insert(0, str(APPLY_REAL_ROOT.parent))
 sys.path.insert(0, str(APPLY_REAL_ROOT))
 import usdz_scene_utils  # noqa: E402
 from geometry_utils import action_to_c2w  # noqa: E402
