@@ -62,7 +62,47 @@ timeout 5400 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters
   코드에서도 나므로 이번 변경과 무관하다 — `ad6a2d9`의 톤맵 프로파일 도입 때문으로 보인다.
   **오늘 두 번 돌린 결과끼리는 rgb도 바이트 동일**하므로 렌더러는 결정론적이다.
 
+---
+
+# D단계 — 스크립트 사본 4개 제거 (−2,382줄)
+
+## 또 드리프트가 있었다
+`apply_real/03_sample_gt_paths.py`는 `ad6a2d9`가 추가한 **`--path_profile`을 못 받고 있었다**.
+A/B/C의 `esdf_utils` 버그에 이어 두 번째다.
+
+## 차이는 셋뿐이었고 전부 optional argument 로 흡수했다
+
+| 차이 | 어느 파일 | 흡수 방법 | 생략하면 |
+|---|---|---|---|
+| `DEFAULT_OUT_DIR`/`LOG_DIR` | 03·03b·03c·03d | 호출부가 이미 `--out_dir`/`--log_dir` 전달 | — |
+| GT 대신 생성 경로를 기준으로 | 03b·03c·03d | `--mode {reproduce,random}` | `reproduce` = 종전 |
+| 점유격자를 스캔 관측 영역으로 제한 | 03b·03c | `--scan_coverage` | off = 종전 |
+
+분기는 exhaustive `if/elif/else` + `assert False` 로 적었다(guideline 6).
+`--scan_coverage`는 3DGS 스캔의 구멍 대응이라 노은역에서만 켠다 —
+**예전 `apply_real` 사본은 이걸 무조건 적용**했으므로 노은역 커맨드에 플래그를 추가해야 한다(README 갱신함).
+
+## 검증 — 두 경로 모두 전후 대조
+
+```
+# mp3d 기본 경로 (회귀)
+/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/03b_verify_reproduction.py --scene 17DRP5sb8fy --num_episodes 3 --out_dir scripts/dataset_converters/gs_vlnpe/logs --log_dir <LOG>
+# 노은역 (신규 인자)
+/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/03b_verify_reproduction.py --scene noeun_station_mid --mode random --scan_coverage --num_episodes 5 --out_dir scripts/dataset_converters/gs_vlnpe/apply_real --log_dir <LOG>
+```
+
+| 경로 | 03b | 03c | 03d | stdout |
+|---|---|---|---|---|
+| mp3d 기본 (패치 전/후) | 20/20 동일 | 15/15 동일 | 4/4 동일 | 출력 경로 문자열만 다름 |
+| 노은역 (구 사본 vs 병합본) | 20/20 동일 | 15/15 동일 | 4/4 동일 | **완전 동일** |
+
+`gs_vlnpe/03`이 `apply_real/03`의 노은역 paths JSON을 **바이트 동일**하게 재현하는 것도 확인했다.
+
+## 최종
+`apply_real/*.py` **18개 → 9개**. A/B/C/D 합계 **−5,243줄**.
+남은 9개는 진짜 다른 것들이다 — `00`/`01`/`02`(usdz ROI·`--geometry usd`),
+`04_render_obs*`(NuRec GS), `04c`, `05_export_vlnce`(새 경로 저장), `camera_profiles`(vln_ce rig), `03e`.
+
 ## 남은 것 (제안했으나 미실행)
-- **D단계**: `apply_real/03`·`03b`·`03c`·`03d`도 원본과 2~7%만 다르다. 인자로 흡수 가능한지 검토.
 - `03b`~`03g` 이름 정리(`study_` 접두사) — 파이프라인과 일회성 실험 구분.
 - `gs_vlnpe/README.md` 신규 — 지금 `reports.md` 400줄이 커맨드까지 겸한다.
