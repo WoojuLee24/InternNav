@@ -120,6 +120,12 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument('--esdf_dir', default=None, help='기본값은 <out_dir>/esdf')
     p.add_argument('--out_dir', default=DEFAULT_OUT_DIR)
     p.add_argument('--log_dir', default=DEFAULT_LOG_DIR)
+    p.add_argument('--paths_dir', default=None,
+                   help='기본값은 <out_dir>/paths. --mode random 에서만 읽는다')
+    p.add_argument('--mode', default='reproduce', choices=['reproduce', 'random'],
+                   help="'reproduce'=GT 에피소드를 쓴다(기본, 종전 동작). "
+                        "'random'=GT가 없는 씬에서 03이 만든 `<scene>_random.json` 궤적을 쓴다. "
+                        '이 모드는 GT 대비 회귀 게이트를 적용하지 않는다(비교할 GT가 없다).')
     return p
 
 
@@ -437,9 +443,17 @@ def main() -> int:
     scenes_data = {}
     for scene in scenes:
         occ, origin, floor_z, cell = load_scene_map(esdf_dir, scene)
-        n_avail = len(sorted((Path(args.data_root) / scene / 'data' / 'chunk-000').glob('*.parquet')))
-        episodes = [load_episode(args.data_root, scene, ep)
-                   for ep in range(min(args.num_episodes, n_avail))]
+        if args.mode == 'random':
+            paths_dir = Path(args.paths_dir or (Path(args.out_dir) / 'paths'))
+            generated = json.load(open(paths_dir / f'{scene}_random.json'))['episodes']
+            episodes = [(np.asarray(e['trajectory'], dtype=np.float64), float(e['h_b']))
+                        for e in generated[:args.num_episodes]]
+        elif args.mode == 'reproduce':
+            n_avail = len(sorted((Path(args.data_root) / scene / 'data' / 'chunk-000').glob('*.parquet')))
+            episodes = [load_episode(args.data_root, scene, ep)
+                       for ep in range(min(args.num_episodes, n_avail))]
+        else:
+            assert False, f'unreachable mode={args.mode!r}'
         scenes_data[scene] = (occ, origin, floor_z, cell, episodes)
         print(f'  {scene}: grid={occ.shape} cell={cell} 에피소드 {len(episodes)}개 로드')
 
@@ -448,7 +462,8 @@ def main() -> int:
     all_ok = True
     for axis in axes:
         rows = sweep_axis(axis, scenes_data, args.num_episodes)
-        ok = check_regression(axis, rows)
+        # random 모드에는 비교할 GT가 없으므로 회귀 게이트를 적용하지 않는다.
+        ok = True if args.mode == 'random' else check_regression(axis, rows)
         all_ok = all_ok and ok
         log_dir = Path(args.log_dir) / SCRIPT_NAME
         axis['_ext_html'] = render_axis_extremes(axis, scenes_data[scenes[0]], log_dir)

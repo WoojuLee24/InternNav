@@ -57,6 +57,7 @@ from esdf_utils import (  # noqa: E402
     cell_to_world,
     chamfer_distance,
     compute_esdf_2d,
+    compute_scan_coverage_mask,
     derive_obstacle_2d,
     discrete_frechet_distance,
     downsample_navigable,
@@ -112,6 +113,10 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument('--esdf_dir', default=None, help='기본값은 <out_dir>/esdf')
     p.add_argument('--paths_dir', default=None, help='기본값은 <out_dir>/paths')
     p.add_argument('--log_dir', default=DEFAULT_LOG_DIR)
+    p.add_argument('--mode', default='reproduce', choices=['reproduce', 'random'],
+                   help="'reproduce'=GT 궤적을 기준으로 삼는다(기본, 종전 동작). 'random'=GT가 없는 씬(노은역 등)에서 03이 만든 `<scene>_random.json`의 궤적을 기준으로 삼는다.")
+    p.add_argument('--scan_coverage', action='store_true',
+                   help='점유격자를 스캔으로 실제 관측된 영역으로 제한한다. 3DGS 스캔처럼 구멍이 있는 씬에서만 켠다. 끄면 종전 동작.')
     return p
 
 
@@ -128,7 +133,10 @@ def load_gt_xy(data_root: str, scene: str, episode: int):
 def plan_once(occupancy, origin, floor_z, h_b, start_xy, goal_xy, cell, h_nav, args):
     """03의 `plan_episode`와 같은 순서 — F1(결정성)을 재려면 같은 파이프라인이어야 한다."""
     esdf = compute_esdf_2d(derive_obstacle_2d(occupancy, origin, floor_z, h_b, cell, h_nav), cell)
-    nav_coarse = downsample_navigable(truncate_navigable(esdf, args.r_b), DOWNSAMPLE_FACTOR,
+    navigable = truncate_navigable(esdf, args.r_b)
+    if args.scan_coverage:
+        navigable = navigable & compute_scan_coverage_mask(occupancy)
+    nav_coarse = downsample_navigable(navigable, DOWNSAMPLE_FACTOR,
                                       args.downsample_mode)
     coarse = cell * DOWNSAMPLE_FACTOR
     sg = np.array([start_xy, goal_xy], dtype=np.float64)
@@ -427,7 +435,8 @@ def main() -> int:
 
     esdf_dir = Path(args.esdf_dir or (Path(args.out_dir) / 'esdf'))
     paths_dir = Path(args.paths_dir or (Path(args.out_dir) / 'paths'))
-    npz_path, json_path = esdf_dir / f'{args.scene}.npz', paths_dir / f'{args.scene}.json'
+    suffix = '_random' if args.mode == 'random' else ''
+    npz_path, json_path = esdf_dir / f'{args.scene}.npz', paths_dir / f'{args.scene}{suffix}.json'
     for p, who in ((npz_path, '02_build_freemap_esdf.py'), (json_path, '03_sample_gt_paths.py')):
         if not p.is_file():
             print(f'  [ERROR] {p} 없음 — {who}를 먼저 돌릴 것')
@@ -458,7 +467,13 @@ def main() -> int:
     for ep_data in planned['episodes'][:args.num_episodes]:
         ep, h_b = ep_data['episode_id'], ep_data['h_b']
         ours = np.array(ep_data['trajectory'], dtype=np.float64)
-        gt_xy, gt_h_b = load_gt_xy(args.data_root, args.scene, ep)
+        if args.mode == 'random':
+            # GT가 없는 씬 — 03이 만든 경로 자신이 기준이다(F1은 '같은 입력으로 두 번'을 본다).
+            gt_xy, gt_h_b = np.asarray(ep_data['trajectory'], dtype=np.float64), h_b
+        elif args.mode == 'reproduce':
+            gt_xy, gt_h_b = load_gt_xy(args.data_root, args.scene, ep)
+        else:
+            assert False, f'unreachable mode={args.mode!r}'
         assert abs(gt_h_b - h_b) < 1e-6, f'ep{ep}: h_b 불일치 {gt_h_b} vs {h_b}'
 
         # F1 — 같은 입력으로 두 번. 03과 같은 순서를 돌려 결과가 비트 단위 같은지 본다.
