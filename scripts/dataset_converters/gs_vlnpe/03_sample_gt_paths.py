@@ -1,8 +1,5 @@
 """M1.3 — GT path를 재현해 경로 생성 알고리즘을 검증한다.
 
-    00: vln_n1 데이터 -> "어떻게 읽고 쓰나"  -> target_schema.json      (전체에 1개)
-    01: 씬 mesh/USD    -> "이 씬 써도 되나"    -> scene_meta/<scene>.json (씬마다 1개)
-    02: 씬 mesh        -> "어디로 갈 수 있나"  -> esdf/<scene>.npz        (씬마다 1개)
     03: occupancy      -> "어떤 경로로 가나"   -> paths/<scene>.json      (씬마다 1개)
 
 계산은 전부 `esdf_utils.py`가 한다. 이 스크립트는 파일 입출력 + 검증 + 리포트만 담당한다.
@@ -67,13 +64,7 @@ min clearance < `r_b`이기 때문이다(cubic spline 오버슈트로 보인다)
 재현 정확도는 **chamfer**(순서 무시)와 **discrete Fréchet**(순서 고려)로 잰다. 임계값을 미리 박지 않고
 분포를 먼저 본다 — A* tie-breaking·refinement 스텝·spline 파라미터가 논문에 명시돼 있지 않다.
 
-실행 예시:
-    /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/03_sample_gt_paths.py \\
-        --scene 17DRP5sb8fy --num_episodes 20
-
-    ... --smooth bezier        # 오버슈트 없는 스무딩과 비교
-    ... --r_b 1.0              # negative test: 통과 불가 -> A* 전부 실패
-"""
+커맨드는 README.md 참고."""
 
 import argparse
 import json
@@ -189,7 +180,7 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument('--downsample_mode', default='any', choices=list(DOWNSAMPLE_MODES),
                         help='논문 4단계 0.2 m 다운샘플. any는 블록에 하나라도 navigable이면 통과'
                              '(기본, 낙관적). majority는 절반 이상일 때만 — 연결성은 같고 navigable만 '
-                             '16% 줄어든다. all은 문틈이 지워져 연결성이 붕괴한다.')
+                             '16%% 줄어든다. all은 문틈이 지워져 연결성이 붕괴한다.')
     parser.add_argument('--refine_mode', default='argmax', choices=list(REFINERS),
                         help='논문 6단계 해석. argmax는 문장 그대로 "장애물 거리 최대화"로 최대한 '
                              '밀어낸다(기본). min_move는 r_b를 만족하는 만큼만 옮긴다 — GT가 약하게 '

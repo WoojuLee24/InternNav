@@ -21,14 +21,7 @@
 **지시문 텍스트**로 후보를 찾고, 그중 `start_position`이 가장 가까운 것을 고른다.
 좌표계도 변환해야 한다 — `reference_path`는 Habitat(y가 높이), parquet은 Isaac(z가 높이).
 
-커맨드
-------
-/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/03g_compare_to_reference.py --paths_dir logs/gs-vlnpe/profile_check/v2/paths --label reproduce_v1 --log_dir logs/gs-vlnpe
-
-두 설정을 나란히:
-/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/03g_compare_to_reference.py --paths_dir logs/gs-vlnpe/refine_sweep/r0.20/paths --label legacy --log_dir logs/gs-vlnpe
-
-Isaac Sim을 띄우지 않는다 — 디스크만 읽는다.
+커맨드·인자·입출력 규칙은 README.md 참고.
 """
 
 import argparse

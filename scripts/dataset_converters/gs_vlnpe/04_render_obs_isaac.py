@@ -38,10 +38,7 @@ GT rgb 자체가 실제 카메라 사진이 아니라 **같은 mesh를 렌더링
   forward=+Z, up=-Y — `geometry_utils.action_to_c2w`가 만드는 OpenCV 컨벤션과 정확히 같아서
   회전행렬→쿼터니언 변환만 하면 되고 별도 축 변환이 필요 없다.
 
-실행 예시 (`isaaclab.sh`가 아니라 `_isaac_sim/python.sh`로 직접 실행 — AppLauncher를 안 씀):
-    /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/04_render_obs_isaac.py \\
-        --scene 17DRP5sb8fy --mode gt_replay --episodes 0,1,2 --n_frames 6
-"""
+커맨드는 README.md 참고."""
 
 from isaacsim import SimulationApp
 
@@ -435,7 +432,7 @@ def build_argparser() -> argparse.ArgumentParser:
                         help='2-B(생성 경로) 렌더 프레임 간격[m]. 기본 0.035(기존 동작 그대로). '
                              'vln_pe GT는 0.141 m 간격(에피소드당 중앙 81프레임)인데 기본값 0.035로 '
                              '같은 길을 가면 4배 촘촘해져 에피소드가 300+ 프레임이 되고, '
-                             'cma/rdp의 max_step=200 절단에 90%가 걸려 뒷부분이 조용히 잘린다 '
+                             'cma/rdp의 max_step=200 절단에 90%%가 걸려 뒷부분이 조용히 잘린다 '
                              '(실측 — 노은역 기존 20ep 중 15ep가 이미 200을 넘는다). '
                              'GT와 같은 밀도로 맞추려면 0.14를 준다.')
     parser.add_argument('--rtx_ambient', type=float, default=0.0,

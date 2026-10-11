@@ -10,19 +10,7 @@
 **04를 수정하지 않는다.** 04를 그대로 모듈로 불러 `build_renderer`/`render_along`을 재사용한다.
 설정도 04의 `MEASURED_RENDER_PRESET`을 그대로 읽으므로 값이 두 곳에 갈리지 않는다.
 
-커맨드
-------
-vln_pe 6씬 표본 (확정 설정):
-timeout --signal=KILL 3600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/04e_sample_compare.py --dataset vln_pe --n_scenes 6 --preset measured --log_dir logs/gs-vlnpe
-
-vln_n1 6씬 표본:
-timeout --signal=KILL 3600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/04e_sample_compare.py --dataset vln_n1 --n_scenes 6 --preset measured --log_dir logs/gs-vlnpe
-
-기존 설정과 나란히 보려면 (대조군 — 프리셋 없이):
-timeout --signal=KILL 3600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/04e_sample_compare.py --dataset vln_pe --n_scenes 6 --light ambient_only --rtx_ambient 10.0 --film_iso 70 --log_dir logs/gs-vlnpe
-
-씬을 직접 고르려면 `--scenes A,B,C`. `--both_settings`를 주면 한 번의 실행에서
-**기존 설정과 확정 설정을 둘 다** 렌더해 같은 프레임에서 비교한다(씬당 렌더 2회).
+커맨드·인자·입출력 규칙은 README.md 참고.
 """
 
 import argparse

@@ -34,13 +34,7 @@
     쟀다(SSIM 0.56 vs 0.83). 렌더 측정 스크립트는 반드시 파이프라인과 같은
     `load_scene_model()`을 거쳐야 한다.
 
-커맨드
-------
-목록과 값:
-/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/render_profiles.py
-
-두 프로파일의 차이:
-/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/render_profiles.py --diff vln_pe_measured vln_n1_measured
+커맨드·인자·입출력 규칙은 README.md 참고.
 """
 
 from dataclasses import dataclass

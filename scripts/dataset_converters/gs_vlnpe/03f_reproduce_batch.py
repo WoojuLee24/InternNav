@@ -25,13 +25,7 @@ GT와 같은 루트를 타면 **GT 지시문이 그대로 유효**하므로 라�
 vln_n1 궤적이 없는 씬은 01을 돌릴 수 없다(실측: vln_pe 61씬 중 15씬). 그 씬들은
 `--require_n1` 기본값에서 자동으로 건너뛰고 리포트에 목록으로 남는다.
 
-커맨드
-------
-전수(vln_n1 GT가 있는 씬):
-timeout --signal=KILL 21600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/03f_reproduce_batch.py --dataset vln_pe --n_scenes 0 --log_dir logs/gs-vlnpe
-
-몇 씬만 먼저:
-/workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/03f_reproduce_batch.py --dataset vln_pe --scenes 17DRP5sb8fy,1LXtFkjw3qL --log_dir logs/gs-vlnpe
+커맨드·인자·입출력 규칙은 README.md 참고.
 """
 
 import argparse

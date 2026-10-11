@@ -18,10 +18,7 @@
 `--film_iso`는 전 컨텍스트 100(기본값) 고정이다. 조명만 변수로 두기 위해서다 — 프로덕션 권장값
 (70)과 다르므로 밝기 절대값을 프로덕션 산출물과 직접 비교하면 안 된다.
 
-실행 (컨텍스트마다 해상도가 달라 `Camera`를 다시 만들 수 없으므로 **프로세스를 분리한다**)
-```
-for C in vln_ce vln_pe noeun; do timeout --signal=KILL 3000 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/04f_light_gallery.py --context $C; done
-```
+커맨드는 README.md 참고.
 `simulation_app.close()`가 수 분 걸릴 수 있으나 산출물은 `main()` 반환 시점에 저장 완료다 —
 **성공 여부는 report.html 파일 존재로 판단**할 것.
 """

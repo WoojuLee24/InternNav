@@ -1,9 +1,6 @@
 """M1.2 — 씬 mesh를 occupancy로 만들어 저장하고, 그 맵이 정상인지 검증한다.
 
-    00: vln_n1 데이터 -> "어떻게 읽고 쓰나"  -> target_schema.json      (전체에 1개)
-    01: 씬 mesh/USD    -> "이 씬 써도 되나"    -> scene_meta/<scene>.json (씬마다 1개)
     02: 씬 mesh        -> "어디로 갈 수 있나"  -> esdf/<scene>.npz        (씬마다 1개)
-    03: occupancy      -> "어떤 경로로 가나"   -> paths/<scene>.json      (씬마다 1개)
 
 계산은 전부 `esdf_utils.py`가 한다. 이 스크립트는 **파일 입출력 + 검증 + 리포트**만 담당한다
 (01과 같은 구조 — 중복 구현 금지).
@@ -44,9 +41,7 @@ Stage 2(Isaac)로 넘어갈 때 `--geometry usd`로 바꾼다.
   3. `.ply` obstacle 겹침 — **기하 검증이 아니다**(그 점들은 mesh 표면 위 0.0000 m라 순환논증).
      mesh->voxel 변환이 GT 라벨과 같은 곳을 obstacle로 보는지의 정황 확인일 뿐이다.
 
-실행 예시:
-    /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/02_build_freemap_esdf.py \\
-        --scene 17DRP5sb8fy
+커맨드는 README.md 참고.
 
 negative test (게이트가 항상 통과만 내지 않음을 보장):
     ... --scene 17DRP5sb8fy --h_nav -0.1     # 바닥을 장애물에 포함 -> clearance 0으로 붕괴, exit 1

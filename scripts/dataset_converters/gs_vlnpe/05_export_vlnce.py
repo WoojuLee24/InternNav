@@ -26,15 +26,7 @@ rig 5개
 **한 프로세스에서 `build_renderer`를 두 번 부르면 죽으므로**(`/World/RenderCamera` 충돌, 실측)
 rig 하나당 프로세스 하나로 돈다. 씬 루프도 같은 이유로 프로세스를 나눈다.
 
-커맨드
-------
-1씬 스모크 (3 에피소드 · rig 5개 ≈ 700 프레임):
-timeout --signal=KILL 3600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/05_export_vlnce.py --scenes 17DRP5sb8fy --max_episodes 3 --out_root data/InternData-N1-v0.5-mini/vln_ce_render --log_dir logs/gs-vlnpe
-
-표본 3씬 × 5 에피소드 (GT 대조용):
-timeout --signal=KILL 14400 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/05_export_vlnce.py --scenes 17DRP5sb8fy,1LXtFkjw3qL,29hnd4uzFmX --max_episodes 5 --out_root data/InternData-N1-v0.5-mini/vln_ce_render --log_dir logs/gs-vlnpe
-
-⚠️ 전수(61씬)는 98만 렌더 · 약 140 GB다. 여유(195 GB)를 거의 다 쓰므로 기본값은 표본이다.
+커맨드·인자·입출력 규칙은 README.md 참고.
 """
 
 import argparse

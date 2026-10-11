@@ -1,7 +1,5 @@
 """논문 6단계(refine)의 두 해석을 끝까지 돌려 비교한다 — `argmax` vs `min_move`.
 
-    03 : ESDF + GT 조건  -> "경로를 만든다"        -> paths/<scene>.json
-    03b: 03의 결과       -> "왜 이만큼 다른가"      -> verify/<scene>.json
     03c: 두 refine 해석  -> "**어느 해석이 맞나**"  -> compare/<scene>.json
 
 논문 6단계는 *"refine the position by maximizing the distance to nearby obstacles"*다.
