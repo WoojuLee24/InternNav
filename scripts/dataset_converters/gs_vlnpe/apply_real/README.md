@@ -44,6 +44,7 @@ format_validation/*_assets/
 ```bash
 ISAAC_PY=/workspace/isaaclab/_isaac_sim/python.sh
 PIPE=scripts/dataset_converters/gs_vlnpe/apply_real
+GS=scripts/dataset_converters/gs_vlnpe      # 03/03b/03c/03d 는 여기 공용 스크립트를 쓴다
 LOG=logs/gs-vlnpe/apply_real
 SCENE=noeun_station_mid
 USDZ=data/noeun_station/noeun_station_collision.usdz
@@ -126,7 +127,7 @@ $ISAAC_PY $PIPE/02_build_freemap_esdf.py \
 ## 03. random GT path 20 episodes 생성
 
 ```bash
-$ISAAC_PY $PIPE/03_sample_gt_paths.py \
+$ISAAC_PY $GS/03_sample_gt_paths.py \
   --scene $SCENE --mode random --num_episodes 20 \
   --esdf_dir $PIPE/esdf --out_dir $PIPE --log_dir $LOG
 ```
@@ -144,14 +145,21 @@ gate의 FAIL이 아니다.
 03의 검증·비교 단계도 보존되어 있다. GT 생성의 필수 본 단계는 03이며, 아래 `03b~03e`는
 재현성 확인과 파라미터 비교를 위한 후속 진단이다.
 
+> **2026-10-11**: `03`·`03b`·`03c`·`03d`는 `apply_real/`에 사본을 두지 않고 **상위 `$GS/`의
+> 공용 스크립트를 쓴다**(사본은 이 네 개가 원본과 2~7%만 달라 포크 드리프트 위험이 컸다 —
+> 실제로 `apply_real/03`은 `--path_profile`을 못 받고 있었다). 노은역 전용 동작은 인자로 들어갔다:
+> `--mode random`(GT 대신 03이 만든 `<scene>_random.json`을 기준으로)과
+> `--scan_coverage`(점유격자를 실제 스캔된 영역으로 제한 — 3DGS 스캔의 구멍 대응).
+> 둘 다 생략하면 종전 mp3d 동작 그대로다.
+
 ```bash
-$ISAAC_PY $PIPE/03b_verify_reproduction.py \
-  --scene $SCENE --mode random --num_episodes 20 --out_dir $PIPE --log_dir $LOG
+$ISAAC_PY $GS/03b_verify_reproduction.py \
+  --scene $SCENE --mode random --scan_coverage --num_episodes 20 --out_dir $PIPE --log_dir $LOG
 
-$ISAAC_PY $PIPE/03c_compare_refine.py \
-  --scene $SCENE --mode random --num_episodes 20 --out_dir $PIPE --log_dir $LOG
+$ISAAC_PY $GS/03c_compare_refine.py \
+  --scene $SCENE --mode random --scan_coverage --num_episodes 20 --out_dir $PIPE --log_dir $LOG
 
-$ISAAC_PY $PIPE/03d_grid_search_params.py \
+$ISAAC_PY $GS/03d_grid_search_params.py \
   --scenes $SCENE --mode random --num_episodes 20 --out_dir $PIPE --log_dir $LOG
 
 $ISAAC_PY $PIPE/03e_compare_reference_path.py \

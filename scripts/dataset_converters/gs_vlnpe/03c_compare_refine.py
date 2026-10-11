@@ -50,6 +50,7 @@ from esdf_utils import (  # noqa: E402
     check_path_navigable,
     compare_clearance_profile,
     compute_esdf_2d,
+    compute_scan_coverage_mask,
     derive_obstacle_2d,
     discrete_frechet_distance,
     downsample_navigable,
@@ -91,6 +92,12 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument('--out_dir', default=DEFAULT_OUT_DIR)
     p.add_argument('--esdf_dir', default=None, help='기본값은 <out_dir>/esdf')
     p.add_argument('--log_dir', default=DEFAULT_LOG_DIR)
+    p.add_argument('--paths_dir', default=None,
+                   help="기본값은 <out_dir>/paths. --mode random 에서만 읽는다")
+    p.add_argument('--mode', default='reproduce', choices=['reproduce', 'random'],
+                   help="'reproduce'=GT 궤적을 기준으로 삼는다(기본, 종전 동작). 'random'=GT가 없는 씬에서 03이 만든 `<scene>_random.json` 궤적을 기준으로 삼는다.")
+    p.add_argument('--scan_coverage', action='store_true',
+                   help='점유격자를 스캔으로 실제 관측된 영역으로 제한한다. 3DGS 스캔처럼 구멍이 있는 씬에서만 켠다. 끄면 종전 동작.')
     return p
 
 
@@ -110,7 +117,10 @@ def plan_modes(occ, origin, floor_z, h_b, gt_xy, cell, h_nav, args):
     """
     coarse = cell * DOWNSAMPLE_FACTOR
     esdf = compute_esdf_2d(derive_obstacle_2d(occ, origin, floor_z, h_b, cell, h_nav), cell)
-    nav_coarse = downsample_navigable(truncate_navigable(esdf, args.r_b), DOWNSAMPLE_FACTOR)
+    navigable = truncate_navigable(esdf, args.r_b)
+    if args.scan_coverage:
+        navigable = navigable & compute_scan_coverage_mask(occ)
+    nav_coarse = downsample_navigable(navigable, DOWNSAMPLE_FACTOR)
     sg = np.array([gt_xy[0], gt_xy[-1]], dtype=np.float64)
     ij = world_to_cell(sg, origin, coarse)
     h_c, w_c = nav_coarse.shape
@@ -269,10 +279,23 @@ def main() -> int:
     occ, origin, floor_z = data['occupancy'], data['origin'], float(data['floor_z'])
     cell, h_nav = float(data['voxel_size']), float(data['h_nav'])
 
-    n_avail = len(sorted((Path(args.data_root) / args.scene / 'data' / 'chunk-000').glob('*.parquet')))
+    random_eps = None
+    if args.mode == 'random':
+        # GT가 없는 씬 — 03이 만든 경로를 기준 궤적으로 쓴다.
+        paths_dir = Path(args.paths_dir or (Path(args.out_dir) / 'paths'))
+        random_eps = json.load(open(paths_dir / f'{args.scene}_random.json'))['episodes']
+        n_avail = len(random_eps)
+    elif args.mode == 'reproduce':
+        n_avail = len(sorted((Path(args.data_root) / args.scene / 'data' / 'chunk-000').glob('*.parquet')))
+    else:
+        assert False, f'unreachable mode={args.mode!r}'
     rows, nav_ref = [], None
     for ep in range(min(args.num_episodes, n_avail)):
-        gt_xy, h_b = load_gt(args.data_root, args.scene, ep)
+        if random_eps is not None:
+            gt_xy = np.asarray(random_eps[ep]['trajectory'], dtype=np.float64)
+            h_b = float(random_eps[ep]['h_b'])
+        else:
+            gt_xy, h_b = load_gt(args.data_root, args.scene, ep)
         r = plan_modes(occ, origin, floor_z, h_b, gt_xy, cell, h_nav, args)
         if r is None:
             print(f'    ep {ep:>3}: astar_failed')
