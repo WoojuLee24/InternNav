@@ -32,7 +32,7 @@ GS=scripts/dataset_converters/gs_vlnpe
 - `02`가 geometry만으로 지도를 만든다 (`--geometry usd` 필수, `--ref_h_b`로 로봇 키를 직접 준다)
 - `03`은 `--mode random`만 가능하다 (`reproduce`는 재현할 GT가 없다)
 - `04`는 `--camera` 프로파일을 반드시 지정한다 (기본 `dataset`은 exit 2)
-- 스캔에 구멍이 있어 검증 단계에 `--scan_coverage`를 켠다
+- `--mode random`이라 `--scan_coverage`가 필요하다 (아래 §3 참고)
 
 ---
 
@@ -105,8 +105,18 @@ timeout --signal=KILL 21600 $ISAAC_PY $GS/03f_reproduce_batch.py --dataset vln_p
 | `--camera {dataset,d455_nominal,d455_30m}` | 04 | 노은역은 반드시 지정 |
 | `--r_b` / `--h_nav_ratio` | 02·03 | 로봇 반경 / 네비 높이비 |
 | `--geometry {obj,usd,both}` | 02 | 노은역은 `usd` 필수(obj 없음) |
-| `--scan_coverage` | 03b·03c | 점유격자를 실제 스캔 영역으로 제한. **노은역만** |
+| `--scan_coverage` | 03b·03c | mesh가 **아예 없는 칸**(건물 밖 허공)을 navigable에서 뺀다. `--mode random`에 필요 |
 | `--out_dir` / `--log_dir` | 전부 | 산출물 / 리포트 위치 |
+
+### `--scan_coverage` — 왜 필요한가
+
+`derive_obstacle_2d`는 `(h_nav, h_obs]` 밴드에 장애물이 없으면 navigable로 친다. 그런데 밴드가
+빈 이유가 **"정말 뚫린 공간"인지 "mesh가 아예 없는 스캔 밖 허공"인지 구분하지 않는다.**
+실측(`s8pcmisQ38h`): navigable로 분류된 셀의 **~40 %**가 전 높이에서 mesh 점유가 0이었다.
+
+GT는 항상 건물 안 좌표만 쓰므로 `--mode reproduce`에서는 문제가 안 된다. **`--mode random`은
+navigable 전체에서 균등하게 뽑으므로 건물 밖을 "갈 수 있는 곳"으로 뽑아버린다** — 그래서 필요하다.
+노은역 전용이 아니라 **mp3d에서도 `random`이면 똑같이 걸린다.**
 
 프로파일 값은 `path_profiles.py` · `render_profiles.py` · `camera_profiles.py`에 있다.
 우선순위는 **개별 인자 > 프로파일 > 스크립트 기본값**.
@@ -192,7 +202,7 @@ timeout --signal=KILL 3600 $ISAAC_PY $GS/04e_sample_compare.py --dataset vln_pe 
 
 | 스크립트 | 무엇을 묻나 | 인자 |
 |---|---|---|
-| `03b_verify_reproduction.py` | 03이 낸 거리값이 **좋은 값인지** | 노은역은 `--mode random --scan_coverage` |
+| `03b_verify_reproduction.py` | 03이 낸 거리값이 **좋은 값인지** | `--mode random` 이면 `--scan_coverage` 같이 |
 | `03c_compare_refine.py` | refine 해석이 `argmax`인가 `min_move`인가 | 〃 |
 | `03d_grid_search_params.py` | 8개 파라미터 중 어디를 더 만질 수 있나 | 노은역은 `--mode random` |
 | `03g_compare_to_reference.py` | 계획 GT(`reference_path`) 대비 거리 | — |
