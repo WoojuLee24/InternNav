@@ -152,7 +152,7 @@ RANDOM_MAX_RESAMPLE_TRIES = 30
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--scene', default=DEFAULT_SCENE)
-    parser.add_argument('--dataset', default='vln_n1', choices=['vln_n1', 'vln_pe'],
+    parser.add_argument('--dataset', default='vln_pe', choices=['vln_n1', 'vln_pe'],
                         help='GT 궤적 데이터셋. vln_pe면 esdf/paths/log에 _vlnpe 태그 사용')
     parser.add_argument('--mode', default='reproduce', choices=['reproduce', 'random'],
                         help='reproduce는 GT에서 h_b/pitch/start/goal을 전부 복사한다. random은 C2에서 구현.')

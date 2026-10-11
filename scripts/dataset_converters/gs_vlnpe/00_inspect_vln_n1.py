@@ -113,7 +113,7 @@ BEV_CELL_M = 0.05
 
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--dataset', default='vln_n1', choices=['vln_n1', 'vln_pe'],
+    parser.add_argument('--dataset', default='vln_pe', choices=['vln_n1', 'vln_pe'],
                         help='vln_pe면 run_inspect_vln_pe로 위임(스키마 덤프 + pose 변환식 mesh-anchor 검증)')
     parser.add_argument('--data_root', default=None,
                         help='traj_data 루트 (scene 폴더들의 부모). 생략 시 --dataset의 기본 경로')

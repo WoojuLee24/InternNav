@@ -177,7 +177,7 @@ def edge_correlation(gray_a: np.ndarray, gray_b: np.ndarray) -> float:
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--scene', default=DEFAULT_SCENE)
-    parser.add_argument('--dataset', default='vln_n1', choices=['vln_n1', 'vln_pe'],
+    parser.add_argument('--dataset', default='vln_pe', choices=['vln_n1', 'vln_pe'],
                         help='GT 데이터셋. vln_pe면 입출력에 _vlnpe 태그, 렌더 해상도 256x256')
     parser.add_argument('--mode', default='gt_replay', choices=['gt_replay', 'reproduce', 'random'],
                         help='gt_replay(2-A, 기본)는 실제 action 시퀀스로 렌더 파이프라인을 검증한다. '

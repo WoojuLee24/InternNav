@@ -118,6 +118,9 @@ BEV_CELL_M = 0.05
 
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    # 상위 gs_vlnpe/ 는 기본값이 'vln_pe' 지만 여기는 'vln_n1' 을 유지한다 —
+    # 노은역은 둘 중 어느 쪽도 아니고, dataset 이 정하는 렌더 해상도(480x270)와
+    # 출력 경로 접미사('')를 그대로 써야 기존 산출물과 맞는다.
     parser.add_argument('--dataset', default='vln_n1', choices=['vln_n1', 'vln_pe'],
                         help='vln_pe면 run_inspect_vln_pe로 위임(스키마 덤프 + pose 변환식 mesh-anchor 검증)')
     parser.add_argument('--data_root', default=None,
