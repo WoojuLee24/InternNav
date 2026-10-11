@@ -42,6 +42,9 @@ from pathlib import Path
 import numpy as np
 import pyarrow.parquet as pq
 
+# 공용 라이브러리·파이프라인 모듈은 상위 gs_vlnpe/ 에 있다.
+# insert(0, ...)는 나중에 넣은 것이 앞이므로 checks/ 안의 모듈이 우선한다.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from esdf_utils import (  # noqa: E402
     ASTAR_CELL_M,

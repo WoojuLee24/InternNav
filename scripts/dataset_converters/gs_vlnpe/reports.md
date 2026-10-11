@@ -256,7 +256,7 @@ iso 70 행들은 이번에 `gt_replay`로 재렌더해 얻은 값이다(SSIM은 
 
 ---
 
-# 05~06 · 설정 프로파일 (2026-09-08 ~ 09-10 추가)
+# 04e~05b · 설정 프로파일 (2026-09-08 ~ 09-10 추가)
 
 위 00~04는 **씬 2개**에서 검증한 기록이다. 이 절은 그것을 **61씬 전수**로 넓히면서 만든
 스크립트와 커맨드다. 상세 경위·수치는 `.claude/memory/260910_vlnpe_render_and_reproduce_result.md`.
@@ -282,19 +282,19 @@ iso 70 행들은 이번에 `gt_replay`로 재렌더해 얻은 값이다(SSIM은 
 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/render_profiles.py
 ```
 
-## 05 표본 비교 — GT와 렌더를 나란히 보기
+## 04e 표본 비교 — GT와 렌더를 나란히 보기
 
 씬 여러 개를 한 페이지에서 눈으로 비교한다. 프레임마다 GT·기존설정·확정설정을 정적 이미지로
 나란히 놓는다(blink 위젯만 쓰면 스크립트 없는 뷰어에서 빈칸으로 보인다 — 실측).
 
 ```
-timeout --signal=KILL 3600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/04e_sample_compare.py --dataset vln_pe --n_scenes 6 --both_settings --n_frames 4 --log_dir logs/gs-vlnpe
+timeout --signal=KILL 3600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/checks/04e_sample_compare.py --dataset vln_pe --n_scenes 6 --both_settings --n_frames 4 --log_dir logs/gs-vlnpe
 ```
 
 `--both_settings` = 기존/확정 설정 둘 다 렌더해 같은 프레임에서 비교(씬당 렌더 2회).
 출력: `logs/gs-vlnpe/04e_sample_compare/<dataset>_<n>scenes/report.html`
 
-## 06 전수 재렌더 — GT pose 재생 → vln_pe 구조로 저장
+## 05 전수 재렌더 — GT pose 재생 → vln_pe 구조로 저장
 
 **목적**: 우리 렌더러가 GT 이미지를 재현하는지 61씬 전수로 검증. GT parquet의 카메라 pose를
 그대로 재생하고 **이미지만** 우리 렌더로 바꾼다. parquet·`meta/`는 GT에서 **바이트 복사**하므로
@@ -312,7 +312,7 @@ timeout --signal=KILL 86400 /workspace/isaaclab/_isaac_sim/python.sh scripts/dat
 시작 시 npy 헤더로 프레임 수를 세어 용량을 가드하고, 성공 판정은 종료코드가 아니라
 sentinel 파일로 한다(Isaac은 정상 종료에도 세그폴트를 낸다).
 
-## 06b 구조 검증 + GT 대조
+## 05b 구조 검증 + GT 대조
 
 ```
 /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/05b_verify_vlnpe.py --render_root data/InternData-N1-v0.5-mini/vln_pe_render/traj_data/r2r --gt_root data/InternData-N1-v0.5-mini/vln_pe/traj_data/r2r --scenes all --require_complete --negative --deep --log_dir logs/gs-vlnpe

@@ -95,7 +95,7 @@ timeout --signal=KILL 21600 /workspace/isaaclab/_isaac_sim/python.sh scripts/dat
 | `--negative` | 산출물 **복사본**을 5가지로 망가뜨려 해당 게이트만 FAIL 하는지 확인 |
 | `--self_test` | GT를 산출물 자리에 넣어 검증기 자체를 검사(전 게이트 PASS가 기준선) |
 
-**전수 실측 결과** (`logs/gs-vlnpe/06b_verify_vlnpe_render/verify.json`, 61씬):
+**전수 실측 결과** (`logs/gs-vlnpe/05b_verify_vlnpe/verify.json`, 61씬):
 
 | | 결과 |
 |---|---|

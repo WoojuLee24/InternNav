@@ -34,8 +34,11 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-if str(HERE) not in sys.path:
-    sys.path.insert(0, str(HERE))
+# 공용 라이브러리·파이프라인 모듈은 상위 gs_vlnpe/ 에 있다.
+# insert(0, ...)는 나중에 넣은 것이 앞이므로 checks/ 안의 모듈이 우선한다.
+for _p in (str(HERE.parent), str(HERE)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from esdf_utils import chamfer_distance, discrete_frechet_distance, resample_by_arclength  # noqa: E402
 

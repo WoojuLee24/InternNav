@@ -22,8 +22,11 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-if str(HERE) not in sys.path:
-    sys.path.insert(0, str(HERE))
+# 공용 라이브러리·파이프라인 모듈은 상위 gs_vlnpe/ 에 있다.
+# insert(0, ...)는 나중에 넣은 것이 앞이므로 checks/ 안의 모듈이 우선한다.
+for _p in (str(HERE.parent), str(HERE)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 SCRIPT_NAME = '04e_sample_compare'
 
@@ -34,7 +37,7 @@ MEASURED_AMBIENT = {'vln_n1': 6.0, 'vln_pe': 10.0}
 
 def load_renderer_module():
     """04를 모듈로 로드 (import 시점에 SimulationApp 부팅 — pxr보다 먼저 해야 한다)."""
-    spec = importlib.util.spec_from_file_location('r4_s05', HERE / '04_render_obs_isaac.py')
+    spec = importlib.util.spec_from_file_location('r4_s05', HERE.parent / '04_render_obs_isaac.py')
     mod = importlib.util.module_from_spec(spec)
     sys.modules['r4_s05'] = mod
     spec.loader.exec_module(mod)
