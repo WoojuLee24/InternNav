@@ -1,5 +1,8 @@
 # gs_vlnpe 파이프라인 리포트 링크 모음 (00~04, vln_n1 + vln_pe + 노은역 usdz)
 
+> **실행 방법·입출력·인자·검증은 [`README.md`](README.md)에 있다.** 이 문서는 **리포트 링크와
+> 실험 경위**를 모아둔 곳이다 — 어떤 설정을 왜 그 값으로 정했는지의 근거.
+
 각 스크립트가 만든 `report.html`의 Artifact 링크 + 로컬 경로. 로컬 경로는 repo 루트 기준.
 최종 갱신 2026-09-03 (노은역 usdz 절 추가). 상세 경위·수치는
 `.claude/memory/260804_gs_vlnpe_04_render_obs_result.md`(Open3D),
