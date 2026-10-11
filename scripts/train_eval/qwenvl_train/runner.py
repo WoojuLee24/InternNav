@@ -725,8 +725,9 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
                    watchdog: bool = False,
                    watchdog_idle_min: int = 10,
                    vis: bool = False,
-                   eval_ckpts: Optional[str] = None) -> None:
-    """End-to-end driver. ``exp_name`` e.g. 'batch_size/b4_eff128_base'.
+                   eval_ckpts: Optional[str] = None) -> int:
+    """End-to-end driver. Returns the failing phase's exit code (0 = all ok) so the
+    queue log's ``rc=`` means something: eval used to die in seconds with rc=0. ``exp_name`` e.g. 'batch_size/b4_eff128_base'.
 
     ``in_process=True`` runs train/eval in THIS process (no torchrun) for VSCode
     attach debugging; debug one phase at a time (--no-eval / --no-train), since
@@ -755,25 +756,26 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
                        debugpy=debugpy if debugpy == "trainer" else None)
         if rc != 0:
             print(f"[train] FAILED (exit {rc}); skipping eval.", file=sys.stderr)
-            return
+            return rc
         _save_wandb_run_id(output_dir)
 
     if not do_eval:
-        return
+        return 0
 
     # node_rank guard mirrors `if [ "${NODE_RANK}" = "0" ]` in the shell scripts
     if p.node_rank != 0:
-        return
+        return 0
 
     if eval_ckpts:
         # --eval-ckpts: evaluate several checkpoints of one run (output_dir = the run dir)
+        rc = 0
         for ckpt in _list_checkpoints(output_dir, eval_ckpts):
             print(f"[eval] --eval-ckpts {eval_ckpts}: {ckpt}", flush=True)
-            _eval_one(p, exp_name, config_path, ckpt, "explicit --eval-ckpts", _ckpt_run_name(ckpt), ckpt,
+            rc = _eval_one(p, exp_name, config_path, ckpt, "explicit --eval-ckpts", _ckpt_run_name(ckpt), ckpt,
                       machine=machine, do_train=do_train, output_dir_for_aux=output_dir,
                       in_process=in_process, debugpy=debugpy, wandb_run_id=None, wandb_new_run=False,
-                      watchdog=watchdog, watchdog_idle_min=watchdog_idle_min, vis=vis)
-        return
+                      watchdog=watchdog, watchdog_idle_min=watchdog_idle_min, vis=vis) or rc
+        return rc
 
     # Deliberately NO fallback to EVAL_MACHINE[machine]["model_path"]: with val_ratio=0
     # there is no best_metric, and that fallback silently evaluated the RELEASED checkpoint.
@@ -788,7 +790,7 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
             f"[eval] no checkpoint found under {output_dir}. Pass --model-path <ckpt> to "
             f"evaluate an existing checkpoint, or check that training actually saved one."
         )
-    _eval_one(p, exp_name, config_path, best, how, run_name, output_dir,
+    return _eval_one(p, exp_name, config_path, best, how, run_name, output_dir,
               machine=machine, do_train=do_train, output_dir_for_aux=output_dir,
               in_process=in_process, debugpy=debugpy, wandb_run_id=wandb_run_id, wandb_new_run=wandb_new_run,
               watchdog=watchdog, watchdog_idle_min=watchdog_idle_min, vis=vis)
@@ -797,7 +799,7 @@ def train_and_eval(p: Params, exp_name: str, config_path: str, *,
 def _eval_one(p: Params, exp_name: str, config_path: str, best: str, how: str, run_name: str,
               output_dir: str, *, machine: str, do_train: bool, output_dir_for_aux: str,
               in_process: bool, debugpy: Optional[str], wandb_run_id: Optional[str],
-              wandb_new_run: bool, watchdog: bool, watchdog_idle_min: int, vis: bool) -> None:
+              wandb_new_run: bool, watchdog: bool, watchdog_idle_min: int, vis: bool) -> int:
     """Evaluate one checkpoint `best`, writing logs under `output_dir` (unchanged body of
     train_and_eval's eval tail; also called per checkpoint by --eval-ckpts)."""
     print(f"[eval] machine={machine}  checkpoint={best}  ({how})")
@@ -806,7 +808,7 @@ def _eval_one(p: Params, exp_name: str, config_path: str, best: str, how: str, r
     else:
         _backfill_chat_template(best, p.system2_ckpt)
     os.makedirs(output_dir, exist_ok=True)
-    run_eval(config_path, best, run_name, output_dir, machine=machine,
+    rc = run_eval(config_path, best, run_name, output_dir, machine=machine,
              # eval_nproc=None -> nproc_per_node 그대로 (기존 동작). GL/CUDA를 GPU 단위로
              # 분리하려면 config에서 eval_nproc=4 + eval_render_gpu_offset=4로 낮춘다.
              nproc=p.eval_nproc or p.nproc_per_node, in_process=in_process, debugpy=debugpy,
@@ -815,6 +817,9 @@ def _eval_one(p: Params, exp_name: str, config_path: str, best: str, how: str, r
              wandb_run_id=wandb_run_id, wandb_new_run=wandb_new_run,
              use_wandb=p.use_wandb, watchdog=watchdog, watchdog_idle_min=watchdog_idle_min,
              exp_name=exp_name, vis=vis)
+    if rc != 0:
+        print(f"[eval] FAILED (exit {rc}): {best}", file=sys.stderr)
+    return rc
 
 
 # --------------------------------------------------------------------------- #
@@ -998,7 +1003,7 @@ def main_cli() -> None:
         print(" ".join(params.train_argv("<output_dir>", exp_name)))
         return
 
-    train_and_eval(
+    sys.exit(train_and_eval(
         params, exp_name, config_path,
         machine=args.machine,
         do_train=not args.no_train,
@@ -1013,7 +1018,7 @@ def main_cli() -> None:
         watchdog_idle_min=args.watchdog_idle_min,
         vis=args.vis,
         eval_ckpts=args.eval_ckpts,
-    )
+    ))
 
 
 if __name__ == "__main__":
