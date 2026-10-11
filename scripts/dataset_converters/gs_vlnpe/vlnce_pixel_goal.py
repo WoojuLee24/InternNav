@@ -10,7 +10,7 @@ InternVLA-N1 기본 학습 설정이 `pixel_goal_only=True`라서, `goal`이 전
 > frame `i`의 pixel goal = **frame `i+goal_len+1`의 카메라 위치 아래 바닥점**을
 > frame `i`의 **룩다운(pitch_2) 카메라**에 투영한 `[u, v]` (640×480 정수).
 
-`3dloader_vlnce/pixel_goal_utils.py`가 이 투영을 이미 구현해 뒀고, 릴리스 610 프레임에
+`vlnce_rig.py`가 이 투영을 이미 구현해 뒀고, 릴리스 610 프레임에
 역산해 확인했다 — **u 오차 중앙 1.28 px · v 1.04 px · 5px 초과 0.00%**.
 
 `goal_len` 선택 규칙 (이 파일에서 역산)
@@ -56,12 +56,11 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
-_3D = REPO / 'scripts' / 'dataset_converters' / '3dloader_vlnce'
-for p in (str(HERE), str(_3D)):
+for p in (str(HERE),):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-import pixel_goal_utils as pg  # noqa: E402
+import vlnce_rig as pg  # noqa: E402
 
 SCRIPT_NAME = 'vlnce_pixel_goal'
 

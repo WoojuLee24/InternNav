@@ -8,6 +8,10 @@ cached mesh/occ에서 depth·경로를 만들려면 절대좌표가 필요하다
 ep0(17DRP5sb8fy) 실측: point-to-mesh median 0.0039 m, yaw 60°, t=axis-map('x,-z,y') of start_position.
 
 offline converter(05) / augmenter / G1이 공용으로 쓴다. 순수 numpy/scipy + trimesh(거리) + gs 재사용.
+
+2026-10-11에 `3dloader_vlnce/`에서 여기로 옮겼다. vln_ce 포맷을 mesh 좌표로 푸는 코드라
+`r_b`(로봇 반경)를 안 받고, 따라서 augmentation이 아니라 데이터 생성 쪽에 속한다.
+이전에는 `gs_vlnpe/05_export_vlnce.py`가 `3dloader_vlnce`를 sys.path로 끌어다 써서 양방향 의존이었다.
 """
 
 import gzip
@@ -18,7 +22,7 @@ from pathlib import Path
 import numpy as np
 from scipy.optimize import minimize
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'gs_vlnpe'))  # 기존 코드 import
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # 같은 폴더의 geometry_utils
 from geometry_utils import compute_mesh_distance, unproject_to_world_frame  # noqa: E402
 
 # dataloader와 동일 하드코딩 K (internvla_n1_lerobot_dataset.py:1026, 640x480 native)

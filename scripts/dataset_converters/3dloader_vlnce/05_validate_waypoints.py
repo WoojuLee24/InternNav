@@ -33,7 +33,7 @@ from esdf_utils import (  # noqa: E402
 from viz_utils import floorplan_canvas, save_gallery  # noqa: E402
 from embodiment_augment import (DETOUR_THRESH_M, H_NAV_HABITAT_M, H_OBS_HABITAT_M,  # noqa: E402
                                 PLAN_MARGIN_M, EmbodimentAugmenter, densify)
-from pixel_goal_utils import rig_height_m  # noqa: E402
+from vlnce_rig import rig_height_m  # noqa: E402
 _m_verify_pose_mesh = importlib.import_module('00_verify_pose_mesh')  # noqa: E402
 load_episode = _m_verify_pose_mesh.load_episode  # noqa: E402
 from waypoint_spine import LEG_TOL_M, build_spine  # noqa: E402

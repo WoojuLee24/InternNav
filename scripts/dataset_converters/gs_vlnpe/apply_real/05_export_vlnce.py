@@ -51,13 +51,12 @@ import numpy as np
 HERE = Path(__file__).resolve().parent          # .../gs_vlnpe/apply_real
 GS = HERE.parent                                 # .../gs_vlnpe
 REPO = GS.parents[2]
-_3D = REPO / 'scripts' / 'dataset_converters' / '3dloader_vlnce'
 # ⚠️ **순서가 중요하다 — `HERE`(apply_real)가 `GS`(gs_vlnpe)보다 앞이어야 한다.**
 # `camera_profiles.py`가 두 폴더에 각각 있고(원래 같은 사본), vln_ce rig 5종은
 # `apply_real/camera_profiles.py`에만 있다. gs_vlnpe 쪽이 먼저 잡히면
 # `KeyError: unknown camera profile: '125cm_30deg'`로 죽는다(실측).
 # `insert(0, ...)`는 **나중에 넣은 것이 앞**이므로 HERE를 마지막에 넣는다.
-for p in (str(_3D), str(GS), str(HERE)):
+for p in (str(GS), str(HERE)):
     if p not in sys.path:
         sys.path.insert(0, p)
 

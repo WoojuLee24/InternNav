@@ -86,13 +86,14 @@ augmenter를 짓기 전에, augmenter가 성립할 **전제**들을 값싸게 �
 ### 번호 없는 파일 = 라이브러리 (실행 순서 없음)
 | 파일 | 역할 |
 |---|---|
-| `vlnce_align.py` | GT `start_position`+`start_rotation` → `T_sf2mesh` (**해석적**, mesh 로드 불필요) |
+| `gs_vlnpe/vlnce_align.py` | GT `start_position`+`start_rotation` → `T_sf2mesh` (2026-10-11 이동) (**해석적**, mesh 로드 불필요) |
 | `embodiment_augment.py` | 핵심 클래스 `EmbodimentAugmenter` — leg 계획 ladder, `_path_ok` 4중 기각 |
 | `waypoint_spine.py` | 사람 주석 waypoint를 GT 프레임에 앵커 + 프레임 플래그 |
 | `corridor_utils.py` | GT 주변 회랑 마스크 + 이탈량 측정 |
 | `navmesh_grid.py` | 캐시된 navmesh → 우리 격자 esdf (하류 무수정용 `+r_b` 트릭) |
 | `recast_like.py` | 칸마다 바닥을 찾는 미니-recast 지도 (#04 후보 v2 — navmesh 없는 씬용 최선) |
-| `pixel_goal_utils.py` | pixel goal 투영·가시성·조정 |
+| `gs_vlnpe/vlnce_rig.py` | pixel goal 투영·가시성 (2026-10-11 이동) |
+| `goal_adjust.py` | `r_b` 충돌 시 goal 조정 (`pixel_goal_utils.py`의 aug 부분) |
 | `publish_artifact_report.py` | stage 시각화 → self-contained Artifact HTML (**매 단계 후 실행**) |
 
 **self-check** (씬·habitat 불필요, 총 47개 assert): `embodiment_augment.py` · `navmesh_grid.py` ·

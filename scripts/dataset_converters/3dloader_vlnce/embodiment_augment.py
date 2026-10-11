@@ -547,7 +547,7 @@ class EmbodimentAugmenter:
         세로는 제한하지 않는다: 룩다운 카메라는 **발밑 근거리가 이미지 아래로 빠지는데**(원본 GT도 31%),
         이는 데이터 고유 성질이고 로봇 자신의 발밑이라 문제되지 않는다. 막는 것은 **좌우**뿐이다.
         """
-        from pixel_goal_utils import intrinsics_for_rig
+        from vlnce_rig import intrinsics_for_rig
         fx, _fy, cx, _cy = intrinsics_for_rig(rig)
         occ = ctx['occ']; origin = ctx['origin']; cell = float(ctx['args'].cell_m)
         ny, nx = occ.shape[1], occ.shape[0]          # occupancy는 (Nx,Ny,Nz)
