@@ -35,7 +35,8 @@ from embodiment_augment import EmbodimentAugmenter, _p03  # noqa: E402
 from esdf_utils import (  # noqa: E402
     compute_esdf_2d, compute_scan_coverage_mask, derive_obstacle_2d, truncate_navigable,
 )
-from pixel_goal_utils import clearance_at, rig_height_m  # noqa: E402
+from vlnce_rig import rig_height_m  # noqa: E402
+from goal_adjust import clearance_at  # noqa: E402
 _m_verify_pose_mesh = importlib.import_module('00_verify_pose_mesh')  # noqa: E402
 load_episode = _m_verify_pose_mesh.load_episode  # noqa: E402
 

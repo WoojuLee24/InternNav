@@ -35,7 +35,7 @@ for _p in (str(_CONV / 'gs_vlnpe'), str(_CONV / '3dloader_vlnce'), str(_HERE)):
 from esdf_utils import derive_obstacle_2d, world_to_cell  # noqa: E402
 from geometry_utils import load_scene_mesh, save_jpg  # noqa: E402
 from viz_utils import save_gallery  # noqa: E402
-from pixel_goal_utils import rig_height_m  # noqa: E402
+from vlnce_rig import rig_height_m  # noqa: E402
 from vlnce_align import align_episode, build_rawdata_index  # noqa: E402
 from verify_pose_mesh import load_episode as load_episode_3d  # noqa: E402  (정합용 프레임 로더)
 

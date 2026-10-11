@@ -33,7 +33,7 @@ for _p in (str(_CONV / 'gs_vlnpe'), str(_CONV / '3dloader_vlnce'), str(_HERE)):
         sys.path.insert(0, _p)
 
 from esdf_utils import check_path_navigable, sample_esdf_at  # noqa: E402
-from pixel_goal_utils import (  # noqa: E402
+from vlnce_rig import (  # noqa: E402
     check_visible, goal_world_from_poses, intrinsics_for_rig, project_to_pixel, rig_height_m,
 )
 

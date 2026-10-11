@@ -10,7 +10,7 @@
 
 | 이름 | 정의 | 쓰는 곳 |
 |---|---|---|
-| **world** | 에피소드 시작 상대, **z-up**. `pose.<rig>`가 cam2world | pixel goal 투영(`pixel_goal_utils`) |
+| **world** | 에피소드 시작 상대, **z-up**. `pose.<rig>`가 cam2world | pixel goal 투영(`gs_vlnpe/vlnce_rig`) |
 | **robot** | X=전방, Y=좌, Z=상, 원점 = 카메라 **바로 아래 바닥** | GT path, 장애물 배치, 결과 |
 | **plan**  | `x_e = -Y_robot`, `y_e = -X_robot`, origin `(-R,-R)` | `esdf_utils`(A*/ESDF/spline) |
 
@@ -47,7 +47,7 @@ from esdf_utils import (  # noqa: E402  gs_vlnpe — 수정 금지, import만
     truncate_navigable,
     world_to_cell,
 )
-from pixel_goal_utils import IMG_H, IMG_W, intrinsics_for_rig, rig_height_m  # noqa: E402  3dloader
+from vlnce_rig import IMG_H, IMG_W, intrinsics_for_rig, rig_height_m  # noqa: E402  3dloader
 
 BEV_RANGE_M = 5.0         # 학습 기본값 (internvla_n1_bev_provider.py)
 BEV_SIZE = 224
@@ -319,7 +319,7 @@ def build_local_map(depth_m: np.ndarray, rig: str, pitch_deg: float,
         assert False, f'unreachable unknown={unknown!r}'
     esdf = compute_esdf_2d(obstacle, cell)
     # goal 조정용 ESDF: 통행 불가 셀(미관측)은 clearance 0으로 눌러 `adjust_goal`이 거기로 못 가게 한다.
-    # `pixel_goal_utils.adjust_goal`은 `clearance >= r_b`만 보므로, 마스킹을 esdf 쪽에 넣는 게
+    # `goal_adjust.adjust_goal`은 `clearance >= r_b`만 보므로, 마스킹을 esdf 쪽에 넣는 게
     # 그 함수를 수정하지 않고 통행성을 반영하는 유일한 방법이다.
     esdf_nav = (np.where(free, esdf, 0.0).astype(np.float32)
                 if unknown == 'nontraversable' else esdf)

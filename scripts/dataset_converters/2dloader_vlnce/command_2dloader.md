@@ -74,7 +74,7 @@
 ## 코드 정책
 
 - 신규 코드는 전부 이 폴더. `gs_vlnpe/`·`3dloader_vlnce/`·`internnav/`는 **import만** 하고 수정하지 않는다.
-- 재사용: `esdf_utils`(ESDF/A*/refine/thin/spline/feasibility), `pixel_goal_utils`(rig intrinsics·pixel goal
+- 재사용: `esdf_utils`(ESDF/A*/refine/thin/spline/feasibility), `gs_vlnpe/vlnce_rig`(rig intrinsics·pixel goal
   왕복·goal 조정), `viz_utils`(HTML 갤러리), `geometry_utils`(depth colormap/jpg),
   `depth_rgb_to_bev_torch.depth_to_bev_occ_ros2`(학습·평가와 **같은** BEV 함수),
   `vlnce_align`+`verify_pose_mesh`(W1의 3D 오라클 정합), `publish_artifact_report`(Artifact 발행).

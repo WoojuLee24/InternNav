@@ -29,10 +29,10 @@ from esdf_utils import compute_esdf_2d, derive_obstacle_2d  # noqa: E402
 from geometry_utils import save_jpg  # noqa: E402
 from viz_utils import floorplan_canvas, save_gallery  # noqa: E402
 from embodiment_augment import EmbodimentAugmenter  # noqa: E402
-from pixel_goal_utils import (  # noqa: E402
-    _heading_at_end, adjust_goal, check_visible, clearance_at, goal_world_from_poses,
-    project_to_pixel, rig_height_m,
+from vlnce_rig import (  # noqa: E402
+    check_visible, goal_world_from_poses, project_to_pixel, rig_height_m,
 )
+from goal_adjust import _heading_at_end, adjust_goal, clearance_at  # noqa: E402
 _m_validate_augment = importlib.import_module('06_validate_augment')  # noqa: E402
 RB_COLORS = _m_validate_augment.RB_COLORS  # noqa: E402
 chip = _m_validate_augment.chip  # noqa: E402

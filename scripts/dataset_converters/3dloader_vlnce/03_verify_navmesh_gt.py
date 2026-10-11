@@ -60,7 +60,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parents[0] / 'gs_vlnpe')); sys.path.insert(0, str(_HERE))
 from esdf_utils import resample_by_arclength  # noqa: E402
 from viz_utils import GT_COLOR, KNOT_COLOR, floorplan_canvas, save_gallery  # noqa: E402
-from pixel_goal_utils import rig_height_m  # noqa: E402
+from vlnce_rig import rig_height_m  # noqa: E402
 from vlnce_align import _rigid, build_rawdata_index, hmap_translation, hmap_yaw  # noqa: E402
 
 WP_COLOR, BAD_COLOR = (0, 220, 255), (255, 40, 40)

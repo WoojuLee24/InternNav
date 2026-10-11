@@ -69,7 +69,7 @@ from esdf_utils import compute_esdf_2d, compute_scan_coverage_mask, derive_obsta
 from esdf_utils import resample_by_arclength, truncate_navigable  # noqa: E402
 from viz_utils import GT_COLOR, OURS_COLOR, floorplan_canvas, save_gallery  # noqa: E402
 from corridor_utils import dist_to_path_field  # noqa: E402
-from pixel_goal_utils import rig_height_m  # noqa: E402
+from vlnce_rig import rig_height_m  # noqa: E402
 from vlnce_align import build_rawdata_index  # noqa: E402
 from waypoint_spine import habitat_to_mesh  # noqa: E402
 import recast_like  # noqa: E402

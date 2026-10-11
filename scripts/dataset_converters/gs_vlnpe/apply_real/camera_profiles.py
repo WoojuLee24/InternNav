@@ -97,21 +97,21 @@ D455_30M = CameraProfile(
 #
 #   - `pose.<rig>` 0행의 translation이 정확히 `(0, 0, H/100)` -> 높이가 이름 그대로다.
 #   - 이미지 640x480, rgb는 **jpg**, depth는 **uint16 PNG 밀리미터**(0 = 무효).
-#   - **hfov가 rig 높이마다 다르다** — `3dloader_vlnce/pixel_goal_utils.py:35`의 `_RIG_HFOV`.
+#   - **hfov가 rig 높이마다 다르다** — `gs_vlnpe/vlnce_rig.py`의 `_RIG_HFOV`.
 #     125 cm는 79.0도(Habitat 기본), 60 cm는 68.7도(그쪽에서 실측 피팅한 값).
 #
 # ⚠️ **주점(cx, cy)이 위 `square_pixel_k_from_hfov`와 다르다.** 기존 함수는 `width * 0.5`
 # (= 320.0)를 쓰는데 vln_ce는 `(width - 1) / 2`(= 319.5)다. 0.5 px 차이라 조용히 어긋나므로
 # 별도 빌더를 둔다 — 픽셀 goal 투영이 이 주점을 쓰기 때문에 섞으면 goal이 0.5 px씩 밀린다.
 VLNCE_W, VLNCE_H = 640, 480
-VLNCE_RIG_HFOV_DEG = {125: 79.0, 60: 68.7}   # pixel_goal_utils._RIG_HFOV 와 같은 값
+VLNCE_RIG_HFOV_DEG = {125: 79.0, 60: 68.7}   # vlnce_rig._RIG_HFOV 와 같은 값
 # 릴리스 depth는 uint16 밀리미터다. 학습은 224로 줄인 뒤 /1000 하고 5.0 m에서 자른다
 # (`internvla_n1_lerobot_dataset.py:1052-1065`). 저장은 그보다 넓게 둔다 — 릴리스 실측 최대 8.2 m.
 VLNCE_DEPTH_SCALE_M = 0.001
 
 
 def vlnce_k(hfov_deg: float) -> np.ndarray:
-    """vln_ce 주점 규약(`(W-1)/2`)을 쓰는 intrinsic. `pixel_goal_utils.intrinsics_for_rig`와 일치."""
+    """vln_ce 주점 규약(`(W-1)/2`)을 쓰는 intrinsic. `vlnce_rig.intrinsics_for_rig`와 일치."""
     fx = (VLNCE_W / 2.0) / np.tan(np.deg2rad(hfov_deg) * 0.5)
     return np.array([
         [fx, 0.0, (VLNCE_W - 1) / 2.0],

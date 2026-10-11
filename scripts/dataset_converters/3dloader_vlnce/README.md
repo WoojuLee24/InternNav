@@ -72,13 +72,14 @@ VLN-CE 학습 데이터의 정답 경로는 **지름 20 cm 작은 로봇** 하�
 | 파일 | 역할 |
 |---|---|
 | `embodiment_augment.py` | 핵심 클래스. 경로 생성 ladder + 라벨 유효성 4중 검사 |
-| `vlnce_align.py` | 에피소드를 집 좌표에 맞추는 변환 (**수식 하나로 계산**, mesh 로드 불필요) |
+| `gs_vlnpe/vlnce_align.py` | 에피소드를 집 좌표에 맞추는 변환 (**2026-10-11에 gs_vlnpe로 이동**) (**수식 하나로 계산**, mesh 로드 불필요) |
 | `waypoint_spine.py` | 사람이 찍은 중간지점을 프레임에 붙이고 구간을 나눔 |
 | `corridor_utils.py` | 원본 경로 주변 "우회 허용 범위" 만들기 + 이탈량 재기 |
 | `navmesh_grid.py` | habitat 지도를 우리 격자로 변환 (하류 코드 무수정) |
 | `recast_like.py` | **칸마다 바닥을 찾는** 미니-recast 지도 (#04 후보 v2 — s8 92.3%로 밴드 계열 최고 · GT 안전 · navmesh 없는 씬용) |
 | `habitat_render.py` | habitat에서 임의 pose depth 렌더 (렌더러 gap 측정용, offline 전용) |
-| `pixel_goal_utils.py` | 화면 목표점 투영·가시성·조정 |
+| `gs_vlnpe/vlnce_rig.py` | 화면 목표점 투영·가시성 — **2026-10-11에 gs_vlnpe로 이동** |
+| `goal_adjust.py` | `r_b` 때문에 못 쓰게 된 목표점 조정 (aug 전용) |
 | `publish_artifact_report.py` | 시각화 → 공유용 HTML **(매 단계 후 실행)** |
 
 ---

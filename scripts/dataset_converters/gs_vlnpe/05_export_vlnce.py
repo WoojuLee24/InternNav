@@ -16,7 +16,7 @@ vln_pe GT는 `observation.camera_position`이 **절대 world 좌표**라 그대�
 vln_ce GT의 `pose.<rig>`는 **에피소드 시작 기준 상대**다(학습이 상대좌표만 쓰기 때문).
 렌더하려면 mesh 절대좌표가 필요하다.
 
-`3dloader_vlnce/vlnce_align.py`가 이 변환을 이미 푼다 — 에피소드 depth를 start-frame 점구름으로
+`vlnce_align.py`가 이 변환을 이미 푼다 — 에피소드 depth를 start-frame 점구름으로
 쌓아 mesh에 **강체 정합**(yaw + 평행이동)한다. 실측 잔차 point-to-mesh median **0.0039 m**.
 새로 짜지 않고 `align_episode`를 그대로 쓴다.
 
@@ -49,8 +49,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
-_3D = REPO / 'scripts' / 'dataset_converters' / '3dloader_vlnce'
-for p in (str(HERE), str(HERE / 'apply_real'), str(_3D)):
+for p in (str(HERE), str(HERE / 'apply_real')):
     if p not in sys.path:
         sys.path.insert(0, p)
 

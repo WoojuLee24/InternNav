@@ -33,7 +33,7 @@ for _p in (str(_CONV / 'gs_vlnpe'), str(_CONV / '3dloader_vlnce'), str(_HERE)):
 
 from geometry_utils import colorize_depth, save_jpg  # noqa: E402
 from viz_utils import save_gallery  # noqa: E402
-from pixel_goal_utils import intrinsics_for_rig, rig_height_m  # noqa: E402
+from vlnce_rig import intrinsics_for_rig, rig_height_m  # noqa: E402
 
 from episode_io import IMG_H, IMG_W, load_episode, to_224_depth  # noqa: E402
 from local_map import (  # noqa: E402
