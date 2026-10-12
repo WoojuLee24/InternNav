@@ -105,6 +105,7 @@ from esdf_utils import (
     path_smoothness,
     sample_esdf_at,
     thin_waypoints,
+    thin_waypoints_safe,
     truncate_navigable,
     world_to_cell,
 )
@@ -205,6 +206,9 @@ def build_argparser() -> argparse.ArgumentParser:
                         help='--post_refine 최대 반복')
     parser.add_argument('--post_refine_margin', type=float, default=0.0,
                         help='--post_refine 이 목표로 할 여유를 r_b 위에 더 준다')
+    parser.add_argument('--thin_safe', action='store_true',
+                        help='솎기로 벽을 가로지르게 된 구간은 원본 waypoint를 되살린다 '
+                             '(기본 off = 종전 동작). 임계값은 --plan_r_b')
     parser.add_argument('--post_refine_turn_ratio', type=float, default=1.3,
                         help='--post_refine 이 허용할 회전량(deg/m) 악화 배수. 넘으면 그 라운드를 '
                              '버리고 멈춘다 — 충돌만 줄이고 지그재그가 되는 것을 막는다.')
@@ -275,8 +279,14 @@ def plan_episode(occupancy, origin, floor_z, h_b, start_xy, goal_xy, args) -> di
     wp_astar[0], wp_astar[-1] = sg[0], sg[1]
     wp_refined = REFINERS[args.refine_mode](wp_astar, esdf, origin, cell,
                                             args.refine_radius, fix_endpoints=True)
-    # r_b 제약은 솎기 전 wp_refined에 걸린다 — 솎기는 스무딩 곡선을 완만하게 만들기 위한 것이다.
-    wp_thinned = thin_waypoints(wp_refined, args.waypoint_spacing_m)
+    # 솎기는 스무딩 곡선을 완만하게 만들기 위한 것이다. 다만 호길이만 보고 고르면 모서리 점이
+    # 빠져 남은 두 점의 직선이 벽을 가로지른다(실측: 선분 여유 0.320 -> 0.050). --thin_safe 는
+    # 그 구간만 원본 점을 되살린다. 기본 off = 종전 동작 그대로.
+    if args.thin_safe:
+        wp_thinned = thin_waypoints_safe(wp_refined, args.waypoint_spacing_m, esdf, origin, cell,
+                                         min_clearance=args.plan_r_b)
+    else:
+        wp_thinned = thin_waypoints(wp_refined, args.waypoint_spacing_m)
     trajectory = SMOOTHERS[args.smooth](wp_thinned, args.smooth_step)
 
     # 논문(NavDP §3)은 여기서 끝난다 — refine 은 **waypoint** 의 여유만 보장하고, spline 이
