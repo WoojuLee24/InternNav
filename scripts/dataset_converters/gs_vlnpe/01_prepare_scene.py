@@ -41,9 +41,22 @@ mesh가 이미 정합돼 있고 `fixed.usd`도 65개 씬 전부에 존재한다.
   - `<log_dir>/01_prepare_scene/<scene>/report.html` — floorplan blink + mesh 표면거리 히스토그램
   - `<log_dir>/01_prepare_scene/<scene>/*.jpg` — floorplan/히스토그램 이미지
 
+[데이터셋 — `--dataset {vln_n1,vln_pe,vln_ce}`] (기본 `vln_n1`: 위 설명 그대로)
+vln_pe/vln_ce parquet에는 `action`·`observation.camera_extrinsic`·`observation.camera_intrinsic`
+컬럼이 **없다**(vln_pe는 camera_position+camera_orientation, vln_ce는 start 기준 상대좌표).
+그래서 그 둘은 parquet을 직접 읽지 않고 `dataset_utils.load_gt_episode`의 공통 계약
+(`poses_c2w`/`cam_xyz`/`h_b`/`pitch_deg`/`floor_z`/`k`)을 통해 같은 검증을 한다 — 02/03과 같은 방식.
+두 경로의 차이는 아래 둘뿐이고, 나머지(①②③④의 판정식·출력 스키마)는 같다:
+  - 검증 ④의 장애물 점군: `meta/pointcloud.ply`는 **vln_n1에만 있다**(실측 — vln_pe/vln_ce의
+    `meta/`에는 info.json/episodes*.jsonl/tasks.jsonl뿐). 02가 같은 이유로 ply 검사를 건너뛰므로
+    여기서도 같은 방식으로 건너뛰고 궤적+카메라 높이만으로 판정한다.
+  - 검증 ③의 허용치: `ALIGN_TOL_M` 주석 참고 (depth의 출처가 달라 같은 잣대를 쓸 수 없다).
+
 [실행 예시]
     /workspace/isaaclab/_isaac_sim/python.sh scripts/dataset_converters/gs_vlnpe/01_prepare_scene.py \\
         --scene 17DRP5sb8fy
+    ... --dataset vln_pe --scene qoiz87JEwZ2          # vln_n1 GT가 없는 씬
+    ... --dataset vln_ce --rig 125cm_30deg --scene 17DRP5sb8fy
 
 [negative test] (게이트가 항상 통과만 내지 않음을 보장)
     ... --scene 17DRP5sb8fy --pose_convention cam2world      # -> passed=false, exit != 0
@@ -74,12 +87,12 @@ from geometry_utils import (  # noqa: E402
     unproject_to_world_frame,
 )
 from viz_utils import blink_widget_html, reference_button_html, save_gallery  # noqa: E402
+import dataset_utils  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 1. 상수
 # ---------------------------------------------------------------------------
 
-DEFAULT_DATA_ROOT = 'data/InternData-N1-v0.5-mini/vln_n1/traj_data/matterport3d_d435i'
 DEFAULT_MESH_ROOT = 'data/scene_data/mp3d_n1'
 DEFAULT_USD_ROOT = 'data/scene_data/mp3d_pe'
 DEFAULT_SCENE = '17DRP5sb8fy'
@@ -88,6 +101,18 @@ DEFAULT_LOG_DIR = 'logs/gs-vlnpe'
 SCRIPT_NAME = '01_prepare_scene'
 
 BOUNDS_ATOL_M = 1e-3          # obj bounds ↔ USD bounds 허용 오차
+
+# 검증 ③(mesh 표면거리) 허용치. **데이터셋마다 다르다 — depth의 출처가 다르기 때문이다.**
+#   vln_n1 : depth가 이 obj mesh를 그대로 렌더한 것이라 맞으면 0.03 mm로 붙는다 -> 1 mm 그대로.
+#   vln_ce : habitat이 같은 mesh를 렌더한다. 실측(17DRP5sb8fy·2n8kARJN3HM, ep0/1, rig 125cm_30deg)
+#            median 0.0004 m -> vln_n1과 같은 1 mm를 쓴다.
+#   vln_pe : depth는 **Isaac이 USD를 렌더**한 것이고 pose도 시뮬이 보고한 값이라 obj mesh와 cm
+#            단위로 어긋난다. 실측(17DRP5sb8fy/1LXtFkjw3qL/2n8kARJN3HM/5q7pvUzZiYa/GdvgFV5R1Z5,
+#            에피소드 2개씩) 올바른 해석 0.030~0.069 m, 틀린 pose 해석 0.24~18 m. 0.15 m면 둘을
+#            확실히 가른다(게이트의 목적은 "같은 world 프레임인가"지 렌더러 일치가 아니다).
+ALIGN_TOL_M = {'vln_n1': MESH_ANCHOR_TOL_M, 'vln_pe': 0.15, 'vln_ce': MESH_ANCHOR_TOL_M}
+# 프레임당 표면거리 샘플 수 — `check_against_scene_mesh`의 n_points 기본값과 같게 맞춘다.
+ALIGN_SAMPLE_POINTS = 400
 
 # 스케일 sanity 범위. **좁게 잡으면 안 된다** — Matterport 씬에는 다층 건물이 섞여 있다
 # (예: s8pcmisQ38h는 Z extent 12.24 m). 처음엔 "실내 층고 2~4m"로 잡았다가 다층 씬을 오판했다.
@@ -107,7 +132,13 @@ FLOORPLAN_MIN_PX = 700        # 작은 씬도 리포트에서 보이도록 최�
 
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--data_root', default=DEFAULT_DATA_ROOT, help='vln_n1 traj_data 루트 (씬 폴더들의 부모)')
+    parser.add_argument('--dataset', default='vln_n1', choices=['vln_n1', 'vln_pe', 'vln_ce'],
+                        help='GT 궤적을 읽을 데이터셋. 기본값 vln_n1은 종전 동작 그대로다. vln_pe/vln_ce는 '
+                             'action/camera_extrinsic 컬럼이 없어 dataset_utils의 공통 계약으로 위임한다')
+    parser.add_argument('--data_root', default=None,
+                        help='traj_data 루트 (씬 폴더들의 부모). 생략 시 --dataset의 기본 경로')
+    parser.add_argument('--rig', default=None,
+                        help='--dataset vln_ce 전용 카메라 rig (생략 시 125cm_30deg). 02/03과 같은 이름')
     parser.add_argument('--mesh_root', default=DEFAULT_MESH_ROOT, help='obj mesh 루트 (<mesh_root>/<scene>/matterport_mesh/*/*.obj)')
     parser.add_argument('--usd_root', default=DEFAULT_USD_ROOT,
                         help='기존 USD 루트. 생성하지 않고 존재·bounds 확인만 한다 '
@@ -197,12 +228,105 @@ def count_episodes(data_root: str, scene: str) -> int:
     return len(sorted((Path(data_root) / scene / 'data' / 'chunk-000').glob('episode_*.parquet')))
 
 
+def resolve_rig(args) -> str:
+    """--dataset vln_ce 의 카메라 rig. 02/03 과 같은 기본값을 쓴다."""
+    import vlnce_gt
+    return args.rig or vlnce_gt.DEFAULT_RIG
+
+
+def load_gt_episode(args, episode: int) -> dict:
+    """`dataset_utils.load_gt_episode` 호출 래퍼 — 02 의 같은 이름 래퍼와 같은 패턴."""
+    kw = {'rig': args.rig} if args.rig else {}
+    return dataset_utils.load_gt_episode(args.data_root, args.scene, episode, args.dataset, **kw)
+
+
+def load_depth_frame(args, episode: int, frame_idx: int):
+    """(depth_m[NaN at invalid], valid_mask). 데이터셋마다 depth 저장 형식이 다르다.
+
+    vln_ce 만 depth 디렉터리가 rig 접미사를 달고 있어(`observation.images.depth.<rig>`)
+    `dataset_utils` 의 로더로는 못 읽는다 — 이미 있는 `vlnce_pixel_goal.depth_loader` 를 쓴다.
+    """
+    videos_dir = Path(args.data_root) / args.scene / 'videos' / 'chunk-000'
+    if args.dataset == 'vln_n1':
+        return load_depth_frame_m(videos_dir / 'observation.images.depth',
+                                  episode, frame_idx, args.max_depth_m)
+    elif args.dataset == 'vln_pe':
+        return dataset_utils.load_depth_frame_m(videos_dir / 'observation.images.depth',
+                                                episode, frame_idx, args.max_depth_m, 'vln_pe')
+    elif args.dataset == 'vln_ce':
+        import vlnce_pixel_goal
+        raw = vlnce_pixel_goal.depth_loader(Path(args.data_root) / args.scene,
+                                            episode, resolve_rig(args))(frame_idx)
+        if raw is None:
+            raise FileNotFoundError(f'vln_ce depth 없음: scene={args.scene} ep={episode} frame={frame_idx}')
+        valid = (raw > 0.0) & (raw <= args.max_depth_m)
+        return np.where(valid, raw, np.nan), valid
+    else:
+        assert False, f'unreachable dataset={args.dataset!r}'
+
+
+def run_alignment_gate_other(args, n_available: int) -> dict:
+    """vln_pe/vln_ce용 검증 ③ — `check_against_scene_mesh`를 쓸 수 없어 같은 측정을 다시 한다.
+
+    그 함수는 parquet의 `action`/`observation.camera_intrinsic`을 **직접** 읽는데 두 데이터셋엔
+    그 컬럼이 없다. 그래서 `dataset_utils`의 공통 계약(`poses_c2w`는 이미 OpenCV c2w이므로
+    `action_to_c2w`를 다시 태우지 않도록 convention은 passthrough인 'cam2world')으로 같은 일을
+    한다 — 반환 스키마·판정식은 `run_alignment_gate`와 같고 허용치만 `ALIGN_TOL_M`로 갈린다.
+    """
+    assert args.dataset in ('vln_pe', 'vln_ce'), f'unreachable dataset={args.dataset!r}'
+    import trimesh   # 01 전용 — 모듈 상단 import 금지(trimesh 없는 환경에서 02/03이 못 돈다)
+
+    mesh = trimesh.load(str(find_scene_mesh(args.mesh_root, args.scene)), process=False, force='mesh')
+    proximity = trimesh.proximity.ProximityQuery(mesh)
+    tol = ALIGN_TOL_M[args.dataset]
+
+    episodes = list(range(min(args.num_episodes, n_available)))
+    per_episode, medians = {}, []
+    for ep in episodes:
+        gt = load_gt_episode(args, ep)
+        poses = gt['poses_c2w']
+        frames = np.unique(np.linspace(0, len(poses) - 1, args.frames_per_episode).astype(int)).tolist()
+        per_frame, all_d = {}, []
+        for frame_idx in frames:
+            depth_m, valid = load_depth_frame(args, ep, int(frame_idx))
+            world_pts = unproject_to_world_frame(depth_m, gt['k'], poses[frame_idx], 'cam2world')[valid]
+            if len(world_pts) == 0:
+                continue   # 전 픽셀이 invalid인 프레임(클립/결측) — 측정할 게 없다
+            sel = np.random.RandomState(0).choice(len(world_pts),
+                                                  min(ALIGN_SAMPLE_POINTS, len(world_pts)), replace=False)
+            d = np.abs(proximity.signed_distance(world_pts[sel]))
+            per_frame[int(frame_idx)] = float(np.median(d))
+            all_d.append(d)
+        assert all_d, f'에피소드 {ep}에 유효 depth가 있는 프레임이 하나도 없다'
+        all_d = np.concatenate(all_d)
+        med, p90 = float(np.median(all_d)), float(np.percentile(all_d, 90))
+        per_episode[ep] = {'median_m': med, 'p90_m': p90, 'passed': bool(med < tol), 'per_frame': per_frame}
+        medians.append(med)
+        print(f'    episode {ep:>3}: median={med:.6f} m  p90={p90:.6f} m  '
+              f'{"OK" if med < tol else "FAIL"}')
+
+    worst = float(max(medians)) if medians else float('nan')
+    return {
+        'pose_convention': 'cam2world',
+        'episodes_tested': episodes,
+        'frames_per_episode': args.frames_per_episode,
+        'median_m': float(np.median(medians)) if medians else float('nan'),
+        'worst_episode_median_m': worst,
+        'tolerance_m': tol,
+        'per_episode': per_episode,
+        'passed': bool(medians) and worst < tol,
+    }
+
+
 def run_alignment_gate(args, n_available: int) -> dict:
     """에피소드마다 `check_against_scene_mesh`를 호출해 결과를 합친다.
 
     표면거리 median이 `MESH_ANCHOR_TOL_M`(1mm) 미만이면 통과. photometric error 같은 상대
     지표로는 좌표 규약을 확정할 수 없어서(축 오류가 상쇄됨) 절대 앵커인 mesh로 재는 것이다.
     """
+    if args.dataset != 'vln_n1':
+        return run_alignment_gate_other(args, n_available)   # 아래 vln_n1 경로는 손대지 않는다
+
     episodes = list(range(min(args.num_episodes, n_available)))
     per_episode, medians = {}, []
     for ep in episodes:
@@ -284,6 +408,84 @@ def check_gt_extent(obstacle: np.ndarray, cam_xyz: np.ndarray, mesh_bounds: np.n
         'pad_m': pad_m,
         'passed': bool(obstacle_frac > 0.99 and traj_frac > 0.99 and height_sane),
     }
+
+
+def check_gt_extent_no_ply(cam_xyz: np.ndarray, mesh_bounds: np.ndarray, floor_z: float,
+                           dataset: str, pad_m: float = 0.5) -> dict:
+    """vln_pe/vln_ce용 검증 ④ — `meta/pointcloud.ply`가 없어(실측) 장애물 항목을 뺀다.
+
+    02도 같은 이유로 ply 검사를 건너뛴다(`02_build_freemap_esdf.py`의 ply_overlap 분기).
+    판정은 궤적이 bounds 안인가 + 카메라 높이가 합리적인가 둘로만 한다.
+    """
+    res = check_gt_extent(np.zeros((0, 3)), cam_xyz, mesh_bounds, floor_z, pad_m)
+    res['obstacle_inside_frac'] = None
+    res['obstacle_skipped'] = f'{dataset} has no meta/pointcloud.ply'
+    res['passed'] = bool(res['trajectory_inside_frac'] > 0.99 and res['camera_height_sane'])
+    return res
+
+
+def gather_gt_reference_other(args) -> dict:
+    """vln_pe/vln_ce용 GT 번들 — `dataset_utils.load_gt_episode`의 공통 계약에서 바로 채운다."""
+    assert args.dataset in ('vln_pe', 'vln_ce'), f'unreachable dataset={args.dataset!r}'
+    gt = load_gt_episode(args, 0)
+    source = f'dataset_utils.load_gt_episode(dataset={args.dataset!r})'
+    return {
+        # ply가 없으므로 빈 배열. 검증은 check_gt_extent_no_ply가, 시각화 state ②는 빈 화면이 된다.
+        'obstacle': np.zeros((0, 3)),
+        'cam_xyz': gt['cam_xyz'],
+        'k': gt['k'],
+        'h_b': gt['h_b'],
+        'pitch_down_deg': gt['pitch_deg'],
+        'floor_z': gt['floor_z'],
+        'pose_convention': 'cam2world',   # poses_c2w가 이미 OpenCV c2w (passthrough)
+        'depth_pose': gt['poses_c2w'][0],
+        'robot_params_note': source,
+        'robot_params': {
+            'h_b_m': gt['h_b'], 'pitch_down_deg': gt['pitch_deg'], 'episode': 0,
+            'source': source,
+            'note': 'camera_extrinsic 컬럼이 없어 로봇 기하에서 유도한 값이다 — vln_pe는 '
+                    'robot_position + VLNPE_TORSO_STANDING_M, vln_ce는 rig 높이 상수. '
+                    '근거/한계는 dataset_utils.load_gt_episode 주석 참고.',
+        },
+    }
+
+
+def gather_gt_reference(args) -> dict:
+    """검증 ④·시각화가 쓰는 GT 번들. 기본(vln_n1) 경로는 종전 계산 그대로다."""
+    if args.dataset != 'vln_n1':
+        return gather_gt_reference_other(args)   # 아래 vln_n1 경로는 손대지 않는다
+
+    obstacle, action, k, extrinsic = load_gt_reference(args.data_root, args.scene, 0)
+    cam_xyz = np.stack([action_to_c2w(a, args.pose_convention)[:3, 3] for a in action])
+    h_b, pitch_down_deg = decompose_camera_extrinsic(extrinsic)
+    floor_z = floor_z_from_extrinsic(float(np.median(cam_xyz[:, 2])), h_b)
+    return {
+        'obstacle': obstacle,
+        'cam_xyz': cam_xyz,
+        'k': k,
+        'h_b': h_b,
+        'pitch_down_deg': pitch_down_deg,
+        'floor_z': floor_z,
+        'pose_convention': args.pose_convention,
+        'depth_pose': action[0],
+        'robot_params_note': 'camera_extrinsic에서 직접',
+        'robot_params': {
+            'h_b_m': h_b, 'pitch_down_deg': pitch_down_deg, 'episode': 0,
+            'source': 'observation.camera_extrinsic (decompose_camera_extrinsic)',
+            'note': 'h_b·pitch는 에피소드마다 다르다 — 여기 값은 episode 0 기준. '
+                    '전체 분포는 target_schema.json의 robot_params 참고.',
+        },
+    }
+
+
+def run_gt_extent_check(args, gt: dict, mesh_bounds: np.ndarray) -> dict:
+    """검증 ④ 디스패치. ply 유무가 판정식을 가른다 — 02의 ply_overlap 분기와 같은 구조."""
+    if args.dataset == 'vln_n1':
+        return check_gt_extent(gt['obstacle'], gt['cam_xyz'], mesh_bounds, gt['floor_z'])
+    elif args.dataset in ('vln_pe', 'vln_ce'):
+        return check_gt_extent_no_ply(gt['cam_xyz'], mesh_bounds, gt['floor_z'], args.dataset)
+    else:
+        assert False, f'unreachable dataset={args.dataset!r}'
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +584,8 @@ def build_summary_html(scene: str, checks: dict, meta: dict) -> str:
         f'<tr><td>episode {ep}</td><td>{v["median_m"]:.6f}</td><td>{v["p90_m"]:.6f}</td>'
         f'<td>{pill(v["passed"], "OK", "FAIL")}</td></tr>'
         for ep, v in a['per_episode'].items())
+    obstacle_txt = ('건너뜀(ply 없음)' if g['obstacle_inside_frac'] is None
+                    else f'{g["obstacle_inside_frac"]*100:.1f}%')
     bounds_rows = ''.join(
         f'<tr><td>{lbl}</td><td>{v[0]:.3f} ~ {v2[0]:.3f}</td><td>{v[1]:.3f} ~ {v2[1]:.3f}</td>'
         f'<td>{v[2]:.3f} ~ {v2[2]:.3f}</td></tr>'
@@ -408,7 +612,7 @@ def build_summary_html(scene: str, checks: dict, meta: dict) -> str:
   <tr><td>③ <b>mesh 표면거리 &lt; {a["tolerance_m"]} m</b></td><td>{pill(a["passed"])}</td>
       <td>median {a["median_m"]:.6f} m / worst {a["worst_episode_median_m"]:.6f} m</td></tr>
   <tr><td>④ GT가 mesh bounds 안 + 카메라 높이</td><td>{pill(g["passed"])}</td>
-      <td>장애물 {g["obstacle_inside_frac"]*100:.1f}% · 궤적 {g["trajectory_inside_frac"]*100:.1f}% ·
+      <td>장애물 {obstacle_txt} · 궤적 {g["trajectory_inside_frac"]*100:.1f}% ·
           카메라 z={g["gt_camera_z"]:.3f} m, 바닥 z={g["floor_z_under_camera"]:.3f} m (= cam_z − h_b)
           → 높이 {g["gt_camera_height_m"]:.3f} m</td></tr>
 </table>
@@ -423,7 +627,9 @@ def build_summary_html(scene: str, checks: dict, meta: dict) -> str:
 
 def main() -> int:
     args = build_argparser().parse_args()
-    print(f'[{SCRIPT_NAME}] scene={args.scene} convention={args.pose_convention}')
+    if args.data_root is None:
+        args.data_root = dataset_utils.default_data_root(args.dataset)
+    print(f'[{SCRIPT_NAME}] scene={args.scene} dataset={args.dataset} convention={args.pose_convention}')
 
     n_eps = count_episodes(args.data_root, args.scene)
     if n_eps == 0:
@@ -453,13 +659,12 @@ def main() -> int:
     alignment = run_alignment_gate(args, n_eps)
 
     # --- 검증 ④ ---
-    obstacle, action, k, extrinsic = load_gt_reference(args.data_root, args.scene, 0)
-    cam_xyz = np.stack([action_to_c2w(a, args.pose_convention)[:3, 3] for a in action])
-    h_b, pitch_down_deg = decompose_camera_extrinsic(extrinsic)
-    floor_z = floor_z_from_extrinsic(float(np.median(cam_xyz[:, 2])), h_b)
-    gt_extent = check_gt_extent(obstacle, cam_xyz, mesh_bounds, floor_z)
+    gt = gather_gt_reference(args)
+    obstacle, cam_xyz, k = gt['obstacle'], gt['cam_xyz'], gt['k']
+    h_b, pitch_down_deg, floor_z = gt['h_b'], gt['pitch_down_deg'], gt['floor_z']
+    gt_extent = run_gt_extent_check(args, gt, mesh_bounds)
     print(f'  robot: h_b={h_b:.4f} m  pitch_down={pitch_down_deg:.2f} deg  '
-          f'floor_z={floor_z:+.4f} m  (camera_extrinsic에서 직접)')
+          f'floor_z={floor_z:+.4f} m  ({gt["robot_params_note"]})')
 
     passed = bool(bounds_check['bounds_match'] and bounds_check['scale_sane']
                   and bounds_check['usd_up_axis_z'] and alignment['passed'] and gt_extent['passed'])
@@ -483,14 +688,9 @@ def main() -> int:
         },
         'floor_z': gt_extent['floor_z_under_camera'],
         'gt_camera_z': gt_extent['gt_camera_z'],
-        'gt_robot_params': {
-            'h_b_m': h_b, 'pitch_down_deg': pitch_down_deg, 'episode': 0,
-            'source': 'observation.camera_extrinsic (decompose_camera_extrinsic)',
-            'note': 'h_b·pitch는 에피소드마다 다르다 — 여기 값은 episode 0 기준. '
-                    '전체 분포는 target_schema.json의 robot_params 참고.',
-        },
+        'gt_robot_params': gt['robot_params'],
         'gt_camera_height_m': gt_extent['gt_camera_height_m'],
-        'pose_convention': args.pose_convention,
+        'pose_convention': gt['pose_convention'],
         'frame_alignment': alignment,
         'gt_extent_check': gt_extent,
         'bounds_check': bounds_check,
@@ -498,6 +698,14 @@ def main() -> int:
         'note': 'mesh 정규화/USD 생성은 하지 않는다 — 이미 Z-up·1.0=1m·GT와 동일 원점이고 USD도 존재한다. '
                 '이 파일은 02(bounds/mesh_path)·03(floor_z)·04(usd_path/카메라 높이)가 읽는다.',
     }
+    # 기본(vln_n1) 산출물의 바이트 동일성을 지키려고 기본 경로에서는 키를 추가하지 않는다.
+    if args.dataset != 'vln_n1':
+        meta['dataset'] = args.dataset
+        meta['data_root'] = args.data_root
+        meta['align_tolerance_m'] = ALIGN_TOL_M[args.dataset]
+        if args.dataset == 'vln_ce':
+            meta['rig'] = resolve_rig(args)
+
     meta_path = Path(args.out_dir) / 'scene_meta' / f'{args.scene}.json'
     meta_path.parent.mkdir(parents=True, exist_ok=True)
     with open(meta_path, 'w') as f:
@@ -505,11 +713,11 @@ def main() -> int:
     print(f'  scene_meta -> {meta_path}')
 
     # --- 시각화 ---
-    log_dir = Path(args.log_dir) / SCRIPT_NAME / args.scene
+    # 02/03 과 같은 규칙으로 로그 경로에 데이터셋 태그를 붙인다(vln_n1 은 '' 라 기존 경로 그대로).
+    log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}'
     grid = build_floorplan_grid(mesh_bounds)
-    depth_dir = Path(args.data_root) / args.scene / 'videos' / 'chunk-000' / 'observation.images.depth'
-    depth_m, valid = load_depth_frame_m(depth_dir, 0, 0, args.max_depth_m)
-    depth_world = unproject_to_world_frame(depth_m, k, action[0], args.pose_convention)[valid]
+    depth_m, valid = load_depth_frame(args, 0, 0)
+    depth_world = unproject_to_world_frame(depth_m, k, gt['depth_pose'], gt['pose_convention'])[valid]
 
     states = render_floorplan_states(mesh, grid, obstacle, cam_xyz, depth_world, log_dir)
     all_dists = np.concatenate([np.array(list(v['per_frame'].values()))
