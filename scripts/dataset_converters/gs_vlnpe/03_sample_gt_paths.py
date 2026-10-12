@@ -77,7 +77,8 @@ import pyarrow.parquet as pq
 from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from esdf_utils import (  # noqa: E402
+from esdf_utils import (
+    repair_by_insertion,  # noqa: E402
     ASTAR_CELL_M,
     DOWNSAMPLE_FACTOR,
     DOWNSAMPLE_MODES,
@@ -197,6 +198,16 @@ def build_argparser() -> argparse.ArgumentParser:
                         help='스무딩 전 waypoint를 솎아낼 호길이 간격. A* 전점을 통과시키면(0) GT보다 '
                              '3배 많이 회전한다 — 0.8에서 GT 스무드니스와 일치. 0이면 솎지 않는다.')
     parser.add_argument('--smooth_step', type=float, default=0.05)
+    parser.add_argument('--post_refine', action='store_true',
+                        help='스무딩 후 r_b 를 위반하는 구간에 안전한 waypoint 를 끼워 넣고 다시 '
+                             '스무딩한다. **논문(NavDP §3)에 없는 단계** — 기본 off 면 종전 동작.')
+    parser.add_argument('--post_refine_rounds', type=int, default=5,
+                        help='--post_refine 최대 반복')
+    parser.add_argument('--post_refine_margin', type=float, default=0.0,
+                        help='--post_refine 이 목표로 할 여유를 r_b 위에 더 준다')
+    parser.add_argument('--post_refine_turn_ratio', type=float, default=1.3,
+                        help='--post_refine 이 허용할 회전량(deg/m) 악화 배수. 넘으면 그 라운드를 '
+                             '버리고 멈춘다 — 충돌만 줄이고 지그재그가 되는 것을 막는다.')
     parser.add_argument('--data_root', default=None, help='생략 시 --dataset의 기본 경로')
     parser.add_argument('--rig', default=None,
                         help="--dataset vln_ce 전용 카메라 rig. 경로를 가르는 것은 높이뿐이다 "
@@ -268,6 +279,20 @@ def plan_episode(occupancy, origin, floor_z, h_b, start_xy, goal_xy, args) -> di
     wp_thinned = thin_waypoints(wp_refined, args.waypoint_spacing_m)
     trajectory = SMOOTHERS[args.smooth](wp_thinned, args.smooth_step)
 
+    # 논문(NavDP §3)은 여기서 끝난다 — refine 은 **waypoint** 의 여유만 보장하고, spline 이
+    # waypoint **사이**에서 부풀어 벽에 닿는 것은 다루지 않는다. --post_refine 은 그 구간에
+    # 안전한 waypoint 를 끼워 넣고 다시 스무딩한다(궤적은 여전히 spline 이다).
+    # 기본 off = 논문 그대로.
+    post_info = None
+    if args.post_refine:
+        wp_thinned, trajectory, post_info = repair_by_insertion(
+            wp_thinned, esdf, origin, cell, args.r_b,
+            SMOOTHERS[args.smooth], args.smooth_step,
+            refine_radius=args.refine_radius,
+            max_rounds=args.post_refine_rounds,
+            margin_m=args.post_refine_margin,
+            max_turn_ratio=args.post_refine_turn_ratio)
+
     result.update({
         'status': 'ok',
         # 아래 3개는 논문 5단계 역검증(④ 비용갭)과 ⑦ 위상에 필요하다. JSON에는 안 나간다.
@@ -275,6 +300,7 @@ def plan_episode(occupancy, origin, floor_z, h_b, start_xy, goal_xy, args) -> di
         'waypoints_astar': wp_astar,
         'waypoints_refined': wp_refined,
         'waypoints_thinned': wp_thinned,
+        'post_refine': post_info,
         'trajectory': trajectory,
         'check_refined': check_path_navigable(wp_refined, esdf, origin, cell, args.plan_r_b),
         'check_trajectory': check_path_navigable(trajectory, esdf, origin, cell, args.r_b),
@@ -757,6 +783,7 @@ def main_random(args) -> int:
             'waypoints_astar': e['planned']['waypoints_astar'].tolist(),
             'waypoints_refined': e['planned']['waypoints_refined'].tolist(),
             'waypoints_thinned': e['planned']['waypoints_thinned'].tolist(),
+            'post_refine': e['planned'].get('post_refine'),
             'trajectory': e['planned']['trajectory'].tolist(),
             'path_length_m': e['planned']['check_trajectory']['length_m'],
             'straight_dist_m': e['straight_m'], 'len_ratio': e['len_ratio'],
@@ -955,6 +982,7 @@ def main() -> int:
             'waypoints_astar': e['planned']['waypoints_astar'].tolist(),
             'waypoints_refined': e['planned']['waypoints_refined'].tolist(),
             'waypoints_thinned': e['planned']['waypoints_thinned'].tolist(),
+            'post_refine': e['planned'].get('post_refine'),
             'trajectory': e['planned']['trajectory'].tolist(),
             'path_length_m': e['planned']['check_trajectory']['length_m'],
             'check_refined': e['planned']['check_refined'],
