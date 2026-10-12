@@ -164,7 +164,12 @@ def build_argparser() -> argparse.ArgumentParser:
                              "'legacy'=2026-09-09까지 쓴 설정, "
                              "'reproduce_v1'=현재 baseline. "
                              '생략하면 아래 개별 기본값을 그대로 쓴다(종전 동작).')
-    parser.add_argument('--r_b', type=float, default=ROBOT_RADIUS_M)
+    parser.add_argument('--r_b', type=float, default=ROBOT_RADIUS_M,
+                        help='로봇 실제 반경 — **궤적 검사** 기준')
+    parser.add_argument('--plan_r_b', type=float, default=None,
+                        help='**계획**에 쓸 여유 반경(A* 통행 격자 + refine 목표). 생략 시 --r_b 와 같다'
+                             '(종전 동작). r_b 보다 크게 주면 스무딩이 깎아먹는 여유를 미리 흡수해 '
+                             '궤적 충돌이 줄지만, 좁은 통로가 막혀 생성 개수가 조금 줄어든다.')
     parser.add_argument('--h_nav_ratio', type=float, default=None,
                         help='주면 h_nav = ratio * h_b 로 쓴다(--h_nav 무시). 논문의 "h_nav는 로봇 키에 '
                              '의존" 서술 대응 — 고정 0.10과 재현 정확도가 같아 기본은 고정값이다.')
@@ -232,7 +237,7 @@ def plan_episode(occupancy, origin, floor_z, h_b, start_xy, goal_xy, args) -> di
     esdf = compute_esdf_2d(obstacle, cell)
     # truncate_navigable만으로는 "장애물 없음"과 "mesh가 아예 없는 스캔 밖 허공"을 구분 못 한다 —
     # coverage mask로 후자를 걷어낸다(무작위 start/goal이 건물 밖으로 새는 것을 여기서 막는다).
-    navigable = truncate_navigable(esdf, args.r_b) & compute_scan_coverage_mask(occupancy)
+    navigable = truncate_navigable(esdf, args.plan_r_b) & compute_scan_coverage_mask(occupancy)
     nav_coarse = downsample_navigable(navigable, args.downsample_factor, args.downsample_mode)
 
     coarse_cell = cell * args.downsample_factor
@@ -271,7 +276,7 @@ def plan_episode(occupancy, origin, floor_z, h_b, start_xy, goal_xy, args) -> di
         'waypoints_refined': wp_refined,
         'waypoints_thinned': wp_thinned,
         'trajectory': trajectory,
-        'check_refined': check_path_navigable(wp_refined, esdf, origin, cell, args.r_b),
+        'check_refined': check_path_navigable(wp_refined, esdf, origin, cell, args.plan_r_b),
         'check_trajectory': check_path_navigable(trajectory, esdf, origin, cell, args.r_b),
         'clearance_astar_median': float(np.median(sample_esdf_at(esdf, wp_astar, origin, cell))),
     })
@@ -293,7 +298,7 @@ def sample_random_start_goal(occupancy, origin, floor_z, h_b, args, rng,
     esdf = compute_esdf_2d(obstacle, cell)
     # plan_episode와 같은 이유로 coverage mask를 걸어야 한다 — 여기서 안 걸면 애초에 건물 밖 허공을
     # start/goal로 뽑아버려서, plan_episode에 넘어간 뒤에야 (다른 이유로) 걸러지길 바라는 셈이 된다.
-    navigable = truncate_navigable(esdf, args.r_b) & compute_scan_coverage_mask(occupancy)
+    navigable = truncate_navigable(esdf, args.plan_r_b) & compute_scan_coverage_mask(occupancy)
     nav_coarse = downsample_navigable(navigable, args.downsample_factor, args.downsample_mode)
     coarse_cell = cell * args.downsample_factor
 
@@ -493,7 +498,7 @@ def build_summary_random(args, stats, episodes) -> str:
 버림) — nav_coarse의 낙관적 다운샘플 때문에 무작위 start/goal이 GT보다 훨씬 자주 병목을 지나가서다.</p>
 <table class="table">
   <tr><th>검증</th><th>결과</th><th>수치</th></tr>
-  <tr><td>① refined waypoint clearance ≥ r_b={args.r_b}</td><td>{pill(stats["refined_ok"])}</td>
+  <tr><td>① refined waypoint clearance ≥ plan_r_b={args.plan_r_b}</td><td>{pill(stats["refined_ok"])}</td>
       <td>최소 {stats["refined_min_m"]:.3f} m ({stats["n_refined_ok"]}/{stats["n_ok"]} 에피소드 통과)</td></tr>
   <tr><td>② <b>하드 충돌</b> — 궤적이 장애물을 관통하는가 (clearance = 0)</td>
       <td>{pill(stats["no_collision"])}</td>
@@ -548,7 +553,7 @@ def build_summary(args, stats, episodes) -> str:
 같은 start/goal이므로 경로가 갈리면 <b>루트 선택이 다른 것</b>이다.</p>
 <table class="table">
   <tr><th>검증</th><th>결과</th><th>수치</th></tr>
-  <tr><td>① refined waypoint clearance ≥ r_b={args.r_b}</td><td>{pill(stats["refined_ok"])}</td>
+  <tr><td>① refined waypoint clearance ≥ plan_r_b={args.plan_r_b}</td><td>{pill(stats["refined_ok"])}</td>
       <td>최소 {stats["refined_min_m"]:.3f} m ({stats["n_refined_ok"]}/{stats["n_ok"]} 에피소드 통과)</td></tr>
   <tr><td>② refine이 clearance를 올렸는가</td><td>{pill(stats["refine_improves"])}</td>
       <td>A* {stats["astar_clearance_median_m"]:.3f} → refined {stats["refined_clearance_median_m"]:.3f} m</td></tr>
@@ -636,6 +641,8 @@ def load_esdf(args):
     occupancy, origin = data['occupancy'], data['origin']
     floor_z = float(data['floor_z'])
     args.cell_m = float(data['voxel_size'])
+    if args.plan_r_b is None:
+        args.plan_r_b = args.r_b          # 생략 시 종전 동작과 완전히 같다
     args.downsample_factor = max(1, int(round(args.astar_cell_m / args.cell_m)))
     args.h_nav = float(data['h_nav'])
     if args.h_nav_ratio is None and 'h_nav_ratio' in data and float(data['h_nav_ratio']) > 0:
@@ -669,7 +676,7 @@ def main_random(args) -> int:
                 last_status = candidate['status']
                 continue
             # 하드 게이트(reproduce와 동일) — 위반이면 통계에 넣지 않고 재추출한다.
-            if candidate['check_refined']['points_min_m'] < args.r_b:
+            if candidate['check_refined']['points_min_m'] < args.plan_r_b:
                 last_status, n_rejected = 'refined_r_b_violation', n_rejected + 1
                 continue
             if candidate['check_trajectory']['hard_n'] > 0:
@@ -704,9 +711,9 @@ def main_random(args) -> int:
         'n_total': args.num_episodes, 'n_ok': len(episodes),
         'success_rate': len(episodes) / args.num_episodes,
         'failures': failures, 'n_rejected_resamples': n_rejected,
-        'n_refined_ok': int((ref_min >= args.r_b).sum()),
+        'n_refined_ok': int((ref_min >= args.plan_r_b).sum()),
         'refined_min_m': float(ref_min.min()),
-        'refined_ok': bool((ref_min >= args.r_b).all()),
+        'refined_ok': bool((ref_min >= args.plan_r_b).all()),
         'traj_min_m': float(min(e['planned']['check_trajectory']['points_min_m'] for e in episodes)),
         'hard_collision_n': int(sum(e['planned']['check_trajectory']['hard_n'] for e in episodes)),
         'hard_collision_eps': int(sum(not e['planned']['check_trajectory']['hard_ok'] for e in episodes)),
@@ -736,7 +743,7 @@ def main_random(args) -> int:
     paths_dir.mkdir(parents=True, exist_ok=True)
     out = {
         'scene_id': args.scene, 'mode': args.mode, 'smooth': args.smooth, 'seed': args.seed,
-        'params': {'r_b': args.r_b, 'refine_radius': args.refine_radius, 'cell_m': args.cell_m,
+        'params': {'r_b': args.r_b, 'plan_r_b': args.plan_r_b, 'refine_radius': args.refine_radius, 'cell_m': args.cell_m,
                    'astar_cell_m': args.cell_m * args.downsample_factor, 'h_nav': args.h_nav,
                    'refine_mode': args.refine_mode, 'downsample_mode': args.downsample_mode,
                    'smooth_step': args.smooth_step, 'floor_z': floor_z,
@@ -764,7 +771,7 @@ def main_random(args) -> int:
 
     # --- 리포트 ---
     log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}_random'
-    navigable = truncate_navigable(episodes[0]['planned']['esdf'], args.r_b) & compute_scan_coverage_mask(occupancy)
+    navigable = truncate_navigable(episodes[0]['planned']['esdf'], args.plan_r_b) & compute_scan_coverage_mask(occupancy)
     states = render_states_random(navigable, origin, args.cell_m, episodes, log_dir)
     body = ('<h3>무작위 생성 경로 (C2, 같은 grid)</h3>'
             '<p class="note">‹ ›로 넘긴다. <b>초록 = 경로, 마젠타 = start, 시안 = goal.</b> '
@@ -862,9 +869,9 @@ def main() -> int:
     stats = {
         'n_total': n_total, 'n_ok': len(episodes), 'success_rate': len(episodes) / n_total,
         'failures': failures,
-        'n_refined_ok': int((ref_min >= args.r_b).sum()),
+        'n_refined_ok': int((ref_min >= args.plan_r_b).sum()),
         'refined_min_m': float(ref_min.min()),
-        'refined_ok': bool((ref_min >= args.r_b).all()),
+        'refined_ok': bool((ref_min >= args.plan_r_b).all()),
         'traj_min_m': float(min(e['planned']['check_trajectory']['points_min_m'] for e in episodes)),
         'hard_collision_n': int(sum(e['planned']['check_trajectory']['hard_n'] for e in episodes)),
         'hard_collision_eps': int(sum(not e['planned']['check_trajectory']['hard_ok'] for e in episodes)),
@@ -934,7 +941,7 @@ def main() -> int:
     paths_dir.mkdir(parents=True, exist_ok=True)
     out = {
         'scene_id': args.scene, 'mode': args.mode, 'smooth': args.smooth,
-        'params': {'r_b': args.r_b, 'refine_radius': args.refine_radius, 'cell_m': args.cell_m,
+        'params': {'r_b': args.r_b, 'plan_r_b': args.plan_r_b, 'refine_radius': args.refine_radius, 'cell_m': args.cell_m,
                    'astar_cell_m': args.cell_m * args.downsample_factor, 'h_nav': args.h_nav,
                    'refine_mode': args.refine_mode, 'downsample_mode': args.downsample_mode,
                    'smooth_step': args.smooth_step, 'floor_z': floor_z,
@@ -962,7 +969,7 @@ def main() -> int:
 
     # --- 리포트 ---
     log_dir = Path(args.log_dir) / SCRIPT_NAME / f'{args.scene}{dataset_utils.dataset_tag(args.dataset)}'
-    navigable = truncate_navigable(episodes[0]['planned']['esdf'], args.r_b) & compute_scan_coverage_mask(occupancy)
+    navigable = truncate_navigable(episodes[0]['planned']['esdf'], args.plan_r_b) & compute_scan_coverage_mask(occupancy)
     states = render_states(navigable, origin, args.cell_m, episodes, log_dir)
     worst = render_worst_episodes(navigable, origin, args.cell_m, episodes, log_dir)
     body = (f'<h3>GT vs 기준선 ⓒ vs 우리 경로 ({len(episodes)} 에피소드, 같은 grid)</h3>'
