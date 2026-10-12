@@ -116,6 +116,53 @@ else:
 - `raw/<run_stamp>/episodes/<scene>_<ep>.json`은 episode당 파일 1개 → 여러 stamp에 걸치면 최신 stamp 우선.
 - 분석 코드는 파일을 직접 파싱하지 말고 **`scripts/eval_dashboard/data.py`의 reader를 import**해서 쓴다 (`build_task` = result/progress/raw 병합·dedupe, `raw_episode_files` = stamp 병합). 읽는 규칙을 한 곳에만 둔다.
 
+### 9. 비교는 **같은 자**로 — 지도·기준·설정이 다르면 비교하지 않는다
+
+**여러 번 반복한 실수다.** 서로 다른 조건에서 나온 두 수치를 나란히 놓고 결론을 내렸다.
+
+#### 9-1. GT와 우리 경로를 **다른 지도**로 재고 비교하지 않는다
+
+- **vln_ce / vln_pe 의 GT 는 R2R `reference_path` 에서 나왔고, 그건 habitat navmesh 산물이다.**
+  (`eval_gt_collect.py` 첫 줄: "GT reference_path 를 move_by_flash 로 재현". 그리고 `reference_path`
+  는 vln_ce·vln_pe 가 **완전히 동일** — train 10,819/10,819 일치 실측)
+- 우리 occupancy(밴드 투영)는 **"이 높이에 바닥이 있는지"를 묻지 않아** 다층 집에서 다른 층
+  공간이 새어 들어온다(실측: s8pcmisQ38h 거짓 승인의 **66.6 %**).
+- 그래서 **GT 를 우리 지도로 재면 GT 가 위반한 것처럼 보인다**(vln_ce 20씬 400 ep 에서 7.2 %).
+  navmesh 기준으로는 GT 가 깨끗하다(`3dloader_vlnce` 실측 waypoint 474/474 · 531/531,
+  뚫린 점은 전부 깊이 1 셀 = 격자 반올림).
+
+| 비교 | 유효한가 |
+|---|---|
+| 우리 경로 ↔ 우리 지도 | ✅ 자기일관적 |
+| GT ↔ GT 의 지도(navmesh) | ✅ |
+| **GT ↔ 우리 지도** | ❌ **지도 오차를 경로 품질로 오인한다** |
+
+→ **"우리 경로가 GT보다 깨끗하다/나쁘다"는 같은 지도에서 재기 전에는 말하지 않는다.**
+   지도가 다르면 그 비교가 재는 것은 **경로 차이가 아니라 지도 차이**다.
+
+→ vln_pe 는 여기에 **물리 실행 오차**가 하나 더 섞인다. H1 이 계획선을 그대로 못 따라가고
+   문턱을 밟고 넘는다(실측 여유 0 인 프레임 5~19 %). 지도를 바꿔도 이건 안 사라진다.
+
+#### 9-2. 기준선은 **같은 조건으로 그때 다시 돌린 것**만 쓴다
+
+- `logs/paths` 같은 **누적 산출물**을 기준선으로 쓰지 않는다. 여러 시점·여러 설정으로 만들어진
+  파일이 섞여 있다. 실측 사례: 같은 설정이라고 생각하고 비교했는데 관통이 **6 vs 18** 로 3 배
+  달랐고(회전량도 44.2 vs 32.5), 그 때문에 "새 설정이 더 나쁘다"는 **정반대 결론**을 냈다.
+- 전후 비교는 **변수 하나만 다른 대조군을 그 자리에서 돌려서** 한다.
+  (코드 변경 전후라면 `git worktree` 로 이전 커밋을 꺼내 **연달아** 돌린다.)
+
+#### 9-3. 용어를 뭉개지 않는다 — "충돌"이라고 쓰지 않는다
+
+둘은 다른 사건이고 심각도가 다르다. 항상 **둘 다** 적는다.
+
+| | 뜻 | `check_path_navigable` |
+|---|---|---|
+| **관통** | 경로 중심이 벽 **안** | `hard_n` (clearance ≤ 0) |
+| **`r_b` 미달** | 중심은 밖인데 **몸이 벽에 걸침** | `points_ok` (clearance < r_b) |
+
+`03` 은 설계상 **관통만** 하드 게이트로 쓴다 — GT 궤적도 13 % 가 `r_b` 미달이라 궤적에
+`r_b` 하드 제약을 걸면 GT 조차 탈락하기 때문이다. "충돌 0" 이라고만 쓰면 어느 쪽인지 알 수 없다.
+
 ## Command
 ### Training & evaluation
 `python scripts/train_eval/qwenvl_train/runner.py --config scripts/train_eval/qwenvl_train/bev/base_s1.fpv_s2.fpv_rgb_gt.py --machine 5090` 
