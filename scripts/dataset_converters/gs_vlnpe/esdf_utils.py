@@ -627,6 +627,111 @@ def smooth_bezier(waypoints_xy: np.ndarray, step_m: float = VOXEL_SIZE_M) -> np.
 # 스무딩으로 계산돼 배수 비교가 무의미해지고, 03b의 F1(결정성)이 통째로 실패한다(실제로 겪음).
 SMOOTHERS = {'cubic': smooth_cubic_spline, 'bezier': smooth_bezier}
 
+def repair_by_insertion(waypoints_xy: np.ndarray, esdf: np.ndarray, origin: np.ndarray,
+                        cell_m: float, r_b: float, smoother, smooth_step: float,
+                        refiner=None, refine_radius: float = 0.10,
+                        max_rounds: int = 5, margin_m: float = 0.0,
+                        max_turn_ratio: float = 1.3) -> tuple:
+    """스무딩 후 `r_b`를 위반하는 구간에 **안전한 waypoint를 끼워 넣고 다시 스무딩**한다.
+
+    왜 이게 되나
+    ------------
+    논문 파이프라인(A* -> refine -> spline)은 **waypoint**의 여유만 보장한다. spline이 waypoint
+    **사이**를 잇는 과정에서 부풀어 벽에 닿는다(실측: refine 후 미달 0/367인데 spline 후 49/367,
+    깎인 양 median 0.039 m / 최대 0.212 m). waypoint 사이가 문제이므로 **그 사이에 점을 하나
+    넣으면** spline이 반드시 그 점을 지나야 해서 부풀 수 없다.
+
+    궤적이 여전히 "waypoint를 지나는 cubic spline"이라 논문 구조가 유지된다 — 바뀌는 것은
+    waypoint 개수뿐이다. 새 평활화 수식을 도입하지 않는다.
+
+    한 라운드
+    ---------
+    1. 현재 궤적에서 `clearance < r_b + margin_m` 인 샘플을 찾는다
+    2. 연속한 위반 샘플을 한 덩어리로 묶고, 덩어리마다 **가장 나쁜 점** 하나만 고른다
+       (덩어리마다 1개씩만 넣어 waypoint가 폭증하지 않게 한다)
+    3. 그 점을 `refiner`로 안전한 위치까지 밀어낸다 (기본: 03과 같은 refiner)
+    4. 원래 waypoint 열에서 **호길이상 맞는 자리**에 끼워 넣는다
+    5. 다시 스무딩한다
+
+    위반이 사라지거나 `max_rounds`에 닿으면 멈춘다. **해결 못 하면 원본을 그대로 돌려준다** —
+    조용히 더 나쁜 궤적을 내놓지 않기 위해서다.
+
+    Returns (waypoints_xy, trajectory, info). `info['rounds']`/`['inserted']`/`['resolved']`.
+    """
+    wp = np.asarray(waypoints_xy, dtype=np.float64).copy()
+    traj = smoother(wp, smooth_step)
+    thr = r_b + margin_m
+    info = {'rounds': 0, 'inserted': 0, 'resolved': True, 'n_bad_start': 0, 'min_start': 0.0,
+            'min_end': 0.0}
+
+    def _turn_per_m(t):
+        d = np.diff(np.asarray(t, dtype=np.float64), axis=0)
+        L = float(np.linalg.norm(d, axis=1).sum())
+        if len(d) < 2 or L < 1e-9:
+            return 0.0
+        a_ = np.arctan2(d[:, 1], d[:, 0])
+        return float(np.degrees(np.abs((np.diff(a_) + np.pi) % (2 * np.pi) - np.pi)).sum() / L)
+
+    def score(t):
+        c = sample_esdf_at(esdf, t, origin, cell_m)
+        return int((c < thr).sum()), float(c.min())
+
+    n0, m0 = score(traj)
+    turn0 = _turn_per_m(traj)
+    info.update(n_bad_start=n0, min_start=m0, min_end=m0,
+                turn_start=turn0, turn_end=turn0)
+    if n0 == 0:
+        return wp, traj, info
+
+    wp_out, traj_out, n_now, m_now = wp, traj, n0, m0
+    for rnd in range(1, max_rounds + 1):
+        clr = sample_esdf_at(esdf, traj_out, origin, cell_m)
+        bad = np.flatnonzero(clr < thr)
+        if bad.size == 0:
+            break
+        # 연속 위반 덩어리. 긴 덩어리는 ~0.5 m 마다 하나씩 넣는다(하나로는 양옆이 다시 부푼다).
+        groups = np.split(bad, np.flatnonzero(np.diff(bad) > 1) + 1)
+        picks = []
+        for g in groups:
+            k = max(1, int(round(len(g) * smooth_step / 0.5)))
+            picks += [int(g[t]) for t in np.linspace(0, len(g) - 1, k).round().astype(int)]
+        picks = sorted(set(picks))
+        # "r_b 를 만족하는 만큼만" 옮긴다 — 창을 넉넉히 줘야 기둥 옆으로 빠져나간다.
+        rad = max(refine_radius, 3.0 * thr)
+        new_pts = refine_min_move(traj_out[picks], esdf, origin, cell_m, rad,
+                                  fix_endpoints=False, r_b=thr)
+        s_wp = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(wp_out, axis=0), axis=1))])
+        s_tr = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(traj_out, axis=0), axis=1))])
+        tot_w = s_wp[-1] if s_wp[-1] > 1e-9 else 1.0
+        tot_t = s_tr[-1] if s_tr[-1] > 1e-9 else 1.0
+        merged = list(wp_out)
+        for pt, k in sorted(zip(new_pts, picks), key=lambda t: -t[1]):
+            j_ins = int(np.searchsorted(s_wp, s_tr[k] / tot_t * tot_w))
+            merged.insert(min(max(j_ins, 1), len(merged) - 1), pt)
+        wp_try = np.asarray(merged, dtype=np.float64)
+        traj_try = smoother(wp_try, smooth_step)
+        n_try, m_try = score(traj_try)
+        # **나빠지면 받지 않는다** — 위반 수·최소 여유·매끄러움 셋 다 본다.
+        # 매끄러움 가드가 없으면 waypoint 를 꽂을수록 지그재그가 되어 "충돌은 줄었지만
+        # 못 쓰는 궤적"이 나온다(실측: 27 -> 83 deg/m).
+        safer = m_try > m_now + 1e-9 or (n_try < n_now and m_try >= m_now - 1e-9)
+        smooth_ok = _turn_per_m(traj_try) <= max(turn0 * max_turn_ratio, turn0 + 5.0)
+        if not (safer and smooth_ok):
+            info.update(rounds=rnd, resolved=False, min_end=m_now,
+                        turn_end=_turn_per_m(traj_out),
+                        stop='turn' if safer and not smooth_ok else 'no_gain')
+            return wp_out, traj_out, info
+        info['inserted'] += len(picks)
+        wp_out, traj_out, n_now, m_now = wp_try, traj_try, n_try, m_try
+        info['rounds'] = rnd
+        if n_now == 0:
+            break
+
+    info.update(resolved=bool(n_now == 0), min_end=m_now, turn_end=_turn_per_m(traj_out))
+    return wp_out, traj_out, info
+
+
+
 
 def check_path_navigable(path_xy: np.ndarray, esdf: np.ndarray, origin: np.ndarray,
                          cell_m: float = VOXEL_SIZE_M, r_b: float = ROBOT_RADIUS_M,
