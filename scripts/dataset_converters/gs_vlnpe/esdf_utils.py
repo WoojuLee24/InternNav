@@ -571,6 +571,91 @@ def thin_waypoints(waypoints_xy: np.ndarray, spacing_m: float) -> np.ndarray:
     return pts[keep]
 
 
+def thin_waypoints_safe(waypoints_xy: np.ndarray, spacing_m: float, esdf: np.ndarray,
+                        origin: np.ndarray, cell_m: float = VOXEL_SIZE_M,
+                        min_clearance: float = ROBOT_RADIUS_M,
+                        min_spacing_m: float = None) -> np.ndarray:
+    """`thin_waypoints`로 솎되, **솎느라 벽을 가로지르게 된 구간은 점을 되살린다.**
+
+    왜 필요한가
+    ----------
+    `thin_waypoints`는 호길이 간격만 보고 0.8 m마다 고른다. 그래서 모서리 점이 통째로 빠지면
+    남은 두 점을 잇는 직선이 벽을 가로지른다 — `thin_waypoints` docstring이 RDP를 거부한 이유와
+    **같은 결함**이다. 그 docstring의 "r_b 제약은 솎기 전 wp_refined에 걸리므로 안전 판정은
+    영향받지 않는다"는 틀렸다. 스무딩이 통과하는 건 솎은 뒤의 점들이라 안전은 거기서 결정된다.
+
+    실측(vln_pe 45씬): `wp_refined` 선분 여유 0.320 -> 솎은 뒤 **0.050** -> spline 관통 32샘플.
+
+    어떻게
+    ------
+    입력 `waypoints_xy`(= `wp_refined`)는 이미 검사를 통과한 폴리라인이므로, 솎인 두 점 사이에
+    원본 점을 **도로 넣으면 반드시 안전해진다**(최악의 경우 원본 그대로).
+
+    되살릴 점은 **인덱스 중점이 아니라 두 조각의 여유가 가장 커지는 점**으로 고른다. 인덱스
+    중점을 쓰면 이웃 바로 옆에 점이 들어가 간격이 0에 가까워지고, 그 불균등한 knot 간격이
+    cubic spline을 크게 부풀린다 — 실측(`JeFG25nYj2p`): 간격 0.000~0.112 m + 꺾임 83~90도에서
+    스플라인이 waypoint 폴리라인에서 **1.23 m** 벗어나 관통 6 에피소드가 생겼다.
+
+    그래도 남는 과밀 구간은 `min_spacing_m`(기본 `spacing_m/4`)보다 가까운 점을 빼서 푼다.
+    **빼도 안전한지 매번 확인**하므로 안전이 간격보다 우선한다.
+    """
+    pts = np.asarray(waypoints_xy, dtype=np.float64)
+    if len(pts) < 3 or spacing_m <= 0:
+        return pts.copy()
+    if min_spacing_m is None:
+        min_spacing_m = spacing_m / 4.0
+
+    thinned = thin_waypoints(pts, spacing_m)
+    keep, j = [], 0
+    for n in range(len(pts)):
+        if j < len(thinned) and np.array_equal(pts[n], thinned[j]):
+            keep.append(n)
+            j += 1
+    assert j == len(thinned), 'thin_waypoints 결과가 원본 점의 부분집합이 아니다'
+
+    step = cell_m / 5.0
+
+    def seg_min(a: int, b: int) -> float:
+        """원본 인덱스 a->b 직선의 최소 여유. 셀의 1/5 간격으로 촘촘히 찍는다."""
+        n = max(2, int(np.linalg.norm(pts[b] - pts[a]) / step) + 1)
+        dense = pts[a] + (pts[b] - pts[a]) * np.linspace(0.0, 1.0, n)[:, None]
+        return float(sample_esdf_at(esdf, dense, origin, cell_m).min())
+
+    # ① 통과 못한 구간에 원본 점을 되살린다. 원본 폴리라인이 상한이라 반드시 끝난다.
+    out = list(keep)
+    changed = True
+    while changed:
+        changed = False
+        rebuilt = [out[0]]
+        for a, b in zip(out[:-1], out[1:]):
+            if b - a > 1 and seg_min(a, b) < min_clearance:
+                # 두 조각 중 나쁜 쪽이 가장 좋아지는 분할점
+                cand = range(a + 1, b)
+                rebuilt.append(max(cand, key=lambda m: min(seg_min(a, m), seg_min(m, b))))
+                changed = True
+            rebuilt.append(b)
+        out = rebuilt
+
+    # ② 과밀 해소 — 가장 가까운 쌍부터, 빼도 안전하면 뺀다. 양 끝은 건드리지 않는다.
+    while len(out) > 2:
+        d = np.linalg.norm(np.diff(pts[out], axis=0), axis=1)
+        order = [i for i in np.argsort(d) if d[i] < min_spacing_m]
+        for i in order:
+            # 선분 i 의 두 끝 중 내부점을 후보로 (둘 다 내부면 더 가까운 이웃 쪽)
+            for m in (i, i + 1):
+                if m == 0 or m == len(out) - 1:
+                    continue
+                if seg_min(out[m - 1], out[m + 1]) >= min_clearance:
+                    del out[m]
+                    break
+            else:
+                continue
+            break
+        else:
+            break
+    return pts[out]
+
+
 def smooth_cubic_spline(waypoints_xy: np.ndarray, step_m: float = VOXEL_SIZE_M) -> np.ndarray:
     """논문 7단계 (기본) — 누적거리로 파라미터화한 cubic spline. **waypoint를 통과한다.**
 
