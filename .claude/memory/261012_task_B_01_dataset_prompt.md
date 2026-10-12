@@ -82,3 +82,24 @@ e9zR4mvMWw7  gZ6f7yhEvPG  kEZ7cmS4wCh  qoiz87JEwZ2  rPc6DW4iMge
 - `vln_pe` 로봇: `r_b 0.20` · 카메라 높이 1.66 m · H1 휴머노이드
 - 결과는 `.claude/memory/<날짜>_01_dataset_result.md` 에 정리하고 커밋
 - 수치가 예상과 **크게 다르면 먼저 보고**할 것. 조용히 넘어가지 말 것
+
+---
+
+## ⚠️ 2026-10-12 추가 — `03` 설정이 바뀌었다
+
+위 4번의 `03` 설정은 **더 이상 쓰지 말 것.** 5씬 파라미터 탐색 결과 아래가 더 좋다
+(r_b 미달 8 → 1, 관통 0 유지, 에피소드 손실 217→211):
+
+```
+--dataset vln_pe --r_b 0.20 --plan_r_b 0.28 --h_nav_ratio 0.12 --refine_radius 0.20 --post_refine --post_refine_margin 0.05 --num_episodes 999
+```
+
+바뀐 점은 둘:
+- `--plan_r_b` 0.25 → **0.28** (spline 이 여유를 median 0.05 · p90 0.15 깎아먹어서 0.05 로는 부족)
+- `--post_refine_margin` 0(기본) → **0.05** (수리 목표를 정확히 `r_b` 로 잡으면 재스무딩이
+  같은 양만큼 다시 파고든다. 실측: 수리 성공 4/12 → 32/33)
+
+`--downsample_mode majority` 는 **쓰지 말 것** — vln_ce 와 달리 vln_pe 에서는 에피소드가
+217→151 로 급감한다(r_b 0.20 이 커서 coarse 격자가 과하게 막힌다).
+
+이미 0.25 로 돌렸다면 **다시 돌려야** 작업 A 의 45씬과 합쳐서 의미 있는 수치가 된다.
