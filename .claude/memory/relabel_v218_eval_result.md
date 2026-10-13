@@ -24,3 +24,13 @@
 ## 평가 config
 - `relabel/eval_v218.<parent>.py`: 부모 baseline_ablation config 에서 eval yaml 만 `relabel/vln_r2r_mini_v218.yaml` 로.
   mini/full 평가 데이터 byte 동일, 둘 다 ld30 → 부모 GT 결과와 문장만 다른 비교.
+
+## v6 vs v218 vs GT 분석 (2026-10-05)
+- **v218/v6 는 split 마다 생성 방식이 다르다**: train/val_seen 은 템플릿(내용어 어휘 26~51, 랜드마크 없음),
+  val_unseen 만 랜드마크가 풍부(v218 509 / v6 377). 문장 내용어 중 GT 에도 있는 비율: v218 train 0.25, val_unseen 0.14.
+  → "v218 학습 x v218 평가" 도 학습/평가 분포가 다르다.
+- 방향 정합성 (경로 회전 vs 문장 left/right, GT 로 부호 보정; 마지막 회전 일치율):
+  GT train 0.80 / val_unseen 0.84, v218 0.88 / 0.94, v6 0.69 / **0.47 (무작위 수준)**.
+- 정지 위치: OS-SR 격차 공개 System2 GT 6.5 / v218 11.6, mini stage1 v218xv218 18.3 (52.7 vs 34.4).
+- GT 학습 모델을 v218 val_unseen 으로 평가하면 전부 35~39 로 수렴 (공개 System2 61.7 -> 39.4).
+- 제안: 좋은 label 의 빠른 판정 = 공개 System2 를 새 label val_unseen 으로 평가 (학습 없이 1.7h). GT 61.7 에 가까울수록 정보 보존.
