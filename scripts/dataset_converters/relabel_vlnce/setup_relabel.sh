@@ -96,7 +96,11 @@ fi
 
 # ---------------------------------------------------------------- 4. 결과 검증
 log "===== 4. 결과 검증 ====="
-GT_SCENES=$(ls "$GT_ROOT/traj_data/r2r" | wc -l)
+# scene 은 디렉터리만 센다. 해제 후에도 <scene>.tar.gz 가 그대로 남아 있어서
+# `ls | wc -l` 은 61개 scene 을 122로 센다 (생성기 build_relabel_dataset.py:116 은
+# os.path.isdir 로 걸러서 61을 잡으므로, 필터가 없으면 전 label 이 똑같이 오탐한다).
+scene_count() { find "$1" -maxdepth 1 -mindepth 1 -xtype d | wc -l; }
+GT_SCENES=$(scene_count "$GT_ROOT/traj_data/r2r")
 GT_EPISODES=$(cat "$GT_ROOT"/traj_data/r2r/*/meta/episodes.jsonl | wc -l)
 NFAIL=0
 bad() { echo "  [x] $1: $2"; NFAIL=$((NFAIL+1)); }
@@ -107,7 +111,7 @@ for L in $LABEL_LIST; do
     if [[ ",$EMIT," == *",data,"* ]] || [ "$CHECK_ONLY" -eq 1 ]; then
         [ -d "$OUT" ] || { bad "$L" "$OUT 가 없다"; continue; }
 
-        n=$(ls "$OUT/traj_data/r2r" | wc -l)
+        n=$(scene_count "$OUT/traj_data/r2r")
         [ "$n" -eq "$GT_SCENES" ] || bad "$L" "scene $n / GT $GT_SCENES"
 
         n=$(find "$OUT/traj_data" -xtype l | wc -l)
