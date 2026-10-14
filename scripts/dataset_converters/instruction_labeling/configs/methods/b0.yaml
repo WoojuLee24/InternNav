@@ -1,0 +1,46 @@
+# 방법 b0 = 그룹별 인자 값의 조합. ablation 은 annotate.py --method b0 --set <group>.<arg>=<value> 로 하나씩 바꾼다
+# (결과 이름은 자동: b0_<arg>-<value>). 검증되어 새 기준이 되면 b1.yaml 을 따로 만든다.
+method: b0
+seed: 0
+workers: 64
+fail_abort_rate: 0.02          # 예외·빈 응답 비율이 이걸 넘으면 중단
+args:
+  frames:                      # VLM 입력 프레임
+    select: keyframes-v1       # start + 회전점(turn_deg 이상, 새 방향) + goal
+    turn_deg: 25.0
+    rig: 125cm_0deg            # 기본 rig (pose 기준)
+    extra_rigs: []             # 프레임마다 함께 넣을 rig, 예: [125cm_30deg]
+    max_images: 16             # 프롬프트당 이미지 상한 = 프레임 수 x rig 수 (서버 limit-mm-per-prompt 와 맞춘다)
+  route:                       # 경로 단어
+    words: v1                  # route.yaml words.<key>
+    start_turn: always         # always | gtrate-v1 (route.yaml start_turn_rate)
+    slight: say                # say | omit (slight_deg 미만 회전은 말하지 않음)
+    rooms: none                # none | house-v1 (MP3D .house 방 순서를 경로 단어 뒤에 한 줄로; route.yaml rooms)
+    turn_deg: 30
+    slight_deg: 60
+    around_deg: 135
+    stairs_dy_m: 0.3
+    short_m: 2.5
+    long_m: 8.0
+  delivery: image              # delivery/<name>.yaml: image | 2stage-v1
+  style:                       # 프롬프트 문체 (style.yaml)
+    template: b0-v1
+    length: "15-40"            # "15-40" | free | gtdist
+    detail: specific-v1        # specific-v1 | plain-v1
+    turn_language: v1
+    stop: must                 # must | stop | wait | stand | none | optional | gtdist
+    numbers: v1
+    concise: v1
+    structure: none            # none | room-v1
+    fewshot: 0                 # GT train 문장 N 개를 문체 예시로 (train scene 만, 같은 trajectory 제외)
+    fewshot_header: v1
+  model: gemma31b-bf16         # model/<name>.yaml
+  gen:                         # 샘플링·재시도·품질검사
+    temperature: 0.35
+    retry_temp_step: 0.1
+    max_tokens: 140
+    max_retries: 5
+    min_words: 12
+    max_words: 70
+    require_stop_condition: true
+    require_landmark: true

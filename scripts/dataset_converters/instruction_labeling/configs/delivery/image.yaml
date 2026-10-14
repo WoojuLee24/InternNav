@@ -1,0 +1,6 @@
+# delivery 그룹 값: image — writer 가 이미지를 직접 본다 (VLM 1회). b0 원본 방식.
+# intro / context 는 label 의 prompt.template 의 {scene_intro} / {scene_context} 자리에 들어간다.
+name: image
+type: image
+intro: "The {n_images} images above were taken along one path, in order.\n\n"
+context: ""

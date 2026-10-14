@@ -1,0 +1,46 @@
+# style 그룹의 텍스트 자원 (버전 키로 고정; 바꾸려면 새 키를 추가한다)
+# 규칙 줄 순서: length, detail, turn_language, stop, numbers, concise, structure (b0 와 같은 순서, structure 는 맨 끝)
+templates:
+  b0-v1: |
+    You are a navigation instruction writer for vision-language robot navigation.
+
+    {scene_intro}Write a concise, natural navigation instruction for this path.
+
+    PATH MOTION SEQUENCE:
+    {route}
+
+    {scene_context}REQUIREMENTS:
+    {rules}{extra}
+
+    Write ONLY the instruction text:
+length:
+  "15-40": "1-4 short sentences, 15-40 words total"
+  free: "Use as many sentences and words as the path needs"
+  gtdist: "1-4 sentences, about {n} words total"          # n = GT train 단어 수 분포에서 episode 마다 추출
+detail:
+  specific-v1: "Reference specific visible landmarks (furniture, rooms, doorways, etc.)"
+  plain-v1: "Name landmarks with plain, common words (rooms, doors, stairs, furniture); avoid colors, materials and decorative details unless they are needed to tell two things apart"
+turn_language:
+  v1: 'Use natural turn language: "turn left/right", "make a left", "go left at"'
+stop:                        # gtdist = stop/wait/stand/none 을 GT train 비율로 episode 마다 추출
+  must: 'MUST include a clear stop condition: "stop at/near/by [landmark]" or "wait at [landmark]"'
+  stop: 'The final sentence must use the verb "stop" (e.g. "stop at/near/by [landmark]")'
+  wait: 'The final sentence must use the verb "wait", not "stop" (e.g. "wait at/near/by [landmark]")'
+  stand: 'The final sentence must use the verb "stand", not "stop" (e.g. "stand next to/in front of [landmark]")'
+  none: 'Do NOT use the words "stop", "wait" or "stand"; end by naming the final place to reach (e.g. "...and walk into the office area.")'
+  optional: 'You may end with "stop/wait/stand at [landmark]", or simply by naming the final place to reach'
+  prefer-stop-v2: 'End where the path ends, in the way people naturally do — "stop at/near [landmark]" is most common, but "wait at/in [place]" or simply ending with the final place ("...and walk into the office.") are also natural; pick whichever fits this path'
+  prefer-stop-v1: 'End at the destination. "Stop at/near/by [landmark]" is preferred, but you may also say "wait at/in [place]" or simply end by naming the final place to reach, as people often do'
+stop_no_require: [none, optional, prefer-stop-v1, prefer-stop-v2]    # 이 값들은 품질검사의 정지 단어 필수 조건을 끈다
+stop_mix:                    # stop=mix-v1: 같은 trajectory 의 형제마다 다른 끝맺음 (순서는 trajectory 마다 섞음)
+  mix-v1: [stop, wait, none]
+stop_gtdist: {stop: 0.55, wait: 0.32, stand: 0.03, none: 0.10}   # GT train 10,819 문장 (vln-s2-pipeline 실측 2026-10-08)
+numbers:
+  v1: "No distances in metres or numbers"
+concise:
+  v1: "Concise, direct — like giving directions to a person"
+structure:
+  none: null
+  room-v1: "Describe the route mainly by the rooms and doorways you leave, pass and enter; mention a turn only where it is needed to find the way"
+fewshot_header:
+  v1: "\n\nSTYLE EXAMPLES (human-written instructions for OTHER paths — match their style, not their content):\n"

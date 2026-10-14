@@ -1,0 +1,15 @@
+# model 그룹 값: vLLM OpenAI 호환 서버. 서버는 /home/irteam/venvs/vllm_gemma 로 띄운다 (이 노드: :8100, DP8, limit-mm image 16).
+name: gemma31b-bf16
+model: gemma-4-31B-it
+base_url: http://localhost:8100/v1
+api_key: token-abc123
+# annotate.py --backend managed 일 때 job 이 직접 띄우는 서버 인자 (지금 :8100 서버와 같은 설정)
+managed:
+  vllm_bin: /home/irteam/venvs/vllm_gemma/bin/vllm
+  path: /home/irteam/data-vol2/checkpoints/VLM/gemma-4-31B-it
+  gpus: "0,1,2,3,4,5,6,7"
+  tensor_parallel_size: 1         # data parallel = GPU 수 / tensor_parallel_size (자동)
+  max_model_len: 16384
+  limit_mm_per_prompt: {image: 16}
+  gpu_memory_utilization: 0.9
+  startup_timeout_s: 1800
