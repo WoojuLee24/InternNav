@@ -14,3 +14,7 @@ select:
       - {at: start, turn_deg: 90, label: start_left, caption: "start position, looking to your left"}
       - {at: start, turn_deg: -90, label: start_right, caption: "start position, looking to your right"}
       - {at: start, turn_deg: 180, label: start_behind, caption: "start position, looking behind you"}
+approach:                    # frames.approach=<key>: 도착 직전 프레임 추가 (궤적을 따라 남은 거리 dist_m 지점, 진행 방향을 봄)
+  v1:                        # GT 도착 명사의 41 % 는 도착 프레임이 아닌 다른 프레임에서만 보인다 (2stage 장면 요약 실측)
+    dist_m: [3.0, 1.5]
+    caption: "approaching the destination"

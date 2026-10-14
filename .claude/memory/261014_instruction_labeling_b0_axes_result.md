@@ -123,3 +123,21 @@
 - 비교 기준 (같은 설정, 기존 보고서): GT→GT 42.5, v278fix→GT 31.9, v278fix_fewshot-3→GT 33.6.
 - 2026-10-14 15시 KST: C+WP (`b0_slight-omit_fewshot-3_keyframe_deg-0`), C+SS (`b0_slight-omit_fewshot-3_select-keyframes-startsurround-v1`) 전체 생성
   (train 10,684 / val_unseen 1,839, 예외 0) → relabel_half 셀 → node4. LD30 은 제외 (사용자 결정; 프롬프트가 이미지 수를 프레임 수로 세고 rig 구분 캡션이 없는 결함도 있음).
+
+## 방 정보 v2 · 도착 직전 프레임 (dev, 2026-10-14 16시 KST)
+- `route.rooms=house-v2`: 복도는 3 m 이상 지날 때만, 나머지 방 1.5 m, "Room changes along the path: leave the bathroom, enter the bedroom, enter the hallway, enter the bedroom. You stop in the bedroom." (동사 형태)
+- `frames.approach=v1`: 궤적을 따라 도착까지 3 m, 1.5 m 남은 프레임 2장 추가 (캡션 "approaching the destination").
+
+| 지표 | GT | C | C+rooms-v1 | **C+rooms-v2** | C+approach | C+SS | **C+SS+rooms-v2** | C+SS+approach |
+|---|---|---|---|---|---|---|---|---|
+| CIDEr | .328 | .283 | .269 | .291 | .266 | .297 | .301 | **.303** |
+| BLEU-4 | .133 | .126 | .126 | .130 | .122 | .130 | **.134** | .132 |
+| METEOR | .202 | .201 | .201 | .205 | .204 | .205 | .208 | **.208** |
+| ROUGE-L | .383 | .378 | .384 | .386 | .378 | .381 | **.390** | .384 |
+| goal_mismatch % | 35 | 57 | 62 | 60 | 60 | 58 | 57 | **54** |
+| "exit" / "leave" / "enter" % | 16/5/22 | 1/1/5 | 2/2/13 | **7/11/19** | 1/0/8 | 1/0/7 | **7/11/19** | 1/0/9 |
+| "hallway" % | 18 | 33 | 66 | 55 | 28 | 26 | 56 | 29 |
+
+- **rooms-v2**: 방 단위 표현이 GT 수준에 근접 (enter 19 vs 22 %, exit+leave 18 vs 21 %), 지표도 C·C+SS 양쪽에서 상승 (CIDEr +0.008 / +0.004, ROUGE +0.008 / +0.009).
+  C+SS+rooms-v2 는 BLEU-4 가 사람과 같고 ROUGE 는 사람 이상. 남은 문제: hallway 과다 (55 % vs 18 %).
+- **approach-v1**: 일관성 없음 — C 에선 CIDEr −0.016·goal +2.7 %p (나빠짐), C+SS 에선 CIDEr +0.005·goal −3.7 %p (좋아짐). 잡음(±0.005, ±1.4) 을 고려하면 확정 못 함.

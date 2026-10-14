@@ -75,8 +75,12 @@ def room_sequence(ep: dict, house_path: str, rc: dict) -> dict:
             runs[-1][2] += 1
         else:
             runs.append([x[0], x[1], 1])
-    min_n = max(1, int(round(rc['min_visit_m'] / rc['step_m'])))
-    kept = [r for i, r in enumerate(runs) if r[2] >= min_n or i in (0, len(runs) - 1)]  # 처음·끝 방은 짧아도 둔다
+    by_label = rc.get('min_visit_by_label') or {}  # v2: 방 종류별 최소 통과 길이 (예: 복도는 길게 지나야 말함)
+
+    def min_n(lab):
+        return max(1, int(round(by_label.get(lab, rc['min_visit_m']) / rc['step_m'])))
+
+    kept = [r for i, r in enumerate(runs) if r[2] >= min_n(r[1]) or i in (0, len(runs) - 1)]  # 처음·끝 방은 짧아도 둔다
     names = []
     for _, lab, _ in kept:
         nm = rc['names'].get(lab)
@@ -89,4 +93,13 @@ def rooms_line(ep: dict, house_path: str, rc: dict) -> tuple:
     seq = room_sequence(ep, house_path, rc)
     if not seq['rooms']:
         return '', seq
-    return rc['line'].format(rooms=rc['joiner'].join(seq['rooms']), goal=seq['rooms'][-1]), seq
+    rooms = seq['rooms']
+    if rc.get('form', 'list') == 'list':  # v1: "a -> b -> c"
+        return rc['line'].format(rooms=rc['joiner'].join(rooms), goal=rooms[-1]), seq
+    elif rc['form'] == 'verbs':  # v2: "leave the a, enter the b, enter the c" (방이 하나면 single_line)
+        if len(rooms) == 1:
+            return rc['single_line'].format(goal=rooms[0]), seq
+        changes = [rc['leave'].format(room=rooms[0])] + [rc['enter'].format(room=r) for r in rooms[1:]]
+        return rc['line'].format(changes=rc['joiner'].join(changes), goal=rooms[-1]), seq
+    else:
+        assert False, f"unreachable rooms form={rc['form']!r}"
