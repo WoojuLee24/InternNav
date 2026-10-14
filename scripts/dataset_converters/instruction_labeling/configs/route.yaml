@@ -43,3 +43,43 @@ rooms:                      # route.rooms=<key>: MP3D .house 방 정보로 "지�
       C: classroom
       D: dining booth
       S: spa
+  house-v2:                 # v1 + 복도는 3 m 이상 지날 때만 + "leave the X, enter the Y" 동사 형태 (GT 의 exit/enter 표현을 겨냥)
+    step_m: 0.25
+    max_dz_m: 1.0
+    min_visit_m: 1.5
+    min_visit_by_label: {h: 3.0, s: 1.0}
+    form: verbs
+    joiner: ", "
+    leave: "leave the {room}"
+    enter: "enter the {room}"
+    line: "Room changes along the path (from scene annotation): {changes}. You stop in the {goal}."
+    single_line: "The whole path stays in the {goal} (from scene annotation)."
+    names:
+      a: bathroom
+      b: bedroom
+      c: closet
+      d: dining room
+      e: entryway
+      f: family room
+      g: garage
+      h: hallway
+      i: library
+      j: laundry room
+      k: kitchen
+      l: living room
+      m: meeting room
+      n: lounge
+      o: office
+      p: porch
+      r: game room
+      s: stairs
+      t: toilet
+      u: utility room
+      v: tv room
+      w: gym
+      x: outdoor area
+      y: balcony
+      B: bar
+      C: classroom
+      D: dining booth
+      S: spa

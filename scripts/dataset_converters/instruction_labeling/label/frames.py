@@ -56,6 +56,23 @@ def select_keyframes(ep: dict, pose: np.ndarray, action: np.ndarray, turn_deg: f
     return uniq
 
 
+def add_approach_frames(sel: list, pose: np.ndarray, ap: dict) -> list:
+    """도착 직전 프레임: 궤적을 따라 끝까지 남은 거리가 dist_m 에 가장 가까운 프레임 (이미 고른 프레임이면 건너뜀).
+    goal 프레임 바로 앞에 놓인다 (프레임 순서 정렬)."""
+    xy = pose[:, :2, 3]
+    seg = np.r_[np.linalg.norm(np.diff(xy, axis=0), axis=1), 0.0]
+    remain = np.cumsum(seg[::-1])[::-1] - seg  # frame i 에서 끝까지 남은 거리
+    have = {f['frame'] for f in sel}
+    extra = []
+    for d in ap['dist_m']:
+        f = int(np.argmin(np.abs(remain - d)))
+        if f in have or f >= len(xy) - 1 or remain[f] < 0.5 * d:  # 경로가 너무 짧으면 넣지 않는다
+            continue
+        have.add(f)
+        extra.append({'frame': f, 'label': f'approach_{d:g}m', 'waypoint_idx': None, 'caption': ap['caption']})
+    return sorted(sel + extra, key=lambda x: x['frame'])
+
+
 def subsample(frames: list, k: int) -> list:
     """b0 와 같은 규칙: 처음·끝 유지, 가운데 균등."""
     if len(frames) <= k:

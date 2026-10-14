@@ -112,6 +112,7 @@ def resolve(m: dict) -> dict:
         'method': m['method'], 'seed': m['seed'], 'workers': m['workers'], 'fail_abort_rate': m['fail_abort_rate'],
         'args': a,
         'frames': {'select': fr['select'], 'select_def': frames_res['select'][fr['select']],
+                   'approach': None if fr.get('approach', 'none') == 'none' else frames_res['approach'][fr['approach']],
                    'turn_deg': fr['keyframe_deg'], 'rig': fr['rig'],
                    'rigs': [fr['rig']] + list(fr['extra_rigs']), 'max_images': fr['max_images']},
         'route': route, 'delivery': delivery, 'style': style,

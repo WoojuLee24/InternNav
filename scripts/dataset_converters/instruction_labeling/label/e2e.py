@@ -8,7 +8,7 @@ import base64
 import hashlib
 import re
 
-from frames import select_keyframes, subsample
+from frames import add_approach_frames, select_keyframes, subsample
 from sources import view_path
 from route_words import route_words, said, turn_words
 from style import episode_style
@@ -56,6 +56,8 @@ def select_frames(cfg: dict, ep: dict, track: dict) -> list:
     assert 'instruction' not in ep, 'GT 누출: 생성 입력에 instruction 이 있다'
     views = cfg['frames']['select_def'].get('views') or []
     sel = select_keyframes(ep, track['pose'], track['action'], float(cfg['frames']['turn_deg']))
+    if cfg['frames'].get('approach'):
+        sel = add_approach_frames(sel, track['pose'], cfg['frames']['approach'])
     budget = int(cfg['frames']['max_images']) // len(cfg['frames']['rigs'])  # 이미지 상한 = 프레임 수 × rig 수
     sel = subsample(sel, budget - len(views))
     if not views:
