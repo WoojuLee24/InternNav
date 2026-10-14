@@ -91,7 +91,7 @@
   ("Rooms along the path (from scene annotation): bathroom -> bedroom -> hallway -> bedroom. You stop in the bedroom.").
   dev 101 traj: 점 coverage 평균 93 %, 방 1~5개. traj 104 는 GT "bathroom → bedroom → hall → bedroom" 과 정확히 일치.
 - `frames.select=keyframes-startsurround-v1`: 출발 지점 좌·우·뒤 시점 3장 (`render/extra_views.py`, goal 시점도 같은 스크립트로 일반화).
-- `frames.turn_deg=0`: 모든 waypoint 프레임 (기존 렌더 그대로, 코드 변경 없음).
+- `frames.keyframe_deg=0` (처음 이름 frames.turn_deg; 결과 이름에 "." 이 들어가 셀 파일명 규칙과 충돌해 바꿈): 모든 waypoint 프레임 (기존 렌더 그대로, 코드 변경 없음).
 - `frames.extra_rigs=[125cm_30deg]`: 30° 내려다본 이미지 추가. 이미지 상한은 프레임 수 × rig 수로 계산하도록 수정.
 - `style.stop=mix-v1`: 같은 trajectory 의 형제 3문장에 stop / wait / 없음을 하나씩 (순서는 trajectory 마다 섞음).
 - hash 규칙: 값이 None 인 옵션은 hash 에서 빠진다 (새 옵션을 꺼진 상태로 추가해도 기존 결과 hash 불변). 모든 산출물 rehash 완료.
@@ -121,3 +121,5 @@
 - `build_relabel_dataset.py --splits train,val_unseen` (새 옵션, 기본값은 기존 3 split) 로 `vln_ce_<L>` 빌드·평가 yaml 생성.
 - `relabel_half/make_cells.py` 로 s1 셀 3종 × 4 label. node2: b0, b0_delivery-2stage-v1 / node3: b0_slight-omit_fewshot-3, b0_slight-omit.
 - 비교 기준 (같은 설정, 기존 보고서): GT→GT 42.5, v278fix→GT 31.9, v278fix_fewshot-3→GT 33.6.
+- 2026-10-14 15시 KST: C+WP (`b0_slight-omit_fewshot-3_keyframe_deg-0`), C+SS (`b0_slight-omit_fewshot-3_select-keyframes-startsurround-v1`) 전체 생성
+  (train 10,684 / val_unseen 1,839, 예외 0) → relabel_half 셀 → node4. LD30 은 제외 (사용자 결정; 프롬프트가 이미지 수를 프레임 수로 세고 rig 구분 캡션이 없는 결함도 있음).

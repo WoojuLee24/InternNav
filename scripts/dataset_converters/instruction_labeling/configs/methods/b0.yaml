@@ -7,7 +7,7 @@ fail_abort_rate: 0.02          # 예외·빈 응답 비율이 이걸 넘으면 �
 args:
   frames:                      # VLM 입력 프레임
     select: keyframes-v1       # start + 회전점(turn_deg 이상, 새 방향) + goal
-    turn_deg: 25.0
+    keyframe_deg: 25.0         # 경로가 이 각도 이상 꺾이는 waypoint 를 key frame 으로 (0 = 모든 waypoint)
     rig: 125cm_0deg            # 기본 rig (pose 기준)
     extra_rigs: []             # 프레임마다 함께 넣을 rig, 예: [125cm_30deg]
     max_images: 16             # 프롬프트당 이미지 상한 = 프레임 수 x rig 수 (서버 limit-mm-per-prompt 와 맞춘다)
