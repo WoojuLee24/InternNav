@@ -112,7 +112,7 @@ def resolve(m: dict) -> dict:
         'method': m['method'], 'seed': m['seed'], 'workers': m['workers'], 'fail_abort_rate': m['fail_abort_rate'],
         'args': a,
         'frames': {'select': fr['select'], 'select_def': frames_res['select'][fr['select']],
-                   'turn_deg': fr['turn_deg'], 'rig': fr['rig'],
+                   'turn_deg': fr['keyframe_deg'], 'rig': fr['rig'],
                    'rigs': [fr['rig']] + list(fr['extra_rigs']), 'max_images': fr['max_images']},
         'route': route, 'delivery': delivery, 'style': style,
         'vllm': {'model': model['model'], 'base_url': model['base_url'], 'api_key': model['api_key'],
