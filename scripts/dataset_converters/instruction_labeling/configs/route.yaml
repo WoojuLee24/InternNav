@@ -1,0 +1,45 @@
+# route 그룹의 텍스트·표 자원 (버전 키로 고정; 바꾸려면 새 키를 추가한다)
+words:                      # route.words
+  v1:                       # = vln-s2-pipeline ROUTE_WORDS (b0)
+    around: "turn around"
+    turn: "turn {side}"
+    slight: "bear slightly {side}"
+    start_turn: "{turn} (the route does not start in the direction you face)."
+start_turn_rate:            # route.start_turn=<key> 일 때: 시작 회전 각도 구간별로 말할 확률 [lo, hi, p]
+  gtrate-v1: [[0, 30, 0.0], [30, 90, 0.143], [90, 135, 0.225], [135, 181, 0.245]]   # GT train 10,819 문장 실측 (2026-10-14)
+rooms:                      # route.rooms=<key>: MP3D .house 방 정보로 "지나는 방 순서" 한 줄을 경로 단어 뒤에 붙인다 (label/rooms.py)
+  house-v1:
+    step_m: 0.25            # reference_path 를 이 간격으로 촘촘히 해서 점마다 방을 찾는다
+    max_dz_m: 1.0           # 점 바닥 높이와 방 바닥 높이 차 허용
+    min_visit_m: 1.0        # 이보다 짧게 지나는 방은 뺀다 (처음·끝 방 제외)
+    joiner: " -> "
+    line: "Rooms along the path (from scene annotation): {rooms}. You stop in the {goal}."
+    names:                  # MP3D region label 코드 -> 이름 (z/-/Z 등은 말하지 않음)
+      a: bathroom
+      b: bedroom
+      c: closet
+      d: dining room
+      e: entryway
+      f: family room
+      g: garage
+      h: hallway
+      i: library
+      j: laundry room
+      k: kitchen
+      l: living room
+      m: meeting room
+      n: lounge
+      o: office
+      p: porch
+      r: game room
+      s: stairs
+      t: toilet
+      u: utility room
+      v: tv room
+      w: gym
+      x: outdoor area
+      y: balcony
+      B: bar
+      C: classroom
+      D: dining booth
+      S: spa

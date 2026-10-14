@@ -1,0 +1,27 @@
+# delivery 그룹 값: 2stage-v1 — v278fix gate3 방식 그대로.
+#   stage 1: 프레임마다 장면을 글로 요약 (ROOM | LANDMARKS | DIRECTION) + 도착 랜드마크 1문장 (v278fix 프롬프트·파라미터)
+#   stage 2: writer 는 이미지 없이 그 글만 본다 (context 블록이 template 의 {scene_context} 자리에 들어감)
+# 내용을 바꾸려면 이 파일을 고치지 말고 2stage-v2.yaml 을 새로 만든다 (label 결과가 버전에 묶여 있다).
+name: 2stage-v1
+type: two_stage
+intro: ""
+context: "SCENE CONTEXT AT KEY POINTS:\n{scene_context}\n\nGOAL/DESTINATION:\n{goal_landmark}\n\n"
+frame_line: "  [Frame {k}: {caption}] {room} — {landmarks}, dir: {direction}"
+empty_context: "  Indoor environment."
+empty_goal: "the destination"
+temperature: 0.4
+max_tokens: 150
+goal_max_tokens: 80
+frame_prompt: |
+  A robot is navigating through this indoor environment.
+  Describe what you see in 1-2 sentences focusing on:
+  1. The ROOM TYPE (bedroom, kitchen, hallway, living room, staircase, etc.)
+  2. The 2-3 most distinctive LANDMARKS visible (furniture, doorways, rugs, appliances, decor)
+  3. The apparent NAVIGATION DIRECTION (straight ahead, turning left/right, approaching stairs)
+
+  Format: ROOM: <type> | LANDMARKS: <item1>, <item2>, <item3> | DIRECTION: <straight|left|right|stairs|unclear>
+goal_prompt: |
+  This is the FINAL frame — the destination where the robot should stop.
+  Describe the stopping location in 1 sentence suitable for use as a navigation landmark.
+  Focus on the most distinctive object or feature at/near the stopping point.
+  Write ONLY the landmark description:

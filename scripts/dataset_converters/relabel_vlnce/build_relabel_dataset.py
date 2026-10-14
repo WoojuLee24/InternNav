@@ -59,7 +59,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 LOG_DIR = os.path.join(HERE, "logs")
 
-SPLITS = ("train", "val_seen", "val_unseen")
+DEFAULT_SPLITS = ("train", "val_seen", "val_unseen")
+SPLITS = DEFAULT_SPLITS  # main() 의 --splits 로만 바뀐다
 TRAIN_SPLIT = "train"
 GT_LABEL = "gt"  # default_config.Params 의 기본값과 같은 문자열
 
@@ -439,6 +440,7 @@ def write_report(gt_root, label_dir, label, info, map_stats):
 
 # --------------------------------------------------------------------------- #
 def main():
+    global SPLITS
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--labels", default="all",
                     help="쉼표 구분 label 목록. 'all' 이면 3개 split 에 모두 있는 label 전부")
@@ -450,7 +452,12 @@ def main():
     ap.add_argument("--gt_root", default="data/InternData-N1-v0.5-mini/vln_ce", help="GT 데이터셋 루트 (읽기 전용)")
     ap.add_argument("--rebuild_map", action="store_true", help="episode 매핑 캐시를 무시하고 다시 만든다")
     ap.add_argument("--self_check", action="store_true", help="데이터 생성 없이 검증만 한다")
+    ap.add_argument("--splits", default=",".join(DEFAULT_SPLITS),
+                    help="label 이 있어야 하는 split (기본 train,val_seen,val_unseen). "
+                         "val_seen 없이 만든 label 은 train,val_unseen (평가는 val_unseen 만 쓴다)")
     args = ap.parse_args()
+    SPLITS = tuple(x for x in args.splits.split(",") if x)
+    assert TRAIN_SPLIT in SPLITS, f"--splits 에 {TRAIN_SPLIT} 가 있어야 한다 (학습 데이터): {SPLITS}"
 
     gt_root = os.path.join(REPO_ROOT, args.gt_root) if not os.path.isabs(args.gt_root) else args.gt_root
     label_dir = os.path.join(REPO_ROOT, args.label_dir) if not os.path.isabs(args.label_dir) else args.label_dir

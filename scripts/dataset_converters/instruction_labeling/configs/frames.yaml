@@ -1,0 +1,16 @@
+# frames 그룹의 frames.select 정의 (버전 키로 고정; 바꾸려면 새 키를 추가한다)
+# views: 궤적 프레임 외에 덧붙이는 시점. at = start | goal, turn_deg = 그 지점에서 왼쪽(+)/오른쪽(-)으로 돈 각도.
+#        render/extra_views.py 로 미리 렌더한다. start 시점은 start 프레임 바로 뒤, goal 시점은 맨 끝에 붙는다.
+# (모든 waypoint 프레임은 select 를 바꿀 필요 없이 --set frames.turn_deg=0 으로 고른다)
+select:
+  keyframes-v1:              # b0: start + 회전점(turn_deg 이상, 새 방향) + goal
+    views: null
+  keyframes-goalside-v1:     # + 도착 지점 좌·우 90°
+    views:
+      - {at: goal, turn_deg: 90, label: goal_left, caption: "destination, looking to your left"}
+      - {at: goal, turn_deg: -90, label: goal_right, caption: "destination, looking to your right"}
+  keyframes-startsurround-v1:  # + 출발 지점 좌·우·뒤 (지금 있는 방을 보고 "방을 나가라" 를 쓸 수 있게)
+    views:
+      - {at: start, turn_deg: 90, label: start_left, caption: "start position, looking to your left"}
+      - {at: start, turn_deg: -90, label: start_right, caption: "start position, looking to your right"}
+      - {at: start, turn_deg: 180, label: start_behind, caption: "start position, looking behind you"}
