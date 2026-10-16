@@ -9,7 +9,7 @@ import hashlib
 import re
 
 from frames import add_approach_frames, select_keyframes, subsample
-from sources import view_path
+from sources import house_path, view_path
 from route_words import route_words, said, turn_words
 from style import episode_style
 
@@ -51,6 +51,26 @@ def frame_caption(f: dict, g: dict, rc: dict) -> str:
     return f'along the route, facing the way forward{nxt}'
 
 
+def stop_cue_line(rc: dict, ep: dict, track: dict) -> dict:
+    """route.stop_cue: 마지막 프레임 기준 정지 단서 한 줄 (없으면 빈 줄 -> b0 와 같음)."""
+    sc = rc.get('stop_cue')
+    if not sc:
+        return {'line': '', 'cands': None}
+    assert sc['kind'] == 'A', f"unreachable stop_cue kind={sc['kind']!r}"
+    import cv2
+    from stop_cues import object_candidates
+    T = len(track['action'])
+    rigs = ['125cm_0deg', '125cm_30deg']
+    poses = {r: track['pose_of'](r)[T - 1] for r in rigs}
+    depths = {r: cv2.imread(str(track['depth'](T - 1, r)), -1).astype('float32') / 1000.0 for r in rigs}
+    cands = object_candidates(ep, house_path(ep), poses, depths, sc)[:int(sc['max_n'])]
+    if not cands:
+        return {'line': '', 'cands': []}
+    c = cands[0]
+    line = sc['line'].format(name=c['name'], side=sc['side_words'][c['side']])
+    return {'line': line, 'cands': [{k: c[k] for k in ('name', 'dist_m', 'side')} for c in cands]}
+
+
 def select_frames(cfg: dict, ep: dict, track: dict) -> list:
     """입력 프레임 선택 (e2e·two_stage 공통). views 정의가 있으면 출발 시점은 start 뒤, 도착 시점은 맨 끝에 붙인다."""
     assert 'instruction' not in ep, 'GT 누출: 생성 입력에 instruction 이 있다'
@@ -77,6 +97,9 @@ def build_request(cfg: dict, ep: dict, track: dict) -> tuple:
     rc = cfg['route']
     sel = select_frames(cfg, ep, track)
     route, g = route_words(ep, rc, cfg['seed'])
+    cue = stop_cue_line(rc, ep, track)
+    if cue['line']:
+        route += '\n' + cue['line']
     es = episode_style(cfg, ep, track['item'].get('sib_idx', 0))
     content = []
     rigs = cfg['frames']['rigs']
@@ -93,7 +116,7 @@ def build_request(cfg: dict, ep: dict, track: dict) -> tuple:
     content.append({'type': 'text', 'text': prompt})
     inputs = {'frames': [f['frame'] for f in sel], 'frame_labels': [f['label'] for f in sel], 'rigs': rigs,
               'route_words': route, 'rooms': g.get('rooms'), 'initial_turn_deg': round(g['initial'], 1), 'start_turn_said': g['start_turn_said'],
-              'stop_style': es['stop']}
+              'stop_style': es['stop'], 'stop_cue': cue['cands']}
     return content, inputs, es
 
 

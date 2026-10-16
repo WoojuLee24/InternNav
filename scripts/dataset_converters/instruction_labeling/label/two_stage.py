@@ -66,6 +66,7 @@ def scene_stage(client, cfg, ep, track, sel) -> dict:
 def writer_prompt(cfg: dict, ep: dict, sel: list, s1: dict, sib_idx: int = 0) -> tuple:
     """stage 1 결과 -> writer 프롬프트 (VLM 호출 없음; 재현 검사에도 쓴다)."""
     rc = cfg['route']
+    assert not rc.get('stop_cue'), 'route.stop_cue 는 delivery=image 에서만 지원한다'
     route, g = route_words(ep, rc, cfg['seed'])
     es = episode_style(cfg, ep, sib_idx)
     sd = cfg['delivery']
