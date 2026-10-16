@@ -71,6 +71,48 @@ def stop_cue_line(rc: dict, ep: dict, track: dict) -> dict:
     return {'line': line, 'cands': [{k: c[k] for k in ('name', 'dist_m', 'side')} for c in cands]}
 
 
+_CUE_CACHE = {}
+
+
+def _cue_row(cache_key: str, split: str, tid: int) -> dict:
+    k = (cache_key, split)
+    if k not in _CUE_CACHE:
+        import json
+        from sources import REPO
+        p = REPO / 'data/InternData-N1-v0.5-mini/instruction_labels/_stop_cues' / cache_key / f'{split}.jsonl'
+        _CUE_CACHE[k] = {r['trajectory_id']: r for r in map(json.loads, open(p))}
+    return _CUE_CACHE[k][tid]
+
+
+def stop_select_line(rc: dict, ep: dict, track: dict) -> dict:
+    """route.stop_select: 캐시의 A·P·R 후보를 우선순위로 정렬하고 mode 로 고른다. 후보가 없으면 빈 줄 (b0 와 같음)."""
+    sel = rc['stop_select']
+    row = _cue_row(sel['cache'], track['item']['split'], ep['trajectory_id'])
+    pool = {}
+    for c in row['P']:
+        pool.setdefault(c['type'], c['phrase'])
+    if row['A']:
+        a = row['A'][0]
+        pool['A'] = f"next to the {a['name']}{sel['a_line'][a['side']]}"
+    for c in row['R']:
+        pool.setdefault(c['type'], c['phrase'])
+    order = [(t, pool[t]) for t in sel['priority'] if t in pool]
+    if not order:
+        return {'line': '', 'cands': []}
+    if sel['mode'] == 'rule':
+        chosen = [order[0]]
+        line = sel['line'].format(cue=chosen[0][1])
+    elif sel['mode'] == 'rotate':
+        chosen = [order[track['item'].get('sib_idx', 0) % len(order)]]
+        line = sel['line'].format(cue=chosen[0][1])
+    elif sel['mode'] == 'vlm':
+        chosen = order
+        line = sel['line'].format(cues=sel['joiner'].join(p for _, p in order))
+    else:
+        assert False, f"unreachable stop_select mode={sel['mode']!r}"
+    return {'line': line, 'cands': [{'type': t, 'phrase': p} for t, p in chosen]}
+
+
 def select_frames(cfg: dict, ep: dict, track: dict) -> list:
     """입력 프레임 선택 (e2e·two_stage 공통). views 정의가 있으면 출발 시점은 start 뒤, 도착 시점은 맨 끝에 붙인다."""
     assert 'instruction' not in ep, 'GT 누출: 생성 입력에 instruction 이 있다'
@@ -97,7 +139,7 @@ def build_request(cfg: dict, ep: dict, track: dict) -> tuple:
     rc = cfg['route']
     sel = select_frames(cfg, ep, track)
     route, g = route_words(ep, rc, cfg['seed'])
-    cue = stop_cue_line(rc, ep, track)
+    cue = stop_cue_line(rc, ep, track) if not rc.get('stop_select') else stop_select_line(rc, ep, track)
     if cue['line']:
         route += '\n' + cue['line']
     es = episode_style(cfg, ep, track['item'].get('sib_idx', 0))

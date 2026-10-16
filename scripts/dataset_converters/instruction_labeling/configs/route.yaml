@@ -166,3 +166,153 @@ stop_cue:                   # route.stop_cue=<key>: 정지 단서 (label/stop_cu
     center_visible: True
     ahead_only: [door]
     size_weight: 0.15
+  P-v1:                     # 장소·사건: 계단 위/아래, 문간(door 물체 근처, 방금 들어온 방이면 방 이름), 방 입구 바로 안쪽, 복도 끝
+    kind: P
+    types: [stairs, doorway, hall_end]
+    camera_height_m: 1.25
+    max_dz_m: 1.0
+    stairs_window_m: 3.0      # 마지막 3 m 구간 높이 변화
+    stairs_dz_m: 0.4
+    door_dist_m: 0.8          # 정지 지점과 door 물체 bbox 수평 거리
+    door_window_m: 1.5        # 이만큼 전의 방과 정지 지점 방이 다르면 '방금 들어옴'
+    entry_edge_m: 1.0         # 방 경계에서 이 안이면 'just inside'
+    hall_end_m: 1.0           # 진행 방향 앞 1 m 가 다른 영역이면 복도 끝
+    line: "You stop {phrase} (from scene annotation)."
+    phrases:
+      stairs_top: "at the top of the stairs"
+      stairs_bottom: "at the bottom of the stairs"
+      doorway: "in the doorway"
+      doorway_room: "in the doorway of the {room}"
+      just_inside: "just inside the {room}"
+      hall_end: "at the end of the hallway"
+      room: "in the {room}"
+    room_names:
+      a: bathroom
+      b: bedroom
+      c: closet
+      d: dining room
+      e: entryway
+      f: family room
+      g: garage
+      h: hallway
+      i: library
+      j: laundry room
+      k: kitchen
+      l: living room
+      m: meeting room
+      n: lounge
+      o: office
+      p: porch
+      r: game room
+      t: toilet
+      u: utility room
+      v: tv room
+      w: gym
+      x: outdoor area
+      y: balcony
+      B: bar
+      C: classroom
+      D: dining booth
+      S: spa
+  P-v2:                     # P-v1 - 방 입구 'just inside'(GT 동의 < 기본 비율) - 복도 끝(드묾·부정확). 문간·계단만
+    kind: "P"
+    types: [stairs, doorway]
+    camera_height_m: 1.25
+    max_dz_m: 1.0
+    stairs_window_m: 3.0
+    stairs_dz_m: 0.4
+    door_dist_m: 0.8
+    door_window_m: 1.5
+    entry_edge_m: 1.0
+    hall_end_m: 1.0
+    line: "You stop {phrase} (from scene annotation)."
+    phrases:
+      stairs_top: "at the top of the stairs"
+      stairs_bottom: "at the bottom of the stairs"
+      doorway: "in the doorway"
+      doorway_room: "in the doorway of the {room}"
+      just_inside: "just inside the {room}"
+      hall_end: "at the end of the hallway"
+      room: "in the {room}"
+    room_names:
+      a: "bathroom"
+      b: "bedroom"
+      c: "closet"
+      d: "dining room"
+      e: "entryway"
+      f: "family room"
+      g: "garage"
+      h: "hallway"
+      i: "library"
+      j: "laundry room"
+      k: "kitchen"
+      l: "living room"
+      m: "meeting room"
+      n: "lounge"
+      o: "office"
+      p: "porch"
+      r: "game room"
+      t: "toilet"
+      u: "utility room"
+      v: "tv room"
+      w: "gym"
+      x: "outdoor area"
+      y: "balcony"
+      B: "bar"
+      C: "classroom"
+      D: "dining booth"
+      S: "spa"
+    entrance: false
+  R-v1:                     # 방: 정지 지점이 있는 방 (방v2 와 같은 annotation)
+    kind: R
+    types: [room]
+    camera_height_m: 1.25
+    max_dz_m: 1.0
+    line: "You stop {phrase} (from scene annotation)."
+    phrases:
+      room: "in the {room}"
+    room_names:
+      a: bathroom
+      b: bedroom
+      c: closet
+      d: dining room
+      e: entryway
+      f: family room
+      g: garage
+      h: hallway
+      i: library
+      j: laundry room
+      k: kitchen
+      l: living room
+      m: meeting room
+      n: lounge
+      o: office
+      p: porch
+      r: game room
+      t: toilet
+      u: utility room
+      v: tv room
+      w: gym
+      x: outdoor area
+      y: balcony
+      B: bar
+      C: classroom
+      D: dining booth
+      S: spa
+stop_select:                # route.stop_select=<key>: A·P·R 후보 캐시(label/build_stop_cues.py) 에서 정지 단서를 고르는 방법 (축 2). none = b0
+  rule-v1:                  # 규칙: 가장 확실한 하나 — 계단 > 문간 > 물체 > 방
+    cache: A-grounded-v1+P-v2+R-v1
+    mode: rule
+    priority: [stairs_top, stairs_bottom, doorway, A, room]
+    line: "You stop {cue} (from scene annotation)."
+  vlm-v1:                   # 후보 전부를 주고 VLM 이 이미지에 맞는 하나를 고름
+    cache: A-grounded-v1+P-v2+R-v1
+    mode: vlm
+    priority: [stairs_top, stairs_bottom, doorway, A, room]
+    line: "Ways to describe where you stop (from scene annotation; end the instruction with ONE of them that fits the images): {cues}."
+    joiner: "; "
+  rotate-v1:                # 형제마다 다른 후보 (형제 번호 순으로 우선순위 목록을 돈다)
+    cache: A-grounded-v1+P-v2+R-v1
+    mode: rotate
+    priority: [stairs_top, stairs_bottom, doorway, A, room]
+    line: "You stop {cue} (from scene annotation)."
