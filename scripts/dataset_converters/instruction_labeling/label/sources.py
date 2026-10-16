@@ -88,7 +88,15 @@ def episode_track(item: dict, rig: str) -> dict:
     def img(f, r=rig):
         return vid / f'observation.images.rgb.{r}' / f'episode_{idx:06d}_{f}.jpg'
 
-    return {'action': np.asarray(df['action'].tolist()), 'pose': pose, 'img': img, 'item': item}
+    def depth(f, r=rig):  # uint16 mm png
+        return vid / f'observation.images.depth.{r}' / f'episode_{idx:06d}_{f}.png'
+
+    def pose_of(r):
+        d = pd.read_parquet(root / scene / 'data' / 'chunk-000' / f'episode_{idx:06d}.parquet', columns=[f'pose.{r}'])
+        return np.stack([np.stack(x) for x in d[f'pose.{r}']]).astype(np.float64)
+
+    return {'action': np.asarray(df['action'].tolist()), 'pose': pose, 'img': img, 'depth': depth, 'pose_of': pose_of,
+            'item': item}
 
 
 def house_path(ep: dict) -> Path:

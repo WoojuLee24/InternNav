@@ -17,6 +17,7 @@ args:
     start_turn: always         # always | gtrate-v1 (route.yaml start_turn_rate)
     slight: say                # say | omit (slight_deg 미만 회전은 말하지 않음)
     rooms: none                # none | house-v1 (MP3D .house 방 순서를 경로 단어 뒤에 한 줄로; route.yaml rooms)
+    stop_cue: none             # none | A-grounded-v1 (정지 지점 근처 보이는 annotation 물체; route.yaml stop_cue)
     turn_deg: 30
     slight_deg: 60
     around_deg: 135

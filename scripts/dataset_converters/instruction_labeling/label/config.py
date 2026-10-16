@@ -80,6 +80,8 @@ def resolve(m: dict) -> dict:
     route['slight'] = rt['slight']
     rooms_key = rt.get('rooms', 'none')
     route['rooms'] = None if rooms_key == 'none' else route_res['rooms'][rooms_key]
+    cue_key = rt.get('stop_cue', 'none')
+    route['stop_cue'] = None if cue_key == 'none' else route_res['stop_cue'][cue_key]
     assert rt['slight'] in ('say', 'omit'), f'unreachable route.slight={rt["slight"]!r}'
     if rt['start_turn'] == 'always':
         route['start_turn_rate'] = None

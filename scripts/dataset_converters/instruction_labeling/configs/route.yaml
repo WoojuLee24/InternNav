@@ -83,3 +83,86 @@ rooms:                      # route.rooms=<key>: MP3D .house 방 정보로 "지�
       C: classroom
       D: dining booth
       S: spa
+stop_cue:                   # route.stop_cue=<key>: 정지 단서 (label/stop_cues.py). none = b0 (VLM 이 도착 이미지에서 스스로 고름)
+  A-grounded-v1:            # 정지 지점 근처의, 마지막 프레임에 보이는 annotation 물체 하나를 경로 단어 뒤에 사실로 넣는다
+    kind: A
+    max_dist_m: 2.0         # 정지 지점(수평)과 물체 bbox 사이 거리
+    min_height_m: -0.2      # 물체 중심 높이 (정지 지점 바닥 기준)
+    max_height_m: 2.2
+    min_cam_dist_m: 0.3
+    occl_tol_m: 0.3         # depth 가 (카메라-점 거리 - 이 값) 이상이면 안 가려진 것으로 본다
+    ahead_deg: 20           # |방위| 이 각도 안이면 "ahead"
+    side_rig: 125cm_0deg
+    camera_height_m: 1.25
+    max_n: 1
+    line: "You stop next to the {name}{side} (from scene annotation)."
+    side_words: {left: ", on your left", right: ", on your right", ahead: ", right in front of you"}
+    names:                  # mpcat40 -> 지시문 단어. 없는 범주(wall/floor/ceiling/misc/objects/void/beam/column/blinds/board_panel/lighting/curtain/window/picture)는 쓰지 않는다
+      chair: chair
+      door: door
+      table: table
+      cabinet: cabinet
+      sofa: couch
+      bed: bed
+      chest_of_drawers: dresser
+      plant: plant
+      sink: sink
+      stairs: stairs
+      toilet: toilet
+      stool: stool
+      mirror: mirror
+      tv_monitor: tv
+      shower: shower
+      bathtub: bathtub
+      counter: counter
+      fireplace: fireplace
+      railing: railing
+      shelving: shelf
+      gym_equipment: exercise machine
+      seating: bench
+      furniture: furniture
+      appliances: appliance
+  A-grounded-v2:            # v1 + 물체 중심이 보여야 함 + 문은 정면일 때만 + 큰 가구 우선 정렬
+    kind: A
+    max_dist_m: 2.0
+    min_height_m: -0.2
+    max_height_m: 2.2
+    min_cam_dist_m: 0.3
+    occl_tol_m: 0.3
+    ahead_deg: 20
+    side_rig: 125cm_0deg
+    camera_height_m: 1.25
+    max_n: 1
+    line: 'You stop next to the {name}{side} (from scene annotation).'
+    side_words:
+      left: ', on your left'
+      right: ', on your right'
+      ahead: ', right in front of you'
+    names:
+      chair: 'chair'
+      door: 'door'
+      table: 'table'
+      cabinet: 'cabinet'
+      sofa: 'couch'
+      bed: 'bed'
+      chest_of_drawers: 'dresser'
+      plant: 'plant'
+      sink: 'sink'
+      stairs: 'stairs'
+      toilet: 'toilet'
+      stool: 'stool'
+      mirror: 'mirror'
+      tv_monitor: 'tv'
+      shower: 'shower'
+      bathtub: 'bathtub'
+      counter: 'counter'
+      fireplace: 'fireplace'
+      railing: 'railing'
+      shelving: 'shelf'
+      gym_equipment: 'exercise machine'
+      seating: 'bench'
+      furniture: 'furniture'
+      appliances: 'appliance'
+    center_visible: True
+    ahead_only: [door]
+    size_weight: 0.15
