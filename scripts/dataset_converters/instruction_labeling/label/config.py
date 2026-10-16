@@ -82,6 +82,12 @@ def resolve(m: dict) -> dict:
     route['rooms'] = None if rooms_key == 'none' else route_res['rooms'][rooms_key]
     cue_key = rt.get('stop_cue', 'none')
     route['stop_cue'] = None if cue_key == 'none' else route_res['stop_cue'][cue_key]
+    sel_key = rt.get('stop_select', 'none')
+    route['stop_select'] = None if sel_key == 'none' else route_res['stop_select'][sel_key]
+    assert not (route['stop_cue'] and route['stop_select']), 'route.stop_cue 와 route.stop_select 는 함께 쓰지 않는다'
+    if route['stop_select']:  # A 문구 형식은 캐시를 만든 A 정의에서 가져온다
+        a_key = route['stop_select']['cache'].split('+')[0]
+        route['stop_select'] = dict(route['stop_select'], a_line=route_res['stop_cue'][a_key]['side_words'])
     assert rt['slight'] in ('say', 'omit'), f'unreachable route.slight={rt["slight"]!r}'
     if rt['start_turn'] == 'always':
         route['start_turn_rate'] = None

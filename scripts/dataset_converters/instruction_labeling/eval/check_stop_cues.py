@@ -24,13 +24,23 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / 'label'))
 import annotate as A  # noqa: E402
 from sources import REPO, episode_track, gt_instructions, house_path, items  # noqa: E402
-from stop_cues import FX, CX, CY, object_candidates, project  # noqa: E402
+from stop_cues import FX, CX, CY, object_candidates, place_candidates, project  # noqa: E402
 
 SYN = {'couch': {'couch', 'sofa', 'sofas', 'couches', 'loveseat'}, 'dresser': {'dresser', 'drawers', 'chest'},
        'tv': {'tv', 'television', 'monitor', 'screen'}, 'shelf': {'shelf', 'shelves', 'bookshelf', 'bookcase'},
        'door': {'door', 'doors', 'doorway', 'doorways', 'entrance'}, 'stairs': {'stairs', 'staircase', 'steps', 'stair'},
        'table': {'table', 'tables', 'desk'}, 'bench': {'bench', 'seat', 'seats'}, 'plant': {'plant', 'plants', 'tree'},
        'counter': {'counter', 'island', 'countertop'}, 'bathtub': {'bathtub', 'tub', 'bath'}, 'chair': {'chair', 'chairs', 'stool', 'stools'}}
+
+
+PLACE_RE = {  # GT 마지막 문장이 같은 종류의 장소 단서를 쓰는가 (평가 전용)
+    'stairs_top': lambda c: r'\b(top|head|up)\b[^.]*\b(stairs?|steps|staircase)\b|\b(stairs?|steps|staircase)\b[^.]*\btop\b',
+    'stairs_bottom': lambda c: r'\b(bottom|foot|base)\b[^.]*\b(stairs?|steps|staircase)\b|\b(stairs?|steps|staircase)\b[^.]*\b(bottom|foot)\b',
+    'doorway': lambda c: r'\b(doorway|door|entrance|threshold|entry|opening|archway)\b',
+    'entrance': lambda c: r'\b(inside|entrance|enter|doorway|into)\b',
+    'hall_end': lambda c: r'\bend of the hall(way)?\b|\bhall(way)?\b[^.]*\bend\b',
+    'room': lambda c: r'\b' + re.escape(c['name'].split()[-1]) + r's?\b',
+}
 
 
 def last_sentence(t):
@@ -67,21 +77,32 @@ def main():
         T = len(tr['action'])
         poses = {r: tr['pose_of'](r)[T - 1] for r in rigs}
         depths = {r: cv2.imread(str(tr['depth'](T - 1, r)), -1).astype(np.float32) / 1000.0 for r in rigs}
-        cands = object_candidates(it['ep'], house_path(it['ep']), poses, depths, cfg)
         gts = [gt[g['ep']['episode_id']] for g in group]
+        if cfg['kind'] == 'A':
+            cands = object_candidates(it['ep'], house_path(it['ep']), poses, depths, cfg)
+        elif cfg['kind'] in ('P', 'R'):
+            cands = place_candidates(it['ep'], house_path(it['ep']), tr['pose_of'](rigs[0]), cfg)
+            for c in cands:
+                c['name'] = c['phrase']
+        else:
+            assert False, f"unreachable kind={cfg['kind']!r}"
         hits = []
         for g in gts:
             ls = last_sentence(g)
-            hits.append(any(any(re.search(rf'\b{w}\b', ls) for w in words_of(c['name'])) for c in cands))
+            if cfg['kind'] == 'A':
+                hits.append(any(any(re.search(rf'\b{w}\b', ls) for w in words_of(c['name'])) for c in cands))
+            else:
+                hits.append(any(re.search(PLACE_RE[c['type']](c), ls) is not None for c in cands))
+        keys = ('name', 'dist_m', 'side', 'visible_in') if cfg['kind'] == 'A' else ('name', 'type', 'kind')
         rows.append({'trajectory_id': tid, 'scene': it['scene'], 'n': len(cands),
-                     'cands': [{k: c[k] for k in ('name', 'dist_m', 'side', 'visible_in')} for c in cands],
+                     'cands': [{k: c[k] for k in keys} for c in cands],
                      'gt_hit_any': any(hits), 'gt_hit_frac': float(np.mean(hits)), 'top1': cands[0]['name'] if cands else None,
                      'img': str(tr['img'](T - 1, rigs[0])), 'gt_last': [last_sentence(g) for g in gts]})
         if n_viz < a.viz:
             ims = []
             for r in rigs:
                 im = cv2.imread(str(tr['img'](T - 1, r)))
-                for c in cands:
+                for c in (cands if cfg['kind'] == 'A' else []):
                     u, v, Z = project(np.array([c['center_local']]), poses[r])
                     if Z[0] > 0 and 0 <= u[0] < 640 and 0 <= v[0] < 480:
                         cv2.circle(im, (int(u[0]), int(v[0])), 7, (0, 255, 255), -1)
@@ -90,6 +111,9 @@ def main():
                 cv2.putText(im, r, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                 ims.append(im)
             canvas = np.concatenate(ims, 1)
+            if cfg['kind'] != 'A':
+                for j, c in enumerate(cands):
+                    cv2.putText(canvas, f"{c['kind']}: {c['name']}", (10, 60 + 28 * j), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
             cv2.putText(canvas, ('GT: ' + gts[0][-110:]).encode('ascii', 'ignore').decode(), (10, 470),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
             cv2.imwrite(str(out / 'viz' / f'{it["scene"]}_traj{tid}.jpg'), canvas)
@@ -103,8 +127,11 @@ def main():
                 continue
             c = r['cands'][0]
             b64 = base64.b64encode(open(r['img'], 'rb').read()).decode()
-            side = {'left': ' on your left', 'right': ' on your right', 'ahead': ' in front of you'}[c['side']]
-            q = f'This is what a robot sees where it stopped. Is there a {c["name"]} within about two meters of the robot{side}? Answer only yes or no.'
+            if cfg['kind'] == 'A':
+                side = {'left': ' on your left', 'right': ' on your right', 'ahead': ' in front of you'}[c['side']]
+                q = f'This is what a robot sees where it stopped. Is there a {c["name"]} within about two meters of the robot{side}? Answer only yes or no.'
+            else:
+                q = f'This is what a robot sees where it stopped. Is the robot standing {c["name"]}? Answer only yes or no.'
             resp = client.chat.completions.create(model='gemma-4-31B-it', max_tokens=3, temperature=0.0, messages=[
                 {'role': 'user', 'content': [{'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{b64}'}},
                                              {'type': 'text', 'text': q}]}])
