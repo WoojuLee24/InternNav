@@ -96,6 +96,17 @@ def gt_episode_ids(gt_root: Path, scene: str) -> list:
 # depth 저장 — vln_ce 규약
 # ---------------------------------------------------------------------------
 
+def select_episode_ids(gt_root: Path, scene: str, args) -> list:
+    """렌더할 에피소드. `--episodes_json`({scene: [ep, ...]})이 있으면 그것만, 없으면 앞에서 `--max_episodes`개."""
+    eps = gt_episode_ids(gt_root, scene)
+    if args.episodes_json:
+        want = set(json.loads(Path(args.episodes_json).read_text()).get(scene, []))
+        return [e for e in eps if e in want]
+    if args.max_episodes > 0:
+        eps = eps[:args.max_episodes]
+    return eps
+
+
 def depth_m_to_vlnce_png(depth_m: np.ndarray, valid: np.ndarray) -> np.ndarray:
     """렌더 depth(m) -> vln_ce 저장형(uint16 **밀리미터**, 0 = 무효).
 
@@ -182,9 +193,7 @@ def render_worker(args) -> int:
 
     prof = camera_profiles.get(rig)
     rig_all = list(camera_profiles.vlnce_rig_names())
-    eps = gt_episode_ids(gt_root, scene)
-    if args.max_episodes > 0:
-        eps = eps[:args.max_episodes]
+    eps = select_episode_ids(gt_root, scene, args)
 
     usd_path = r4.load_scene_model(args.mesh_root, scene)
     mesh = load_scene_mesh(args.mesh_root, scene)
@@ -242,7 +251,7 @@ def render_worker(args) -> int:
     sent.parent.mkdir(parents=True, exist_ok=True)
     sent.write_text(json.dumps({
         'scene': scene, 'rig': rig, 'episodes': len(per_ep), 'frames': total,
-        'max_episodes': int(args.max_episodes),
+        'max_episodes': int(args.max_episodes), 'episodes_json': args.episodes_json,
         'align_residual_median_m': float(np.median(resids)) if resids else None,
         'align_residual_max_m': float(max(resids)) if resids else None,
         'per_episode': per_ep, 'elapsed_s': round(time.time() - t0, 1),
@@ -284,7 +293,7 @@ def run_workers(args, scenes: list, rigs: list, sentinel_dir: Path, log_root: Pa
         sent = sentinel_dir / f'{scene}__{rig}.json'
         if args.skip_existing and sent.is_file():
             rec = json.loads(sent.read_text())
-            if rec.get('max_episodes') == args.max_episodes:
+            if rec.get('max_episodes') == args.max_episodes and rec.get('episodes_json') == args.episodes_json:
                 done.append(rec)
                 print(f'[{SCRIPT_NAME}] {i}/{len(jobs)} {scene}/{rig} — 이미 있음, 건너뜀', flush=True)
                 continue
@@ -294,6 +303,7 @@ def run_workers(args, scenes: list, rigs: list, sentinel_dir: Path, log_root: Pa
                '--gt_root', args.gt_root, '--out_root', args.out_root,
                '--mesh_root', args.mesh_root, '--raw_root', args.raw_root,
                '--max_episodes', str(args.max_episodes),
+               *(['--episodes_json', args.episodes_json] if args.episodes_json else []),
                '--align_frames', str(args.align_frames),
                '--light', args.light, '--rtx_ambient', str(args.rtx_ambient),
                '--film_iso', str(args.film_iso)]
@@ -332,6 +342,8 @@ def main() -> int:
     ap.add_argument('--scenes', default='17DRP5sb8fy', help='콤마 구분')
     ap.add_argument('--rigs', default='all', help="콤마 구분 또는 all (릴리스 5종)")
     ap.add_argument('--max_episodes', type=int, default=3, help='씬당 에피소드 상한. 0이면 전부')
+    ap.add_argument('--episodes_json', default=None,
+                    help='{scene: [ep, ...]} json — 이 에피소드만 렌더 (주면 --max_episodes 무시). 계단 에피소드 선택용')
     ap.add_argument('--align_frames', type=int, default=8, help='정합에 쓸 프레임 수')
     ap.add_argument('--refine', action='store_true', help='정합을 수치 최적화로 다듬는다(느림)')
     ap.add_argument('--light', default='ambient_only')
@@ -357,8 +369,7 @@ def main() -> int:
     rigs = (list(camera_profiles.vlnce_rig_names()) if args.rigs == 'all'
             else [r for r in args.rigs.split(',') if r])
 
-    n_ep = sum(len(gt_episode_ids(gt_root, s)[:args.max_episodes] if args.max_episodes > 0
-                   else gt_episode_ids(gt_root, s)) for s in scenes)
+    n_ep = sum(len(select_episode_ids(gt_root, s, args)) for s in scenes)
     print(f'[{SCRIPT_NAME}] 씬 {len(scenes)} × rig {len(rigs)} · 에피소드 {n_ep} '
           f'· light={args.light} ambient={args.rtx_ambient} iso={args.film_iso}', flush=True)
     print(f'[{SCRIPT_NAME}] GT(읽기) {gt_root}', flush=True)
@@ -377,9 +388,7 @@ def main() -> int:
             print(f'[{SCRIPT_NAME}] {scene}: rig {sorted(set(rigs) - got)} 미완 — sidecar 복사 보류',
                   flush=True)
             continue
-        eps = gt_episode_ids(gt_root, scene)
-        if args.max_episodes > 0:
-            eps = eps[:args.max_episodes]
+        eps = select_episode_ids(gt_root, scene, args)
         rs = [d['align_residual_median_m'] for d in done
               if d['scene'] == scene and d['align_residual_median_m'] is not None]
         copy_gt_sidecars(gt_root, out_r2r, scene, eps, {
