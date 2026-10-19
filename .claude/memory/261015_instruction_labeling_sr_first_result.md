@@ -67,3 +67,14 @@ SR = 3 m 안에서 멈춘 비율, OS = 한 번이라도 3 m 안에 들어간 비
   단서 준수 rule 94 %, rotate 89 %; vlm 이 고른 것 문간 164 > 물체 70 > 방 49.
 - 문장 지표는 모두 b0 수준 (CIDEr .233~.239). rotate 만 다양성 크게 ↑ (형제 유사도 .86 → .72, 고유 82 → 95 %).
 - 전체 생성 (train 10,684 / val 1,839, 예외 0) → relabel_half 셀. 배치: node2 rule / node3 rotate / node4 vlm (각 노드 현재 job 뒤).
+
+## 추가 결과 (2026-10-19 KST) — label→GT SR / OS
+| label | SR / OS |
+|---|---|
+| b0_slight-omit_fewshot-3_keyframe_deg-0_rooms-house-v2 (C+WP+방v2) | **37.4** / 50.1 (현재 최고, label→label·GT→label 평가 중) |
+| b0_slight-omit_fewshot-3_rooms-house-v2 (C+방v2) | 35.9 / 48.9 |
+| C+SS+방v2 | 35.6 / 48.0 |
+| b0_stop_select-vlm-v1 / rotate-v1 / rule-v1 | 35.0 / 34.7 / 33.0 |
+| b0_stop_cue-A-grounded-v1 | 34.6 |
+- 방 이동(house-v2) 을 넣은 3개가 모두 상위. 정지 단서 계열은 b0(32.1) 보다 +1~3.
+- 대기: slight-omit+WP+방v2 (node2), Qwen3-VL-32B / 235B 로 만든 C+방v2 (node3 / node4). 전체 표는 `scripts/dataset_converters/instruction_labeling/README.md`.
