@@ -159,6 +159,8 @@ def build_request(cfg: dict, ep: dict, track: dict) -> tuple:
     inputs = {'frames': [f['frame'] for f in sel], 'frame_labels': [f['label'] for f in sel], 'rigs': rigs,
               'route_words': route, 'rooms': g.get('rooms'), 'initial_turn_deg': round(g['initial'], 1), 'start_turn_said': g['start_turn_said'],
               'stop_style': es['stop'], 'stop_cue': cue['cands']}
+    if 'sibling_profile' in es:
+        inputs['sibling_profile'] = es['sibling_profile']
     return content, inputs, es
 
 
