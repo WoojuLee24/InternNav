@@ -42,5 +42,23 @@ concise:
 structure:
   none: null
   room-v1: "Describe the route mainly by the rooms and doorways you leave, pass and enter; mention a turn only where it is needed to find the way"
+sibling:                     # style.sibling: 같은 trajectory 의 형제(3 episode)마다 다른 서술 방식 줄을 규칙 끝에 넣는다
+  none: null                 # 형제 순번 -> 방식: trajectory 마다 (seed, trajectory_id) 로 섞은 순서. length 가 있으면 길이 규칙 줄을 대체
+  profiles-v1:
+    - name: step
+      line: "Write it as step-by-step directions: describe each turn and the stretch between turns, in order"
+    - name: landmark
+      line: "Describe the route mainly by the landmarks you walk past, through or toward (furniture, rooms, doorways); mention a turn only where it is needed to find the way"
+    - name: brief
+      line: "Keep it brief: name only the one or two key landmarks or rooms on the way and where to stop"
+      length: "1-2 short sentences, 12-22 words total"
+fewshot_match:               # style.fewshot_match: fewshot 예시를 형제 서술 방식과 같은 GT train 문체 묶음에서 뽑는다 (style.fewshot > 0 일 때)
+  none: null                 # 형제 -> 방식 배정은 style.sibling 과 같은 규칙 (같이 쓰면 같은 방식). GT 분류 (train 10,819: brief 33 / landmark 35 / step 21 / 나머지 11 %)
+  gtstyle-v1:
+    profiles: [step, landmark, brief]
+    brief_max_words: 20      # 단어 수 <= 20 -> brief
+    turn_re: "\\b(turn|make a (left|right)|go (left|right)|take a (left|right)|veer|bear (left|right))\\b"
+    step_min_turns: 2        # brief 아니고 회전 표현 >= 2 -> step
+    landmark_re: "\\b(past|pass|passing|along|through|toward|towards|between|beside|around)\\b"   # brief 아니고 회전 <= 1 이고 이 표현 -> landmark
 fewshot_header:
   v1: "\n\nSTYLE EXAMPLES (human-written instructions for OTHER paths — match their style, not their content):\n"

@@ -111,7 +111,13 @@ def resolve(m: dict) -> dict:
              'stop_no_require': [k for k in stop_lines if k in style_res['stop_no_require']],
              'numbers': style_res['numbers'][st['numbers']], 'concise': style_res['concise'][st['concise']],
              'structure': style_res['structure'][st['structure']], 'fewshot': int(st['fewshot']),
-             'fewshot_header': style_res['fewshot_header'][st['fewshot_header']]}
+             'fewshot_header': style_res['fewshot_header'][st['fewshot_header']],
+             # 형제별 서술 방식 / 문체 맞춘 fewshot: 끄면 None (gen_hash 에서 빠짐)
+             'sibling': style_res['sibling'][st.get('sibling', 'none')],
+             'fewshot_match': style_res['fewshot_match'][st.get('fewshot_match', 'none')]}
+    assert not (style['fewshot_match'] and not style['fewshot']), 'style.fewshot_match 는 style.fewshot > 0 일 때만'
+    assert not (style['sibling'] and style['fewshot_match']) or \
+        [p['name'] for p in style['sibling']] == style['fewshot_match']['profiles'], 'sibling 과 fewshot_match 의 방식 순서가 같아야 한다'
     delivery = _yaml(CONF / 'delivery' / f'{a["delivery"]}.yaml')
     assert delivery['name'] == a['delivery']
     model = _yaml(CONF / 'model' / f'{a["model"]}.yaml')
