@@ -52,6 +52,19 @@ sibling:                     # style.sibling: 같은 trajectory 의 형제(3 epi
     - name: brief
       line: "Keep it brief: name only the one or two key landmarks or rooms on the way and where to stop"
       length: "1-2 short sentences, 12-22 words total"
+  profiles-v2:                 # v1 + 방식별 시작 회전(start_turn: always | route.yaml start_turn_rate 키) + 첫머리 규칙(opener). delivery=image 전용
+    - name: step
+      line: "Write it as step-by-step directions: describe each turn and the stretch between turns, in order"
+      start_turn: always
+    - name: landmark
+      line: "Describe the route mainly by the landmarks you walk past, through or toward (furniture, rooms, doorways); mention a turn only where it is needed to find the way"
+      start_turn: gtrate-v1
+      opener: "Begin with where to head (toward or past a landmark you can see, or the room you leave), not with a turn"
+    - name: brief
+      line: "Keep it brief: name only the one or two key landmarks or rooms on the way and where to stop"
+      length: "1-2 short sentences, 12-22 words total"
+      start_turn: gtrate-v1
+      opener: "Begin with the room you leave or the place you head to, not with a turn"
 fewshot_match:               # style.fewshot_match: fewshot 예시를 형제 서술 방식과 같은 GT train 문체 묶음에서 뽑는다 (style.fewshot > 0 일 때)
   none: null                 # 형제 -> 방식 배정은 style.sibling 과 같은 규칙 (같이 쓰면 같은 방식). GT 분류 (train 10,819: brief 33 / landmark 35 / step 21 / 나머지 11 %)
   gtstyle-v1:
