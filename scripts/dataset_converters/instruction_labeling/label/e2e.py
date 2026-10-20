@@ -138,11 +138,13 @@ def build_request(cfg: dict, ep: dict, track: dict) -> tuple:
     """VLM 요청 content, 기록용 입력 요약, episode 별 style."""
     rc = cfg['route']
     sel = select_frames(cfg, ep, track)
+    es = episode_style(cfg, ep, track['item'].get('sib_idx', 0))
+    if 'start_turn_rate' in es:  # style.sibling profiles-v2: 형제 서술 방식별 시작 회전 확률
+        rc = dict(rc, start_turn_rate=es['start_turn_rate'])
     route, g = route_words(ep, rc, cfg['seed'])
     cue = stop_cue_line(rc, ep, track) if not rc.get('stop_select') else stop_select_line(rc, ep, track)
     if cue['line']:
         route += '\n' + cue['line']
-    es = episode_style(cfg, ep, track['item'].get('sib_idx', 0))
     content = []
     rigs = cfg['frames']['rigs']
     for k, f in enumerate(sel, 1):

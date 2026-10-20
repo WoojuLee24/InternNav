@@ -115,6 +115,10 @@ def resolve(m: dict) -> dict:
              # 형제별 서술 방식 / 문체 맞춘 fewshot: 끄면 None (gen_hash 에서 빠짐)
              'sibling': style_res['sibling'][st.get('sibling', 'none')],
              'fewshot_match': style_res['fewshot_match'][st.get('fewshot_match', 'none')]}
+    if style['sibling'] and any('start_turn' in p for p in style['sibling']):  # 방식별 시작 회전: 키 -> 확률표 내용 (gen_hash 에 들어가게)
+        assert a['delivery'] == 'image', 'style.sibling 의 start_turn 은 delivery=image 에서만'
+        style['sibling'] = [dict(p, start_turn_rate=None if p['start_turn'] == 'always' else route_res['start_turn_rate'][p['start_turn']])
+                            for p in style['sibling']]
     assert not (style['fewshot_match'] and not style['fewshot']), 'style.fewshot_match 는 style.fewshot > 0 일 때만'
     assert not (style['sibling'] and style['fewshot_match']) or \
         [p['name'] for p in style['sibling']] == style['fewshot_match']['profiles'], 'sibling 과 fewshot_match 의 방식 순서가 같아야 한다'

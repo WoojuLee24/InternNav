@@ -74,6 +74,8 @@ def episode_style(cfg: dict, ep: dict, sib_idx: int = 0) -> dict:
         if prof[profile].get('length'):
             rules[0] = prof[profile]['length']
         rules.append(prof[profile]['line'])
+        if prof[profile].get('opener'):
+            rules.append(prof[profile]['opener'])
     extra = ''
     if s['fewshot']:
         pool = _train_pool()[1]
@@ -89,4 +91,6 @@ def episode_style(cfg: dict, ep: dict, sib_idx: int = 0) -> dict:
     out = {'rules': '\n'.join(f'- {r}' for r in rules), 'extra': extra, 'quality': q, 'stop': stop}
     if profile:
         out['sibling_profile'] = profile
+    if s.get('sibling') and 'start_turn' in prof[profile]:  # profiles-v2: 경로 단어의 시작 회전 확률을 방식별로
+        out['start_turn_rate'] = prof[profile]['start_turn_rate']
     return out
