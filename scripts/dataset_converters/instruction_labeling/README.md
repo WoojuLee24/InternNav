@@ -46,12 +46,30 @@ pitch 0 / 30) 를 재현한다. 설정은 `configs/render.yaml`.
 | 용어 | 뜻 |
 |---|---|
 | label | 같은 R2R 경로(episode)에 자동 생성기로 새로 쓴 지시문. episode·경로·이미지는 GT 와 같고 **문장만** 다르다 |
-| 방법(method) | `configs/methods/<method>.yaml` 의 **그룹별 인자 조합**. 지금은 `b0` 하나. 더 좋다고 SR 로 확인된 조합만 `b1` 로 추가한다 |
+| 방법(method) | `configs/methods/<method>.yaml` 의 **그룹별 인자 조합**. `b0`(기준) → `b1`(2026-10-20 지정, 아래). 더 좋다고 SR 로 확인된 조합만 새 번호로 추가한다 |
 | 변형 이름 | b0 에서 바꾼 인자가 자동 suffix 로 붙는다: `b0_slight-omit_fewshot-3_rooms-house-v2` |
 | `-v1`, `-v2` | 문구·규칙표 같은 버전 자원의 키. 정의를 고칠 때는 덮어쓰지 않고 새 키를 만든다 (gen_hash 가 바뀌어 결과가 섞이지 않는다) |
 | SR | 성공률. 멈춘 위치가 목표 3 m 안. val_unseen 1,839 episode, mini s1 1 epoch, ld30 |
 | OS | 경로 중 한 번이라도 목표 3 m 안에 들어간 비율 (지나쳐도 성공으로 침). OS − SR 이 크면 "도착했는데 안 멈춤" |
 | 2x2 | {학습 문장 GT / label} × {평가 문장 GT / label}. **label→GT 가 핵심 지표** (label 로 학습해 사람 문장을 따르는가) |
+
+### b1 (현재 기준, 2026-10-20)
+`configs/methods/b1.yaml` = b0 + `route.slight=omit` + `style.fewshot=3` + `frames.keyframe_deg=0` + `route.rooms=house-v2`.
+relabel_half s1 label→GT SR **37.4** (b0 32.1, GT 42.5). 이후 ablation 은 `--method b1 --set ...` (이름 `b1_<arg>-<value>`).
+
+옛 이름과 생성 내용(gen_hash)이 같아 `label/rename.py` 로 복사했다 (다시 생성하지 않음). 이미 돌았거나 돌고 있는 학습·평가는 옛 이름으로 남아 있다.
+| b1 이름 | 옛 이름 (결과 폴더) |
+|---|---|
+| `b1` | `b0_slight-omit_fewshot-3_keyframe_deg-0_rooms-house-v2` |
+| `b1_stop_cue-A-grounded-v1` | `b0_slight-omit_fewshot-3_keyframe_deg-0_rooms-house-v2_stop_cue-A-grounded-v1` (node2 학습 중, 옛 이름) |
+| `b1_sibling-profiles-v1_fewshot_match-gtstyle-v1` | `b0_..._rooms-house-v2_sibling-profiles-v1_fewshot_match-gtstyle-v1` (정보량 검사는 옛 이름) |
+| `b1_select-keyframes-startsurround-v1` | `b0_..._rooms-house-v2_select-keyframes-startsurround-v1` |
+| `b1_select-keyframes-startsurround-v1_sibling-profiles-v2_fewshot_match-gtstyle-v1` | `b0_..._rooms-house-v2_select-keyframes-startsurround-v1_sibling-profiles-v2_fewshot_match-gtstyle-v1` |
+| `b1_fewshot-0` (복사 안 함) | `b0_slight-omit_keyframe_deg-0_rooms-house-v2` |
+
+```
+/usr/bin/python scripts/dataset_converters/instruction_labeling/label/rename.py --from b0_slight-omit_fewshot-3_keyframe_deg-0_rooms-house-v2 --method b1
+```
 
 ### b0 와 v278 / v278fix 의 차이
 v278 / v278fix 는 `vln-s2-pipeline`(Kemal 생성기)으로 만든 이전 label, b0 는 이 폴더의 생성기다.
@@ -77,6 +95,7 @@ v278fix → b0 는 **생성 방식(e2e)·이미지(InternNav 조건)·방향 버
 | 파일 | 하는 일 |
 |---|---|
 | `configs/methods/b0.yaml` | b0 = 그룹별 인자 값 (모든 인자와 뜻이 주석으로 있다) |
+| `configs/methods/b1.yaml` | b1 = 현재 기준 (b0 에서 4개 인자 변경) |
 | `configs/route.yaml` | 경로 단어 문구, 시작 회전 확률, 방 이름(`rooms`), 정지 단서 후보(`stop_cue`), 정지 단서 고르기(`stop_select`) |
 | `configs/style.yaml` | 프롬프트 template, 길이·정지 표현·few-shot 등 규칙 줄 |
 | `configs/frames.yaml` | 프레임 선택 규칙(`select`), 도착 직전 프레임(`approach`) |
@@ -89,6 +108,7 @@ v278fix → b0 는 **생성 방식(e2e)·이미지(InternNav 조건)·방향 버
 | `label/frames.py` / `label/route_words.py` / `label/rooms.py` / `label/stop_cues.py` / `label/style.py` / `label/sources.py` | 프레임 선택 / 경로 단어 / MP3D 방 순서 / 정지 단서 후보 / 규칙 줄·few-shot / 입력 소스 (train 릴리스 ↔ raw 매핑) |
 | `label/build_stop_cues.py` | 정지 단서 후보(A·P·R) 를 split 전체에 미리 계산해 캐시 (`stop_select` 가 읽음) |
 | `label/rehash.py` | 설정 정리 후 기존 결과의 gen_hash 갱신 |
+| `label/rename.py` | 생성 내용(gen_hash)이 같은 기존 label 을 새 방법 이름으로 복사 (예: SOTA → `b1`) |
 | `eval/text_metrics.py` | 문장 지표 (BLEU/METEOR/ROUGE/CIDEr 등, navcomposer venv). SR 과 순위가 안 맞으니 1차 필터로만 |
 | `eval/check_stop_cues.py` | 정지 단서 후보 검증 (후보 비율, GT 동의율, VLM 판정, 그림) |
 | `eval/dev_subset.json` | val_unseen dev 집합 (101 trajectory / 303 episode) |
@@ -138,6 +158,8 @@ PYTHONPATH= /home/irteam/venvs/navcomposer/bin/python scripts/dataset_converters
 | `style.length` | 길이 목표 | "15-40" | `free`, `gtdist` |
 | `style.stop` | 끝맺음 표현 | must | `stop`, `wait`, `stand`, `none`, `optional`, `gtdist`, `prefer-stop-v1/-v2`, `mix-v1` |
 | `style.fewshot` | 다른 경로의 GT train 문장 N 개를 문체 예시로 | 0 | **3** |
+| `style.sibling` | 형제(같은 경로 3 episode)마다 다른 서술 방식 줄 | none | `profiles-v1` (step / landmark / brief), `profiles-v2` (+ landmark·brief 는 시작 회전 GT 비율·첫머리 규칙) |
+| `style.fewshot_match` | fewshot 예시를 형제 서술 방식과 같은 GT 문체 묶음에서 | none | `gtstyle-v1` |
 | `style.detail` / `style.structure` | 묘사 규칙 / 문장 구조 | specific-v1 / none | `plain-v1` / `room-v1` |
 | `model` | VLM | gemma31b-bf16 | `qwen3vl32b-bf16`, `qwen3vl235b-a22b-fp8` |
 | `gen.temperature` / `max_tokens` / `max_retries` | 샘플링 | 0.35 / 140 / 5 | 재시도마다 +0.1 |
