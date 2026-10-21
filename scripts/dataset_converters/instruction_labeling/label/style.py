@@ -50,7 +50,46 @@ def _match_pool(fm: dict, name: str) -> list:
     return _MATCH[key]
 
 
-def episode_style(cfg: dict, ep: dict, sib_idx: int = 0) -> dict:
+def path_rule(cfg: dict, ep: dict, sib_idx: int, g: dict) -> dict:
+    """style.pathrule: 경로 사실(g = route_words geometry + n_turns)로 형제별 첫머리·서술 방식·길이를 고른다.
+    첫머리는 조건을 만족하는 종류 중 형제마다 다른 것 (trajectory 마다 섞은 순서). GT 문장 통계는 쓰지 않는다."""
+    pr = cfg['style']['pathrule']
+    rooms = g.get('rooms') or []
+    valid = []
+    for k in pr['openers']:
+        if k == 'turn':
+            ok = g['start_turn_said']
+        elif k == 'straight':
+            ok = abs(g['initial']) < pr['straight_max_deg']
+        elif k == 'room_exit':
+            ok = len(rooms) >= 2
+        elif k == 'destination':
+            ok = len(rooms) >= 1
+        elif k == 'landmark':  # 돌아서 출발하는 경로를 앞에 보이는 물체로 시작하면 방향이 모호하다
+            ok = not g['start_turn_said']
+        else:
+            assert False, f'unreachable pathrule opener={k!r}'
+        if ok:
+            valid.append(k)
+    key = f'{cfg["seed"]}:{ep["trajectory_id"]}:pathrule'
+    opener = random.Random(key + ':opener').sample(valid, len(valid))[sib_idx % len(valid)]
+    descs = list(pr['descriptions'])
+    desc = random.Random(key + ':desc').sample(descs, len(descs))[sib_idx % len(descs)]
+    sh = pr['short']
+    simple = len(rooms) <= sh['max_rooms'] and g['n_turns'] <= sh['max_turns']
+    short = simple and sib_idx == random.Random(key + ':short').randrange(3)
+    room = rooms[0] if opener == 'room_exit' else rooms[-1] if opener == 'destination' else ''
+    o = pr['openers'][opener]
+    check = o['check']
+    if check and '{room}' in check:  # 방 이름의 마지막 단어 (예: "living room" -> room)
+        check = check.replace('{room}', re.escape(room.split()[-1]))
+    forbid = [pr['openers']['straight']['check']] if abs(g['initial']) >= pr['no_forward_deg'] else []
+    return {'opener': opener, 'desc': desc, 'short': short, 'opener_line': o['line'].format(room=room),
+            'desc_line': pr['descriptions'][desc], 'length': sh['length'] if short else None,
+            'check': check, 'forbid': forbid, 'fewshot_class': 'brief' if short else desc}
+
+
+def episode_style(cfg: dict, ep: dict, sib_idx: int = 0, path: dict = None) -> dict:
     s = cfg['style']
     rng = random.Random(f'{cfg["seed"]}:{ep["episode_id"]}:style')
     if s['length_mode'] == 'gtdist':
@@ -76,6 +115,11 @@ def episode_style(cfg: dict, ep: dict, sib_idx: int = 0) -> dict:
         rules.append(prof[profile]['line'])
         if prof[profile].get('opener'):
             rules.append(prof[profile]['opener'])
+    if path:  # style.pathrule: 경로 사실로 고른 서술 방식·첫머리·길이
+        if path['length']:
+            rules[0] = path['length']
+        rules += [path['desc_line'], path['opener_line']]
+        profile = path['fewshot_class']
     extra = ''
     if s['fewshot']:
         pool = _train_pool()[1]
@@ -88,6 +132,9 @@ def episode_style(cfg: dict, ep: dict, sib_idx: int = 0) -> dict:
     q = dict(cfg['quality'])
     if stop in s['stop_no_require']:
         q['require_stop_condition'] = False
+    if path:  # 첫머리 사후 검사 (어기면 재시도)
+        q['require_start'] = path['check']
+        q['forbid'] = list(q.get('forbid', [])) + path['forbid']
     out = {'rules': '\n'.join(f'- {r}' for r in rules), 'extra': extra, 'quality': q, 'stop': stop}
     if profile:
         out['sibling_profile'] = profile

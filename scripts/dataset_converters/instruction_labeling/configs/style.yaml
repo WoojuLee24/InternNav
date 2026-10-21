@@ -65,6 +65,24 @@ sibling:                     # style.sibling: 같은 trajectory 의 형제(3 epi
       length: "1-2 short sentences, 12-22 words total"
       start_turn: gtrate-v1
       opener: "Begin with the room you leave or the place you head to, not with a turn"
+pathrule:                    # style.pathrule: 경로 사실로 형제별 첫머리·서술 방식·길이를 고른다 (GT 문장 통계는 쓰지 않는다). style.sibling 과 함께 쓰지 않음
+  none: null                 # 첫머리 조건은 코드(style.py path_rule)에 고정: turn=시작 회전을 경로 단어에 말함 / straight=시작 회전 straight_max_deg 미만 /
+  v1:                        #   room_exit=지나는 방 2개 이상 / destination=도착 방을 앎 / landmark=시작 회전을 말하지 않는 경로. 조건을 만족하는 것 중 형제마다 다른 것 (trajectory 마다 섞은 순서)
+    straight_max_deg: 30
+    no_forward_deg: 90       # 시작 회전이 이 각도 이상이면 "walk/go/head straight|forward|ahead" 로 시작 금지 (사후 검사)
+    descriptions:            # 서술 방식 (형제마다 번갈아). 문구는 sibling profiles-v1 과 같다
+      step: "Write it as step-by-step directions: describe each turn and the stretch between turns, in order"
+      landmark: "Describe the route mainly by the landmarks you walk past, through or toward (furniture, rooms, doorways); mention a turn only where it is needed to find the way"
+    openers:                 # line = 규칙 줄, check = 생성 문장이 이 첫머리로 시작했는지 (정규식, {room} 은 방 이름)
+      turn: {line: "Begin with the turn you make at the start", check: "^\\W*(turn|make a|spin|bear|veer|go (left|right))\\b"}
+      straight: {line: "Begin by going straight ahead from where you stand", check: "^\\W*(walk|go|head|move|proceed|continue)\\s+(straight|forward|ahead)\\b"}
+      room_exit: {line: "Begin with leaving the {room} you start in", check: "^\\W*((turn|make a|spin|bear|veer)[^.,]{0,25}?(,|\\band\\b)\\s*)?(exit|leave|walk out|step out|head out|go out|get out)\\b"}   # 앞에 짧은 회전 구절 허용 ("Turn around and leave the ...")
+      destination: {line: "Begin with where you are going (the {room}) as a plain direction, like \"Go to the ...\" or \"Head into the ...\"; do not start with \"To get to\"", check: "^\\W*(go|head|walk|make your way|proceed|move)\\b[^.]*\\b{room}"}
+      landmark: {line: "Begin with a landmark you walk past, through or toward first, one you can see in the direction you start walking (not with a turn)", check: "^(?!\\W*(turn|make a|spin|bear|veer)\\b)\\W*(\\w+\\s+){0,2}?(past|through|toward|towards|across|along|between|beside|by|alongside)\\b"}
+    short:                   # 단순한 경로(방 max_rooms 개 이하, 경로 단어 회전 max_turns 개 이하)에서만 형제 하나를 짧게
+      max_rooms: 2
+      max_turns: 2
+      length: "1-2 short sentences, 12-22 words total"
 fewshot_match:               # style.fewshot_match: fewshot 예시를 형제 서술 방식과 같은 GT train 문체 묶음에서 뽑는다 (style.fewshot > 0 일 때)
   none: null                 # 형제 -> 방식 배정은 style.sibling 과 같은 규칙 (같이 쓰면 같은 방식). GT 분류 (train 10,819: brief 33 / landmark 35 / step 21 / 나머지 11 %)
   gtstyle-v1:

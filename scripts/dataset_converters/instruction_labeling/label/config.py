@@ -114,7 +114,10 @@ def resolve(m: dict) -> dict:
              'fewshot_header': style_res['fewshot_header'][st['fewshot_header']],
              # 형제별 서술 방식 / 문체 맞춘 fewshot: 끄면 None (gen_hash 에서 빠짐)
              'sibling': style_res['sibling'][st.get('sibling', 'none')],
-             'fewshot_match': style_res['fewshot_match'][st.get('fewshot_match', 'none')]}
+             'fewshot_match': style_res['fewshot_match'][st.get('fewshot_match', 'none')],
+             'pathrule': style_res['pathrule'][st.get('pathrule', 'none')]}
+    assert not (style['sibling'] and style['pathrule']), 'style.sibling 과 style.pathrule 은 함께 쓰지 않는다'
+    assert not style['pathrule'] or a['delivery'] == 'image', 'style.pathrule 은 delivery=image 에서만'
     if style['sibling'] and any('start_turn' in p for p in style['sibling']):  # 방식별 시작 회전: 키 -> 확률표 내용 (gen_hash 에 들어가게)
         assert a['delivery'] == 'image', 'style.sibling 의 start_turn 은 delivery=image 에서만'
         style['sibling'] = [dict(p, start_turn_rate=None if p['start_turn'] == 'always' else route_res['start_turn_rate'][p['start_turn']])

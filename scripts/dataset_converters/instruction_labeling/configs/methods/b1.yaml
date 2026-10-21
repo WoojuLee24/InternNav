@@ -40,6 +40,7 @@ args:
     fewshot_header: v1
     sibling: none              # none | profiles-v1 | profiles-v2 (v2 = 방식별 시작 회전·첫머리 규칙; 형제마다 다른 서술 방식 줄: step / landmark / brief; style.yaml sibling)
     fewshot_match: none        # none | gtstyle-v1 (fewshot 예시를 형제 서술 방식과 같은 GT 문체 묶음에서; style.fewshot > 0)
+    pathrule: none             # none | v1 (경로 사실로 형제별 첫머리·서술 방식·길이; style.yaml pathrule. style.sibling 과 함께 쓰지 않음)
   model: gemma31b-bf16         # model/<name>.yaml
   gen:                         # 샘플링·재시도·품질검사
     temperature: 0.35
