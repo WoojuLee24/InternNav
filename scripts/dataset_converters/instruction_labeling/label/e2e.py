@@ -11,7 +11,7 @@ import re
 from frames import add_approach_frames, select_keyframes, subsample
 from sources import house_path, view_path
 from route_words import route_words, said, turn_words
-from style import episode_style
+from style import episode_style, path_rule
 
 LANDMARK_NOUNS = {'table', 'chair', 'couch', 'sofa', 'desk', 'bed', 'stairs', 'staircase', 'doorway', 'door',
                   'window', 'kitchen', 'bedroom', 'hallway', 'living', 'dining', 'bathroom', 'cabinet', 'shelf',
@@ -35,6 +35,8 @@ def quality_check(text: str, q: dict) -> list:
     if q.get('require_landmark', False) and not any(n in text.lower() for n in LANDMARK_NOUNS):
         issues.append('no_landmark')
     issues += [f'forbid:{r}' for r in q.get('forbid', []) if re.search(r, text, re.I)]
+    if q.get('require_start') and not re.search(q['require_start'], text, re.I):  # style.pathrule 첫머리
+        issues.append('opener')
     return issues
 
 
@@ -138,13 +140,20 @@ def build_request(cfg: dict, ep: dict, track: dict) -> tuple:
     """VLM 요청 content, 기록용 입력 요약, episode 별 style."""
     rc = cfg['route']
     sel = select_frames(cfg, ep, track)
-    es = episode_style(cfg, ep, track['item'].get('sib_idx', 0))
-    if 'start_turn_rate' in es:  # style.sibling profiles-v2: 형제 서술 방식별 시작 회전 확률
+    sib = track['item'].get('sib_idx', 0)
+    pathrule = cfg['style'].get('pathrule')
+    es = None if pathrule else episode_style(cfg, ep, sib)
+    if es and 'start_turn_rate' in es:  # style.sibling profiles-v2: 형제 서술 방식별 시작 회전 확률
         rc = dict(rc, start_turn_rate=es['start_turn_rate'])
     route, g = route_words(ep, rc, cfg['seed'])
     cue = stop_cue_line(rc, ep, track) if not rc.get('stop_select') else stop_select_line(rc, ep, track)
     if cue['line']:
         route += '\n' + cue['line']
+    prule = None
+    if pathrule:  # style.pathrule: 경로 사실을 본 뒤 형제별 첫머리·서술 방식·길이를 고른다
+        g['n_turns'] = sum(said(a, rc) for a in g['turns'].values())
+        prule = path_rule(cfg, ep, sib, g)
+        es = episode_style(cfg, ep, sib, prule)
     content = []
     rigs = cfg['frames']['rigs']
     for k, f in enumerate(sel, 1):
@@ -163,6 +172,8 @@ def build_request(cfg: dict, ep: dict, track: dict) -> tuple:
               'stop_style': es['stop'], 'stop_cue': cue['cands']}
     if 'sibling_profile' in es:
         inputs['sibling_profile'] = es['sibling_profile']
+    if prule:
+        inputs['pathrule'] = {k: prule[k] for k in ('opener', 'desc', 'short')}
     return content, inputs, es
 
 
