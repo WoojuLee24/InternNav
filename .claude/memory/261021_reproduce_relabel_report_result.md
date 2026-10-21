@@ -21,17 +21,22 @@ HTML 판: [VLN 파이프라인 ③ 재현과 relabel](https://claude.ai/artifact
 평가: R2R val_unseen 1,839 episode, `vln_r2r_full_ld30.yaml`, H200 8장.
 
 ### 1-1. 결과 (SR / SPL / OS / NE)
-| 무엇 | 우리 | 공식 (README) | 판정 |
+공식 수치는 두 가지다: **wo-dagger** (DAgger 데이터 없이 학습, S2+SPF 55.4 / Dual NavDP 58.2) 와 **최종** (DAgger 포함, S2+SPF 60.9 / Dual DualVLN 64.3).
+DAgger = 학습한 모델을 돌려 틀린 지점의 정답 행동을 다시 모아 추가 학습하는 방식. 그 데이터는 공개되지 않아 **우리 stage1 의 맞는 비교 대상은 wo-dagger** 다.
+
+| 무엇 | 우리 | vs wo-dagger (DAgger 없음) | vs 최종 (DAgger 포함) |
 |---|---|---|---|
-| 공개 System2 ckpt 를 우리 평가로 | **61.7** / 55.7 / 68.2 / 4.18 | S2+SPF 60.9 / 55.2 / 68.3 / 4.25 | 평가 파이프라인 정상 |
-| 공개 DualVLN ckpt 를 우리 평가로 | **63.7** / 58.1 / 69.4 / 4.12 | 64.3 / 58.5 / 70.7 / 4.05 | 정상 |
-| stage2: 공개 System2 위에서 우리가 학습 | **62.9** (08-20) / **63.7** (09-30) | 64.3 | stage2 레시피 재현 (차이 ≤ 1.5) |
-| stage1: upstream 그대로 (scalevln 없음, 2 epoch) | 44.5 / 40.1 / 56.0 / 6.45 | S2+SPF 60.9 (wo-dagger 55.4) | **−16.4** |
-| stage1 + scalevln, 1 epoch | 49.2 / 44.1 / 60.3 / 5.84 | | −11.7 |
-| stage1 + scalevln, 2 epoch | 49.4 / 44.6 / 61.7 / 6.06 | | −11.5 |
-| stage1 + scalevln 1 epoch 중간 ckpt-24000 (최고) | **52.6** / 49.2 / 60.4 / 5.28 | | −8.3 (wo-dagger 대비 −2.8) |
-| 전체 체인: 우리 stage1(44.5) → stage2 | 46.8 | Dual 64.3 | −17.5 |
-| 전체 체인: 우리 stage1(sv 1 epoch, 49.2) → stage2 | **52.4** / 46.9 / 62.7 / 5.53 | Dual 64.3 | −11.9 |
+| 공개 System2 ckpt 를 우리 평가로 | **61.7** / 55.7 / 68.2 / 4.18 | — | 60.9 → +0.8 (평가 정상) |
+| 공개 DualVLN ckpt 를 우리 평가로 | **63.7** / 58.1 / 69.4 / 4.12 | — | 64.3 → −0.6 (평가 정상) |
+| stage2: 공개 System2(DAgger 포함) 위에서 우리가 학습 | **62.9** (08-20) / **63.7** (09-30) | — | 64.3 → −0.6~−1.4 (재현) |
+| stage1: upstream 그대로 (scalevln 없음, 2 epoch) | 44.5 / 40.1 / 56.0 / 6.45 | 55.4 → **−10.9** | 60.9 → −16.4 |
+| stage1 + scalevln, 1 epoch (최종) | 49.2 / 44.1 / 60.3 / 5.84 | 55.4 → **−6.2** | 60.9 → −11.7 |
+| stage1 + scalevln, 2 epoch (최종) | 49.4 / 44.6 / 61.7 / 6.06 | 55.4 → **−6.0** | 60.9 → −11.5 |
+| stage1 + scalevln 1 epoch 중간 ckpt-24000 (최고) | **52.6** / 49.2 / 60.4 / 5.28 | 55.4 → **−2.8 (근접)** | 60.9 → −8.3 |
+| 전체 체인: 우리 stage1(44.5) → stage2 | 46.8 | 58.2* → −11.4 | 64.3 → −17.5 |
+| 전체 체인: 우리 stage1(sv 1 epoch, 49.2) → stage2 | **52.4** / 46.9 / 62.7 / 5.53 | 58.2* → −5.8 | 64.3 → −11.9 |
+
+\* Dual 의 wo-dagger 공식 수치는 NavDP(58.2) 만 있고 DualVLN 은 없어 참고값.
 
 ### 1-2. 학습 run
 | run | 내용 | 기간 (KST) | 상태 |
@@ -45,12 +50,13 @@ HTML 판: [VLN 파이프라인 ③ 재현과 relabel](https://claude.ai/artifact
 | `baseline/dualvln_stage2_from_stage1_20261006_071041` | sv 1 epoch stage1 → stage2 | 10-06 → 10-08 | 완료 (52.4) |
 
 ### 1-3. 핵심
-1. **평가와 stage2 는 재현된다.** 공개 ckpt 를 우리 평가로 재면 공식과 ±1 이내, 공개 System2 위의 stage2 학습도 64.3 대비 62.9~63.7.
-2. **차이는 stage1 에 있다.** upstream 스크립트 그대로는 44.5. scalevln 을 넣으면 +5 (49.2), 최고 중간 ckpt 52.6 — 그래도 공식 S2 60.9 보다 8 낮다.
-3. **stage2 는 약한 stage1 을 메우지 못한다** (체인 52.4 vs 64.3).
-4. **남은 원인 (추정)**: 공식 모델은 DAgger 데이터를 썼을 가능성이 높다 (README 의 "wo-dagger" 행이 55.4). 우리는 그 데이터가 없다. 2 epoch 과적합도 확인됨.
-   코드·인자·라벨 차이는 배제했다 (`verify_params_stage1.py` 일치, 라벨 209,741개 일치).
-5. 그래서 instruction labeling 실험(2장)은 full 이 아니라 **mini 데이터 + stage1 1 epoch** 로, GT 학습과 label 학습을 같은 조건에서 비교한다.
+1. **평가와 stage2 는 재현된다.** 공개 ckpt 를 우리 평가로 재면 공식과 ±1 이내, 공개 System2(DAgger 포함) 위의 stage2 학습도 64.3 대비 62.9~63.7.
+2. **stage1 은 맞는 기준(wo-dagger 55.4)에 근접했지만 아직 못 미친다.** 최고 중간 ckpt 52.6 (−2.8), 최종 ckpt 49.2~49.4 (약 −6).
+   "거의 재현" 이라 하려면 최종 ckpt 가 ±1.5 안에 들어와야 한다.
+3. **scalevln 을 넣으면 +5** (44.5 → 49.2). 2 epoch 는 과적합 (loss 0.04) 이라 1 epoch 중간 ckpt 가 가장 좋았다.
+4. **공식 최종과의 나머지 차이 (55.4 → 60.9, 5.5 %p) 는 DAgger 데이터 몫** 으로 본다. README 에 두 수치가 따로 있어 크기를 알 수 있고, 우리는 그 데이터가 없다.
+5. **stage2 는 약한 stage1 을 메우지 못한다** (체인 52.4).
+6. 그래서 instruction labeling 실험(2장)은 full 이 아니라 **mini 데이터 + stage1 1 epoch** 로, GT 학습과 label 학습을 같은 조건에서 비교한다.
 
 정정: `.claude/memory/dualvln_stage1_stage2_repro_result.md` 의 "stage2_full_20260818 이 step 4993 에서 사망" 은 틀렸다 — 18,321 step 까지 완료하고 평가됐다.
 
