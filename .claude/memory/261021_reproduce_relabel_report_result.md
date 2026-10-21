@@ -2,7 +2,7 @@
 
 5090 서버의 파이프라인 report ① 환경과 경로 데이터셋, ② labeling 학습 평가 에 이어지는 편이다.
 두 질문에 답한다: (1) 공개 InternVLA-N1 성능을 우리 손으로 재현했는가, (2) 사람 문장 없이 자동 생성 문장(label)으로 학습해도 되는가.
-HTML 판: [VLN 파이프라인 ③ 재현과 relabel](https://claude.ai/artifact/S51KpgTbDm4swoTb6eSiSN) (비공개, 페이지 Share 메뉴로 공유). 모든 시각 KST.
+HTML 판: [VLN 파이프라인 ③ 재현과 relabel](https://claude.ai/artifact/S51KpgTbDm4swoTb6eSiSN) (비공개, 페이지 Share 메뉴로 공유), repo 사본 `.claude/memory/261021_reproduce_relabel_report.html`. 모든 시각 KST.
 
 ## 0. 용어
 | 용어 | 뜻 |

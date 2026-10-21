@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body>
+<!-- 게시판: https://claude.ai/artifact/S51KpgTbDm4swoTb6eSiSN (Version 3) -->
+<title>VLN 파이프라인 ③ 재현과 relabel</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: 한 열 보고서. 위에 파이프라인 지도, 장마다 결론 → 그림 → 표 → 핵심. */
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --fg:#1b2430; --muted:#5b6675; --line:#dde2e8;
+  --accent:#1f6f8b; --accent-soft:#e3f0f5; --gt:#7a5c00; --gt-soft:#f6edd3;
+  --good:#2e7d4f; --bad:#b4442f; --warn:#9a6b00;
+  --sans:"IBM Plex Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#12161b; --panel:#1a2027; --fg:#e4e8ee; --muted:#9aa5b3; --line:#2c343e;
+  --accent:#5fb3d0; --accent-soft:#1d3440; --gt:#e0bd5c; --gt-soft:#3a3018;
+  --good:#6cc391; --bad:#ec8a73; --warn:#e2b456; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12161b; --panel:#1a2027; --fg:#e4e8ee; --muted:#9aa5b3; --line:#2c343e;
+  --accent:#5fb3d0; --accent-soft:#1d3440; --gt:#e0bd5c; --gt-soft:#3a3018;
+  --good:#6cc391; --bad:#ec8a73; --warn:#e2b456; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:15px;line-height:1.65}
+.wrap{max-width:1000px;margin:0 auto;padding-inline:20px;padding-block:28px 64px;display:flex;flex-direction:column;gap:28px}
+h1{font-size:1.75rem;line-height:1.3;margin:0;text-wrap:balance}
+h2{font-size:1.3rem;margin:0;text-wrap:balance}
+h3{font-size:1.05rem;margin:0;color:var(--accent)}
+p{margin:0;max-width:72ch}
+.eyebrow{font-family:var(--mono);font-size:.78rem;letter-spacing:.06em;color:var(--muted);text-transform:uppercase}
+.lede{color:var(--muted)}
+section.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:22px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.map{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.map a,.map div{display:block;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--fg);text-decoration:none;font-size:.88rem}
+.map a:hover{border-color:var(--accent)}
+.map .here{border-color:var(--accent);background:var(--accent-soft)}
+.map b{display:block;font-family:var(--mono);font-size:.75rem;color:var(--muted);font-weight:500}
+.tbl{overflow-x:auto;min-width:0}
+table{border-collapse:collapse;width:100%;font-size:.9rem}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:500;font-size:.82rem;white-space:nowrap}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.gt td{background:var(--gt-soft)}
+tr.best td{background:var(--accent-soft);font-weight:500}
+code{font-family:var(--mono);font-size:.84em;background:var(--accent-soft);padding:1px 5px;border-radius:4px;word-break:break-all}
+.terms{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.terms div{border-left:3px solid var(--line);padding-left:10px;font-size:.9rem}
+.terms b{font-family:var(--mono)}
+ol.key{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:6px;max-width:80ch}
+.pill{display:inline-block;font-size:.75rem;padding:1px 8px;border-radius:999px;font-weight:500;white-space:nowrap}
+.ok{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}
+.no{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+.wait{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}
+.chart{overflow-x:auto;min-width:0}
+.chart svg{display:block;width:100%;min-width:560px;height:auto}
+.chart text{fill:var(--fg);font-family:var(--sans);font-size:12px}
+.chart .axis{stroke:var(--line)}
+.chart .lbl{fill:var(--muted);font-size:11px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:.82rem;color:var(--muted)}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.note{font-size:.85rem;color:var(--muted)}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+
+<div class="wrap">
+  <header style="display:flex;flex-direction:column;gap:10px">
+    <div class="eyebrow">VLN pipeline report ③ · 2026-10-21 KST · H200 node1–4</div>
+    <h1>VLN 파이프라인 ③ 재현과 relabel</h1>
+    <p class="lede">두 가지 질문에 답합니다. 공개 InternVLA-N1 성능을 우리 손으로 다시 만들 수 있는가. 사람이 쓴 지시문 없이 자동 생성한 문장(label)으로 학습해도 되는가.</p>
+  </header>
+
+  <nav class="map" aria-label="파이프라인 report">
+    <a href="https://claude.ai/artifact/F8picTt7BhSRXLNUUXAWZ2" target="_blank" rel="noopener"><b>① 01–04</b>환경과 경로 데이터셋</a>
+    <a href="https://claude.ai/artifact/HgBoKBGedShctw89YWnbSn" target="_blank" rel="noopener"><b>② 05–08</b>labeling 학습 평가</a>
+    <a class="here" href="#reproduce"><b>③ 1장</b>full 데이터 재현</a>
+    <a class="here" href="#relabel"><b>③ 2장</b>relabel 2x2</a>
+  </nav>
+
+  <section class="card">
+    <h2>용어</h2>
+    <div class="terms">
+      <div><b>stage1</b> — Qwen2.5-VL-7B에서 시작해 System2(언어→목표 픽셀)를 학습. 평가는 S2 + ShortestPathFollower</div>
+      <div><b>stage2</b> — stage1 위에 System1(로컬 이동 정책)을 붙여 학습. 평가는 dual system</div>
+      <div><b>SR</b> — 성공률. 멈춘 위치가 목표 3 m 안인 비율 (주 지표)</div>
+      <div><b>OS</b> — 경로 중 한 번이라도 목표 3 m 안에 들어간 비율</div>
+      <div><b>ld30</b> — 평가 때 카메라를 아래로 30° 숙여 봄. 학습 데이터와 같은 정본</div>
+      <div><b>scalevln</b> — 공개 학습 데이터 하나. upstream 학습 스크립트에서 주석 처리되어 있음</div>
+      <div><b>GT / label</b> — R2R 사람 지시문 / 같은 경로에 자동 생성기로 새로 쓴 지시문</div>
+      <div><b>2x2</b> — {학습 문장 GT·label} × {평가 문장 GT·label}. 경로·이미지는 같고 문장만 다름</div>
+    </div>
+  </section>
+
+  <section class="card" id="reproduce">
+    <div class="eyebrow">1장 · full 데이터 · R2R val_unseen 1,839 · ld30</div>
+    <h2>평가와 stage2는 재현됐고, stage1은 DAgger 없는 공식 수치에 2.8 %p 모자랍니다</h2>
+    <p>공개 체크포인트를 우리 평가로 재면 공식 수치와 1 %p 이내입니다. 공개 System2 위에서 stage2를 학습해도 62.9~63.7로 공식 64.3에 가깝습니다. Qwen2.5-VL-7B부터 학습한 stage1은 두 공식 기준과 따로 비교합니다. README에는 DAgger 데이터 없이 학습한 수치(wo-dagger, S2 55.4)와 DAgger까지 쓴 최종 수치(S2 60.9)가 함께 있고, 우리는 DAgger 데이터가 없으므로 맞는 비교 대상은 wo-dagger입니다.</p>
+    <div class="terms">
+      <div><b>DAgger</b> — 학습한 모델을 돌려 보며 틀린 지점의 정답 행동을 다시 모아 추가 학습하는 방식. 그 데이터는 공개되지 않았음</div>
+      <div><b>wo-dagger</b> — README의 DAgger 없이 학습한 공식 수치. S2+SPF 55.4, Dual(NavDP) 58.2. DualVLN의 wo-dagger 수치는 없음</div>
+    </div>
+    <div class="legend"><span><i style="background:var(--gt)"></i>공식 (README)</span><span><i style="background:var(--accent)"></i>우리</span></div>
+    <div class="chart" id="chart-repro" role="img" aria-label="재현 SR 막대그래프"></div>
+    <div class="tbl"><table>
+      <thead><tr><th>무엇</th><th>우리 SR / SPL / OS / NE</th><th>vs 공식 wo-dagger<br>(DAgger 없음)</th><th>vs 공식 최종<br>(DAgger 포함)</th></tr></thead>
+      <tbody>
+        <tr><td>공개 System2 ckpt를 우리 평가로</td><td class="n">61.7 / 55.7 / 68.2 / 4.18</td><td class="n">—</td><td class="n">60.9 <span class="pill ok">+0.8 평가 정상</span></td></tr>
+        <tr><td>공개 DualVLN ckpt를 우리 평가로</td><td class="n">63.7 / 58.1 / 69.4 / 4.12</td><td class="n">—</td><td class="n">64.3 <span class="pill ok">−0.6 평가 정상</span></td></tr>
+        <tr><td>stage2: 공개 System2(DAgger 포함) 위에서 우리가 학습 (08-20 / 09-30)</td><td class="n">62.9 / 63.7</td><td class="n">—</td><td class="n">64.3 <span class="pill ok">−0.6~−1.4 재현</span></td></tr>
+        <tr><td>stage1: upstream 스크립트 그대로 (scalevln 없음, 2 epoch)</td><td class="n">44.5 / 40.1 / 56.0 / 6.45</td><td class="n">55.4 <span class="pill no">−10.9</span></td><td class="n">60.9 <span class="pill no">−16.4</span></td></tr>
+        <tr><td>stage1 + scalevln, 1 epoch (최종)</td><td class="n">49.2 / 44.1 / 60.3 / 5.84</td><td class="n">55.4 <span class="pill no">−6.2</span></td><td class="n">60.9 <span class="pill no">−11.7</span></td></tr>
+        <tr><td>stage1 + scalevln, 2 epoch (최종)</td><td class="n">49.4 / 44.6 / 61.7 / 6.06</td><td class="n">55.4 <span class="pill no">−6.0</span></td><td class="n">60.9 <span class="pill no">−11.5</span></td></tr>
+        <tr class="best"><td>stage1 + scalevln 1 epoch, 중간 ckpt-24000 (최고)</td><td class="n">52.6 / 49.2 / 60.4 / 5.28</td><td class="n">55.4 <span class="pill wait">−2.8 근접</span></td><td class="n">60.9 <span class="pill no">−8.3</span></td></tr>
+        <tr><td>전체 체인: 우리 stage1 49.2 → stage2 (DualVLN)</td><td class="n">52.4 / 46.9 / 62.7 / 5.53</td><td class="n">58.2* <span class="pill no">−5.8</span></td><td class="n">64.3 <span class="pill no">−11.9</span></td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">* Dual의 wo-dagger 공식 수치는 NavDP(58.2)만 있고 DualVLN은 없어서 참고값입니다.</p>
+    <h3>핵심</h3>
+    <ol class="key">
+      <li><b>평가 파이프라인과 stage2 레시피는 재현됐습니다.</b> 공식과 1.5 %p 이내입니다. 이 비교는 공개 System2(DAgger 포함) 위에서 한 것입니다.</li>
+      <li><b>stage1은 맞는 기준(wo-dagger)에 근접했지만 아직 못 미칩니다.</b> 최고 중간 체크포인트가 52.6으로 wo-dagger 55.4보다 2.8 %p 낮고, 최종 체크포인트는 49.2~49.4로 약 6 %p 낮습니다. "거의 재현"이라고 하려면 최종 체크포인트에서 ±1.5 %p 안에 들어와야 합니다.</li>
+      <li><b>scalevln을 넣으면 +5 %p</b>입니다(44.5 → 49.2). 2 epoch는 과적합이어서(loss 0.04) 1 epoch 중간 체크포인트가 가장 좋았습니다.</li>
+      <li><b>공식 최종 수치와의 나머지 차이(55.4 → 60.9, 5.5 %p)는 DAgger 데이터 몫</b>으로 봅니다. README에 두 수치가 따로 있어 그 크기를 알 수 있고, 우리는 그 데이터가 없습니다.</li>
+      <li><b>stage2는 약한 stage1을 메우지 못합니다.</b> 우리 stage1 위의 전체 체인은 52.4입니다.</li>
+      <li>그래서 2장의 labeling 실험은 full 대신 <b>mini 데이터와 stage1 1 epoch</b>로 하고, GT 학습과 label 학습을 같은 조건에서 비교합니다.</li>
+    </ol>
+    <p class="note">결과 파일: <code>/home/irteam/data-vol2/checkpoints/{baseline,baseline_ablation}/&lt;run&gt;/logs/*/result_h200.json</code>. 주요 run: stage1 gemm (08-25→08-30), stage1 sv 1·2 epoch (09-29→10-04, 10-09), 체인 stage2 (10-06→10-08).</p>
+  </section>
+
+  <section class="card" id="relabel">
+    <div class="eyebrow">2장 · mini 데이터 (R2R 61 scene, 10,684 episode) · stage1 1 epoch · val_unseen 1,839</div>
+    <h2>현재 기준 label b1은 GT 학습의 88 %입니다</h2>
+    <p>label로 학습하고 사람 문장으로 평가한 SR(label→GT)이 b1 37.4입니다. GT로 학습한 42.5의 88 %이고, 이전 기준선 v278fix(31.9)보다 5.5 %p 높습니다. 학습 1회 기준이며 오차는 약 ±2 %p입니다.</p>
+    <div class="legend"><span><i style="background:var(--gt)"></i>GT 학습 (상한)</span><span><i style="background:var(--accent)"></i>이 repo 생성기 (b0·b1 계열)</span><span><i style="background:var(--muted)"></i>이전 생성기 (v278fix)</span></div>
+    <div class="chart" id="chart-relabel" role="img" aria-label="label별 SR 막대그래프"></div>
+
+    <h3>label 계보</h3>
+    <div class="tbl"><table>
+      <thead><tr><th>label</th><th>생성기</th><th>무엇이 다른가</th></tr></thead>
+      <tbody>
+        <tr><td>v278</td><td>gemma-4-31B AWQ, 2단계</td><td>프레임별 장면 요약 글을 만든 뒤 글만 보고 작성. 프레임 버그 3개가 있는 상태라 2x2 학습은 하지 않음</td></tr>
+        <tr><td>v278fix</td><td>v278 + 버그 수정</td><td>waypoint 기준 key frame, HFOV 79°, 검은 프레임 제거, seed 고정. 이전 기준선</td></tr>
+        <tr><td><b>b0</b></td><td>이 repo, gemma-4-31B bf16, 1단계</td><td>이미지 여러 장과 경로 단어를 VLM에 한 번에 넣음. InternNav 학습·평가와 같은 이미지, 올바른 카메라 방향 (v278 계열은 회전·도착 프레임이 거울상)</td></tr>
+        <tr class="best"><td><b>b1</b></td><td>b0 + 4개 인자</td><td>살짝 꺾이는 회전 생략, 사람 문장 예시 3개, 모든 waypoint 프레임, 지나는 방 순서(MP3D 주석). 현재 기준 (10-20 지정)</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>2x2 결과 (SR / OS %)</h3>
+    <p class="note">label→GT: label로 학습해 사람 문장으로 평가(주 지표). label→label: 자기 문장으로 평가(문체를 외우면 높아짐). GT→label: 사람 문장으로 학습한 모델에 label 문장을 줌(문장의 경로 정보량).</p>
+    <div class="tbl"><table>
+      <thead><tr><th>학습 label</th><th>label→GT</th><th>label→label</th><th>GT→label</th></tr></thead>
+      <tbody>
+        <tr class="gt"><td>GT (상한)</td><td class="n">42.5 / 52.5</td><td class="n">—</td><td class="n">—</td></tr>
+        <tr class="best"><td>b1</td><td class="n">37.4 / 50.1</td><td class="n">52.9 / 66.0</td><td class="n">44.0 / 56.8</td></tr>
+        <tr><td>b1 − 사람 문장 예시</td><td class="n">35.3 / 49.4</td><td class="n">53.2 / 65.5</td><td class="n">44.2 / 57.0</td></tr>
+        <tr><td>b1 + 정지 단서(물체)</td><td class="n">35.9 / 47.7</td><td class="n">49.4 / 64.8</td><td class="n">42.0 / 54.3</td></tr>
+        <tr><td>b1 − 모든 waypoint</td><td class="n">35.9 / 48.9</td><td class="n">51.9 / 64.1</td><td class="n">41.4 / 53.6</td></tr>
+        <tr><td>b1 − 모든 waypoint, Qwen3-VL-32B로 생성</td><td class="n">33.8 / 48.3</td><td class="n">47.8 / 61.0</td><td class="n">37.4 / 52.1</td></tr>
+        <tr><td>b1 − 모든 waypoint, Qwen3-VL-235B로 생성</td><td class="n">30.6 / 50.8</td><td class="n">48.3 / 63.7</td><td class="n">38.8 / 51.0</td></tr>
+        <tr><td>b0를 v278 식 2단계로 생성</td><td class="n">33.8 / 52.5</td><td class="n">54.7 / 68.0</td><td class="n">38.1 / 52.9</td></tr>
+        <tr><td>b0</td><td class="n">32.1 / 49.4</td><td class="n">56.3 / 67.9</td><td class="n">40.5 / 52.2</td></tr>
+        <tr><td>v278fix (이전 기준선)</td><td class="n">31.9 / 40.0</td><td class="n">31.9 / 41.9</td><td class="n">30.0 / 43.4</td></tr>
+        <tr><td>v278 (버그 수정 전)</td><td colspan="3">학습 안 함. 프레임 버그 3개를 고친 v278fix부터 2x2를 돌렸습니다</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>실패 유형 (label→GT, %)</h3>
+    <div class="tbl"><table>
+      <thead><tr><th>label</th><th>성공</th><th>지나침 (목표 근처까지 갔다가 다른 곳에서 멈춤)</th><th>못 감 (목표 근처에 한 번도 못 감)</th></tr></thead>
+      <tbody>
+        <tr class="gt"><td>GT</td><td class="n">42.5</td><td class="n">≈10</td><td class="n">≈47.5</td></tr>
+        <tr class="best"><td>b1</td><td class="n">37.4</td><td class="n">12.7</td><td class="n">49.6</td></tr>
+        <tr><td>b0</td><td class="n">32.1</td><td class="n">15.8</td><td class="n">49.5</td></tr>
+        <tr><td>v278fix</td><td class="n">31.9</td><td class="n">8.1</td><td class="n">60.0</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>핵심</h3>
+    <ol class="key">
+      <li><b>문장에 담긴 경로 정보는 이미 충분합니다.</b> b1 문장을 GT 학습 모델에 주면 44.0으로 사람 문장(42.5)보다 높습니다. v278fix는 30.0으로 정보 손실이 컸습니다.</li>
+      <li><b>v278fix → b0의 이득은 입력 이미지와 카메라 방향에서 왔습니다.</b> b0를 v278 식 2단계로 되돌려도 33.8로 비슷했습니다.</li>
+      <li><b>지나는 방 정보가 가장 효과적이었습니다(+3.2).</b> 목표를 지나치는 비율이 17.7 %에서 12.7 %로 줄었습니다. 정지 단서는 지나침을 줄이지만 못 감을 늘려 순이득이 작았습니다.</li>
+      <li><b>남은 5 %p는 문체 차이입니다.</b> b1로 학습한 모델은 자기 문장에서 52.9, 사람 문장에서 37.4입니다. 같은 경로의 문장 3개가 거의 같습니다(첫 3단어가 같은 비율 76 %, 사람은 4 %).</li>
+      <li><b>생성 모델은 gemma-4-31B를 유지합니다.</b> Qwen3-VL 32B는 −2.1, 235B는 −5.3이었습니다.</li>
+    </ol>
+
+    <h3>진행 중 — 같은 경로의 문장 3개를 다르게 쓰기 (b1 기반)</h3>
+    <div class="tbl"><table>
+      <thead><tr><th>실험</th><th>바꾼 것</th><th>첫 3단어 같음 (사람 3.9 %)</th><th>정보량 GT→label (b1 44.0, 기준 42)</th><th>학습 결과</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>문장마다 서술 방식(단계별·물체 중심·짧게) + 그 문체의 사람 예시</td><td class="n">61.6 %</td><td class="n">43.6 <span class="pill ok">통과</span></td><td><span class="pill wait">10-21 15:40</span></td></tr>
+        <tr><td>2</td><td>출발 지점 좌·우·뒤 이미지 추가</td><td class="n">76.0 %</td><td class="n">43.6 <span class="pill ok">통과</span></td><td><span class="pill wait">10-22 07:50</span></td></tr>
+        <tr><td>3</td><td>1 + 2 + 두 문장은 시작 회전 생략</td><td class="n">20.7 %</td><td class="n">39.7 <span class="pill no">미달</span></td><td><span class="pill wait">10-21 15:40</span></td></tr>
+        <tr><td>pathrule</td><td>1 + 2 + 경로 사실에 맞는 첫머리만 허락, 문장마다 다른 첫머리</td><td class="n">19.8 % (dev)</td><td class="n">40.2 <span class="pill no">미달</span></td><td>—</td></tr>
+      </tbody>
+    </table></div>
+    <ol class="key">
+      <li><b>실험 3이 떨어진 이유:</b> 크게 돌아서 출발하는 경로에서 "Head forward"처럼 틀린 방향으로 시작한 문장이 있었습니다(해당 문장 SR 26 %). 사람은 회전을 생략할 때 "Leave the bedroom"처럼 방으로 시작합니다(그런 사람 문장 SR 41 %).</li>
+      <li><b>pathrule이 떨어진 이유:</b> "목적지 먼저" 첫머리(전체의 33 %)가 −8.9 %p였습니다. 회전·직진·물체로 시작한 문장은 손실이 없었습니다. 다음 버전은 목적지 첫머리를 뺍니다.</li>
+    </ol>
+    <p class="note">결과 파일: <code>/home/irteam/data-vol2/checkpoints/relabel_half/&lt;run&gt;/logs/&lt;cell&gt;/result_h200.json</code>. 생성기와 인자 설명: <code>scripts/dataset_converters/instruction_labeling/README.md</code>. md 판: <code>.claude/memory/261021_reproduce_relabel_report_result.md</code>.</p>
+  </section>
+</div>
+
+<script>
+(function(){
+  function bars(el, rows, max, refs){
+    var W=760, rowH=30, left=330, right=60, top=10, H=top+rows.length*rowH+30;
+    var x=function(v){return left+(W-left-right)*v/max;};
+    var s='<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg">';
+    for(var t=0;t<=max;t+=10){s+='<line class="axis" x1="'+x(t)+'" y1="'+top+'" x2="'+x(t)+'" y2="'+(H-24)+'"/><text class="lbl" x="'+x(t)+'" y="'+(H-8)+'" text-anchor="middle">'+t+'</text>';}
+    (refs||[]).forEach(function(r){s+='<line x1="'+x(r.v)+'" y1="'+top+'" x2="'+x(r.v)+'" y2="'+(H-24)+'" stroke="var(--gt)" stroke-dasharray="4 3" stroke-width="1.5"/><text class="lbl" x="'+(x(r.v)+4)+'" y="'+(top+10)+'">'+r.t+'</text>';});
+    rows.forEach(function(r,i){var y=top+i*rowH+5;
+      s+='<text x="'+(left-10)+'" y="'+(y+14)+'" text-anchor="end">'+r.l+'</text>';
+      s+='<rect x="'+left+'" y="'+y+'" width="'+(x(r.v)-left)+'" height="18" rx="2" fill="'+r.c+'"/>';
+      s+='<text x="'+(x(r.v)+6)+'" y="'+(y+14)+'" style="font-family:var(--mono)">'+r.v.toFixed(1)+'</text>';});
+    el.innerHTML=s+'</svg>';
+  }
+  var A='var(--accent)', G='var(--gt)', M='var(--muted)';
+  bars(document.getElementById('chart-repro'),[
+    {l:'공식 Dual DualVLN',v:64.3,c:G},{l:'공식 S2 + SPF',v:60.9,c:G},{l:'공식 wo-dagger S2 + SPF',v:55.4,c:G},
+    {l:'공개 DualVLN ckpt, 우리 평가',v:63.7,c:A},{l:'공개 System2 ckpt, 우리 평가',v:61.7,c:A},
+    {l:'stage2 (공개 S2 위), 우리 학습',v:63.7,c:A},{l:'stage1 upstream 그대로',v:44.5,c:A},
+    {l:'stage1 + scalevln 1 epoch',v:49.2,c:A},{l:'stage1 + scalevln 최고 중간 ckpt',v:52.6,c:A},
+    {l:'체인: 우리 stage1 → stage2',v:52.4,c:A}],70);
+  bars(document.getElementById('chart-relabel'),[
+    {l:'GT 학습',v:42.5,c:G},{l:'b1',v:37.4,c:A},{l:'b1 + 정지 단서',v:35.9,c:A},{l:'b1 − 모든 waypoint',v:35.9,c:A},
+    {l:'b1 − 사람 문장 예시',v:35.3,c:A},{l:'Qwen3-VL-32B 생성',v:33.8,c:A},{l:'b0',v:32.1,c:A},{l:'Qwen3-VL-235B 생성',v:30.6,c:A},
+    {l:'v278fix',v:31.9,c:M}],50,[{v:42.5,t:'GT 42.5'}]);
+})();
+</script>
+
+</body>
+</html>
