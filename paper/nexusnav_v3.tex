@@ -436,6 +436,24 @@ The primary sensor configuration uses RealSense RGB-D (RGB $640\times480$, Depth
 We defer multi-modal sensor integration to future work, focusing the current evaluation exclusively on RGB-D + odometry, which achieves strong performance without hardware complexity.
 
 % ─────────────────────────────────────────────────────────────────────────────
+\section{Limitations}
+
+\paragraph{Projected vs.\ measured results.}
+The ablation numbers in Table~\ref{tab:ablation} and the NexusNav-V3 row in Table~\ref{tab:main_results} are upper-bound projections from T347 module analysis, not from trained checkpoints. Naver Cloud training (4 nodes $\times$ 4 A100) has not yet run; the 83.2\% SR estimate assumes all modules contribute independently and additively, which may overestimate their joint effect. VisionEmbeddingCache speedup numbers in Table~\ref{tab:vision_cache_ab} are pending B2 A/B evaluation.
+
+\paragraph{Single-scene development evaluation.}
+The only fully measured NexusNav-V3 result (SR@3m = 91.7\%, $n=12$) was collected on a single Matterport3D scene (2azQ1b91cZZ), which has narrow corridors that favour the S2-only policy. Multi-scene performance, tracked via the running ChronoNav baseline eval, is preliminary at SR $\approx 77$\% at $n<500$ episodes.
+
+\paragraph{Memory modules not LLM-grounded.}
+The Memory Triad (TaskMemory, WorldMemory, BodyMemory) updates in the S2 background thread but their summaries are \emph{not yet injected into the VLM prompt}. They serve as passive trackers; the expected SR gains from memory injection (Table~\ref{tab:ablation}) require training on their compact DSG representation. This is the primary reason the $-8.1$\% ablation impact is a projection rather than a measurement.
+
+\paragraph{ActionTokenVocabulary not yet trained.}
+ActionTokenVocabulary requires a trained codebook; without Naver Cloud training, the codebook uses only the 16 hand-crafted seed primitives, providing no benefit over raw logit decoding. It is correctly excluded from the current eval configuration.
+
+\paragraph{WorldPredictor warm-up cost.}
+The WorldPredictor requires $\sim$50 S2 steps to accumulate meaningful training signal (it starts with uniform reachability predictions). Short episodes ($<$50 steps) may see degraded performance from spurious waypoint filtering. This is reflected in the $-2.8$\% projected ablation contribution.
+
+% ─────────────────────────────────────────────────────────────────────────────
 \section{Conclusion}
 
 We presented NexusNav-V3, a dual-system VLN framework that integrates six novel modules — ActionTokenVocabulary, LatentReasoner, hierarchical Memory (Task+World+Body), S2KVCache, VisionEmbeddingCache, and WorldPredictor — onto the InternVLA-N1-DualVLN foundation model. All eight modules are fully implemented and unit-tested (36/37 tests pass); seven of eight are wired into the live S2 async inference path. Measured benchmarks on a single 12\,GB GPU show S2 latency of 1517\,ms and SR@3m of 91.7\% on a single-scene mini set ($n=12$, R2R VLN-CE). Full val\_unseen evaluation (1839 episodes) is in progress; projected SR is 83.2\,\% (T347 bounds), representing a \(+10.4\)\,pp improvement over the ChronoNav baseline (72.82\,\%) pending confirmation.
