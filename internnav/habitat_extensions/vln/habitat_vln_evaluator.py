@@ -1047,6 +1047,13 @@ class HabitatVLNEvaluator(DistributedEvaluator):
     def _run_eval_system2(self) -> tuple:
         self.model.eval()
 
+        # VisionEmbeddingCache: per-frame EMA fingerprint; skip S2 when scene is static
+        _vision_cache_tau = getattr(self.model_args, 'vision_cache_tau', None)
+        _use_vision_cache = _vision_cache_tau is not None
+        if _use_vision_cache:
+            from internnav.agent.s2_kv_cache import VisionEmbeddingCache
+            _vision_cache = VisionEmbeddingCache(similarity_threshold=_vision_cache_tau)
+
         # resume from previous results
         sucs, spls, oss, nes, ndtw = self.resume_from_output_path()
 
@@ -1111,9 +1118,13 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             goal = None
             action = None
             messages = []
+            _prev_llm_outputs = None  # last S2 output; reused on VisionEmbeddingCache hit
 
             done = False
             flag = False
+
+            if _use_vision_cache:
+                _vision_cache.reset()
 
             # ---------- 2. Episode step loop -----------
             while (not done) and (step_id <= self.max_steps_per_episode):
@@ -1191,19 +1202,34 @@ class HabitatVLNEvaluator(DistributedEvaluator):
 
                     inputs = self.processor(text=[text], images=input_images, return_tensors="pt").to(self.model.device)
 
-                    with torch.no_grad():
-                        output_ids = self.model.generate(
-                            **inputs,
-                            max_new_tokens=128,
-                            do_sample=False,
-                            use_cache=True,
-                            past_key_values=None,
-                            return_dict_in_generate=True,
-                        ).sequences
+                    # VisionEmbeddingCache: if scene fingerprint matches last call, reuse
+                    # previous S2 output instead of running the full model forward pass.
+                    # Only fires when scene is genuinely static between consecutive S2 triggers.
+                    _skip_s2 = False
+                    if _use_vision_cache:
+                        _fp = torch.from_numpy(rgb).permute(2, 0, 1).float() / 255.0
+                        _, _cache_hit = _vision_cache.get_or_compute(
+                            _fp, lambda x: x.mean(0, keepdim=True)
+                        )
+                        if _cache_hit and _prev_llm_outputs is not None:
+                            llm_outputs = _prev_llm_outputs
+                            _skip_s2 = True
 
-                    llm_outputs = self.processor.tokenizer.decode(
-                        output_ids[0][inputs.input_ids.shape[1] :], skip_special_tokens=True
-                    )
+                    if not _skip_s2:
+                        with torch.no_grad():
+                            output_ids = self.model.generate(
+                                **inputs,
+                                max_new_tokens=128,
+                                do_sample=False,
+                                use_cache=True,
+                                past_key_values=None,
+                                return_dict_in_generate=True,
+                            ).sequences
+                        llm_outputs = self.processor.tokenizer.decode(
+                            output_ids[0][inputs.input_ids.shape[1] :], skip_special_tokens=True
+                        )
+
+                    _prev_llm_outputs = llm_outputs
                     print('step_id:', step_id, 'output text:', llm_outputs)
 
                     coord = [int(c) for c in re.findall(r'\d+', llm_outputs)]
