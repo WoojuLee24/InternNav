@@ -9,18 +9,23 @@ _last_updated: 2026-10-22 20:10 UTC by session_01ARwduxfwfZ4FyxfSkDxPoN_
 
 ---
 
-## Branch Strategy
+## Worktree Map (ISOLATED — use these for parallel sessions)
 
-| Branch | Purpose | Owner |
-|--------|---------|-------|
-| `dev` | Main integration — merge target | all (merge only) |
-| `dev/vln-ce` | VLN-CE training + eval configs | session A |
-| `dev/nexusnav-s2` | S2 modules, NexusNav policy | session B |
-| `dev/paper` | NexusNav + ChronoNav paper drafts | session C |
-| `dev/chrononav` | ChronoNav annotation pipeline (v280+) | session D |
+| Worktree path | Branch | Purpose | Session |
+|---------------|--------|---------|---------|
+| `/home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev` | `dev` | Main integration (MERGE TARGET) | coordinator |
+| `/mnt/nvme0/worktrees/vln-ce` | `wt/vln-ce` | VLN-CE eval, training configs, eval monitoring | session A |
+| `/mnt/nvme0/worktrees/nexusnav-s2` | `wt/nexusnav-s2` | S2 module wiring into agent inference path | session B |
+| `/mnt/nvme0/worktrees/paper` | `wt/paper` | NexusNav + ChronoNav paper writing | session C |
+| `/mnt/nvme0/worktrees/wiring` | `wt/wiring` | VisionEmbeddingCache evaluator wiring | session D |
 
-**Current branch:** `dev` (single — all work committed here for now).
-When multiple sessions run in parallel, create feature branches and open a PR to `dev`.
+**How to use:**
+1. New session: pick a worktree that matches your work. Edit files ONLY in that worktree's directory.
+2. When done: `git -C <worktree> commit -m "..."` then `git -C <worktree> push origin <branch>`
+3. Coordinator session: review PRs, `git merge wt/<branch>` into `dev`, push `dev`.
+4. To get another session's finished work: `git -C <your-worktree> merge origin/dev` after they push.
+
+**Share findings without conflicts**: read OMNAV_MASTER.md from `dev` branch (it gets updated when worktrees merge). Each worktree has its own copy of all files — edits don't touch `dev` until merged.
 
 ---
 
