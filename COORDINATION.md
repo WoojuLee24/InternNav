@@ -59,7 +59,7 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 
 | Container | Model | GPU | Status | Log |
 |-----------|-------|-----|--------|-----|
-| `vln_ce_mini_chrononav` | ChronoNav S2-only 4-bit | all | ▶ RUNNING full val_unseen (ep 135/500, SR=77.8%) cap at 500 | docker logs vln_ce_mini_chrononav |
+| `vln_ce_mini_chrononav` | ChronoNav S2-only 4-bit | all | ▶ RUNNING full val_unseen (ep 162/500, SR=79.0%) cap at 500 | docker logs vln_ce_mini_chrononav |
 
 **Completed containers (results):**
 | Container | Model | Result |
@@ -74,7 +74,7 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 ## Work Queue (ordered by priority)
 
 ### IN PROGRESS
-- [ ] ChronoNav FULL val_unseen eval — running (`vln_ce_mini_chrononav`, ep 135/500, SR=77.8%) — cap at 500 eps
+- [ ] ChronoNav FULL val_unseen eval — running (`vln_ce_mini_chrononav`, ep 162/500, SR=79.0%) — cap at 500 eps
 - [ ] Push 18+ commits to origin/dev (user must run: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`)
 
 ### DONE THIS SESSION

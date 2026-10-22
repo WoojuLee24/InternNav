@@ -144,9 +144,9 @@ Sensors: RealSense RGB-D (640×480) + Odometry
 ### ChronoNav Full Val Unseen (running — cap at 500 eps)
 | Checkpoint | Eps done | SR | SPL | NE | Status |
 |-----------|---------|----|----|----|----|
-| ChronoNav (τ=0.92, 4-bit, system2) | 135 | 77.8% | 0.676 | 4.85 | RUNNING — cap at 500, ~8.7h ETA |
+| ChronoNav (τ=0.92, 4-bit, system2) | 162 | 79.0% | 0.681 | 4.78 | RUNNING — cap at 500, ~7.5h ETA |
 
-> Container: `vln_ce_mini_chrononav`, ep 135/500 at ~20:00 UTC 2026-10-23. ~40s/ep. SR stable ~77.8%.
+> Container: `vln_ce_mini_chrononav`, ep 162/500 at ~23:00 UTC 2026-10-23. ~40s/ep. SR rising ~79.0%. z_int=1.94 CROSSED p<0.05 one-sided vs v278!.
 > ✓ CAP SCRIPT RUNNING (PID 3541569) — will auto-cap at 500, write result.json, then launch B2-uncached + B2-cached.
 > NexusNav + B2-cached/B2-uncached evals BLOCKED until ChronoNav caps (~8.7h remaining).
 
@@ -219,7 +219,7 @@ Launch: `./scripts/train/base_train/start_vln_ce_train.sh --model {navdp|dualsys
 - [x] Emit `timing_rank0.json` at eval end ✅ 0d15e21
 - [x] cap_and_launch_b2.sh auto-cap script ✅ scripts/eval/cap_and_launch_b2.sh
 - [ ] **⚠ START CAP SCRIPT**: `bash scripts/eval/cap_and_launch_b2.sh` (container will overshoot 500 eps without this)
-- [ ] ChronoNav full val_unseen 500 eps → ep 135/500, SR=77.8%, ~8.7h remaining
+- [ ] ChronoNav full val_unseen 500 eps → ep 162/500, SR=79.0%, ~7.5h remaining
 - [ ] B2-cached eval (50 eps, multi-scene) → VisionEmbeddingCache speedup A/B (Table 4 in paper)
   - Config ready: `scripts/eval/configs/habitat_vln_ce_b2_cached_cfg.py`
   - Uncached arm: `scripts/eval/configs/habitat_vln_ce_b2_uncached_cfg.py`
