@@ -5,7 +5,7 @@
 > Keep entries short — this is a coordination surface, not documentation.
 
 _Format: update the `_last_updated` line and the relevant row. Do NOT rewrite the whole file._
-_last_updated: 2026-10-22 15:22 UTC by session_01ARwduxfwfZ4FyxfSkDxPoN_
+_last_updated: 2026-10-22 15:55 UTC by session_01ARwduxfwfZ4FyxfSkDxPoN_
 
 ---
 
@@ -51,7 +51,7 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 | `scripts/cloud/` | session_01ARw | ✅ done | Dockerfile, PyTorchJob YAML, ZeRO-2 config |
 | `internnav/configs/` | FREE | — | claim before touching |
 | `internnav/evaluator/` | FREE | — | claim before touching |
-| `internnav/agent/internvla_n1_agent.py` | FREE | — | claim before touching |
+| `internnav/agent/internvla_n1_agent.py` | session_01ARw | ✅ done | LatentReasoner+S2ThoughtCache wired (7d41569, merged to dev) |
 
 ---
 
@@ -86,7 +86,7 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 ### NEXT (sequential)
 - [ ] Monitor ChronoNav eval → collect SR/SPL/NE at ep 500 → update paper table
 - [ ] Run NexusNav-V3 mini eval (use `habitat_vln_ce_mini_nexusnav_cfg.py`, fix to system2 mode)
-- [ ] Wire LatentReasoner + S2ThoughtCache into `internvla_n1_agent.py` (session B, wt/nexusnav-s2)
+- [x] Wire LatentReasoner + S2ThoughtCache into `internvla_n1_agent.py` — DONE (7d41569, merged)
 - [ ] v280 reannotation (blocked on vLLM server at 10.77.32.231 restart)
 
 ### PARALLEL-SAFE (any session can start independently)
@@ -127,8 +127,8 @@ When finishing a session:
 5. Write 2-line handoff note below:
 
 ### Latest Handoff Note
-**From:** session_01ARwduxfwfZ4FyxfSkDxPoN (2026-10-22 15:22)
-**State:** ChronoNav FULL val_unseen eval running (`vln_ce_mini_chrononav`), ep 33+/1839, SR=87.5% SPL=0.690 NE=3.88. All single-scene `2azQ1b91cZZ`. Cap at 500 eps per hardstop rule. Two forks completed: (1) VisionEmbeddingCache wired into `_run_eval_system2()` — merged to dev. (2) NexusNav paper ablation + cache gap analysis — merged to dev. Dev now 18 commits ahead of origin. **CRITICAL**: `dual_system` mode crashes on 12GB GPU — ALWAYS use `mode='system2'` + `load_in_4bit=True`. User must push: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`. Next: NexusNav-V3 mini eval + LatentReasoner wiring (wt/nexusnav-s2).
+**From:** session_01ARwduxfwfZ4FyxfSkDxPoN (2026-10-22 15:55)
+**State:** ChronoNav FULL val_unseen running (`vln_ce_mini_chrononav`), ep 35/1839, SR=85.7% SPL=0.657 NE=3.83. Scene `2azQ1b91cZZ`, cap at 500 eps. LatentReasoner+S2ThoughtCache now wired into `internvla_n1_agent.py` (commit 7d41569, merged to dev). All P0 wiring tasks complete. Dev ahead of origin — user must push: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`. Next: NexusNav-V3 mini eval (fix `habitat_vln_ce_mini_nexusnav_cfg.py` to system2+4bit, launch container after ChronoNav finishes or on GPU availability).
 
 ---
 

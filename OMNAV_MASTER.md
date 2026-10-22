@@ -96,7 +96,7 @@ Sensors: RealSense RGB-D (640×480) + Odometry
 | VisionEmbeddingCache | `internnav/agent/s2_kv_cache.py` | ✅ done | included | EMA: v̂_t = τ·v̂_{t-1} + (1-τ)·φ(I_t) |
 | WorldPredictor | `internnav/agent/world_predictor.py` | ✅ done | included | online BCE reachability |
 | NexusNavNet | `internnav/model/basemodel/nexusnav/` | ✅ done | — | 7B + LoRA r=32 + NexusNavS2Heads |
-| **LatentReasoner inference wiring** | `internnav/agent/internvla_n1_agent.py` | 🔄 IN PROGRESS | — | fork agent aec99b7f wiring in wt/nexusnav-s2 |
+| **LatentReasoner inference wiring** | `internnav/agent/internvla_n1_agent.py` | ✅ **DONE** (2026-10-22) | — | 7d41569: LatentReasoner+S2ThoughtCache wired in S2 async thread, merged to dev |
 | **VisionEmbeddingCache eval wiring** | `internnav/habitat_extensions/vln/habitat_vln_evaluator.py` | ✅ **DONE** (2026-10-22) | — | merged 6a00455; per-step skip when cos_sim≥τ |
 
 > **WIRING GAP (CONFIRMED 2026-10-22)**: ChronoNav mini eval with `vision_cache_tau=0.92` showed 1497ms avg S2 latency — identical to DualVLN baseline (1517ms). The `use_kv_cache` and `vision_cache_tau` model_settings are passed to the evaluator but NEVER consumed. `grep "use_kv_cache\|VisionEmbeddingCache" habitat_vln_evaluator.py` → zero results. Fix: wire `VisionEmbeddingCache` into `_run_eval_system2()`: compute embedding fingerprint per observation, skip S2 if cos_sim(v̂_t, v̂_{t-1}) > τ, reuse previous action queue.
@@ -192,7 +192,7 @@ Launch: `./scripts/train/base_train/start_vln_ce_train.sh --model {navdp|dualsys
 ## 9. Outstanding Work (ordered)
 
 ### P0 — CRITICAL PATH
-- [ ] Wire `LatentReasoner` + `S2ThoughtCache` into `internnav/agent/internvla_n1_agent.py`
+- [x] Wire `LatentReasoner` + `S2ThoughtCache` into `internnav/agent/internvla_n1_agent.py` ✅ 7d41569
 - [ ] Collect ChronoNav mini results → compare vs DualVLN baseline (running now)
 - [ ] NexusNav-V3 mini eval → `habitat_vln_ce_mini_nexusnav_cfg.py` (fix to system2 mode first)
 - [ ] v280 vLLM reannotation (unblock: restart server at 10.77.32.231)
