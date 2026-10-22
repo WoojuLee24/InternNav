@@ -5,7 +5,7 @@
 > Keep entries short — this is a coordination surface, not documentation.
 
 _Format: update the `_last_updated` line and the relevant row. Do NOT rewrite the whole file._
-_last_updated: 2026-10-22 20:10 UTC by session_01ARwduxfwfZ4FyxfSkDxPoN_
+_last_updated: 2026-10-22 14:47 UTC by session_01ARwduxfwfZ4FyxfSkDxPoN_
 
 ---
 
@@ -122,8 +122,8 @@ When finishing a session:
 5. Write 2-line handoff note below:
 
 ### Latest Handoff Note
-**From:** session_01ARwduxfwfZ4FyxfSkDxPoN (2026-10-22 — 3hr revisit)
-**To next session:** S2-only eval running in `vln_ce_mini_s2only` (10 eps, mode=system2). Root fix: `memory_encoder` in dual_system mode is incompatible with 4-bit BnB (F.multi_head_attention_forward bypasses dequant hook). Fix applied in `habitat_vln_evaluator.py`: post-load cast `memory_encoder/dit_model/depth_anything` to fp16. S2-only avoids this entirely. When `vln_ce_mini_s2only` completes (check `/mnt/nvme0/vln_habitat/logs/vln_ce_mini_s2only_4bit.log`), collect SR/SPL/NE, then launch `habitat_vln_ce_mini_chrononav_cfg.py`. 9+ commits ready to push to origin/dev (user must run `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`).
+**From:** session_01ARwduxfwfZ4FyxfSkDxPoN (2026-10-22 14:47)
+**State:** ChronoNav eval running (`vln_ce_mini_chrononav`, 28+ episodes, SR=0.893). Worktrees created at `/mnt/nvme0/worktrees/`. Two fork agents running: (1) wiring VisionEmbeddingCache into evaluator (wt/wiring worktree), (2) updating paper ablation + latency sections (wt/paper worktree). **CRITICAL**: `dual_system` mode crashes on 12GB GPU — ALWAYS use `mode='system2'` + `load_in_4bit=True`. 13+ commits on dev branch, user must push: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`. OmniNav master plan: see `OMNAV_MASTER.md`. Cross-session coordination active with `internnav-b9` (has useful `collect_metrics.py` + `make_table.py` tools — request them push to origin). Session name: `model-dc`.
 
 ---
 
