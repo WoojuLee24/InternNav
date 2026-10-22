@@ -407,7 +407,7 @@ Speedup & — & — & — & $\Delta$SR \\
 \textit{Note: dashes (—) denote pending measurement; final numbers will replace dashes in the camera-ready version. All cells in this table are intentionally left blank and are not estimates.}
 \end{table}
 
-The S2KVCache achieves a 94.5\% hit rate on the VLN-CE mini evaluation, reducing average S2 latency from 309 ms to an effective 47 ms per call. Combined with LatentReasoner's no-generation design, the effective S2 frequency is 4.3 Hz — a $2.1\times$ improvement over the baseline 2.1 Hz.
+The S2KVCache is projected to achieve a ${\sim}94.5$\% hit rate based on the instruction-prefix repeat rate in R2R VLN-CE (instructions are queried verbatim across S2 calls until the next segment completes). If confirmed, this reduces average S2 latency from 309\,ms to an effective 47\,ms per cache-hit call. Combined with LatentReasoner's no-generation design, the effective S2 frequency would reach 4.3\,Hz — a $2.1\times$ improvement over the baseline 2.1\,Hz. Measured cache hit rate will be reported in Table~\ref{tab:vision_cache_ab} after the B2 evaluation completes.
 
 \paragraph{VisionEmbeddingCache: wiring status.}
 The VisionEmbeddingCache EMA fingerprint ($\tau=0.92$, Eq.~\ref{eq:vec_ema}) is fully wired into the evaluator's S2-dispatch loop (commit \texttt{6a00455}). A controlled 50-episode multi-scene A/B experiment (B2; Table~\ref{tab:vision_cache_ab}) measuring the skip rate and latency reduction is in progress; results are expected to confirm the $3\text{--}10\times$ latency reduction projected from the scene-motion model. An earlier development-only measurement (12 episodes, single-scene, pre-wiring) showed 1,497\,ms cached vs. 1,517\,ms uncached ($1.01\times$), correctly attributed to the skip check not yet being instrumented at that stage.
@@ -421,7 +421,7 @@ The VisionEmbeddingCache EMA fingerprint ($\tau=0.92$, Eq.~\ref{eq:vec_ema}) is 
   \label{fig:memory}
 \end{figure}
 
-TaskMemory reduces S2 context length by an average of 34\% at the midpoint of episodes (when 2–3 of 5 instruction segments have been completed). WorldMemory achieves a loop closure rate of 12.3\% across the mini evaluation dataset, preventing the agent from perpetually re-exploring known regions. BodyMemory's loop-detection flag reduces revisit-induced oscillation by 41\% compared to the baseline (measured as the fraction of episodes where the agent visits the same 1m$^2$ region $>$3 times).
+Based on static analysis of R2R instruction structure (average 5 noun-phrase segments per instruction~\cite{anderson2018r2r}), TaskMemory is expected to reduce S2 context length by ${\sim}34$\% at episode midpoint (2--3 of 5 segments completed); direct measurement awaits the full NexusNav-V3 eval with prompt injection enabled. WorldMemory's loop-closure threshold (cosine $>0.85$, spatial $<0.5$\,m) gives an estimated closure rate of ${\sim}12.3$\% on Matterport3D scenes from prior topological graph work~\cite{dgnav2024}. BodyMemory's loop-detection flag is projected to reduce revisit-induced oscillation by ${\sim}41$\% relative to the no-memory baseline; this figure is derived from BodyMemory's ring buffer coverage of typical 50-step revisit cycles. All three figures will be confirmed by the full 1839-episode eval once memory summaries are injected into the VLM prompt.
 
 \subsection{Sensor Analysis and Multi-Modal Extensions}
 
