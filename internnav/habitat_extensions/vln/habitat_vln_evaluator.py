@@ -31,7 +31,7 @@ from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
 from habitat.utils.visualizations.utils import images_to_video, observations_to_image
 from habitat_baselines.config.default import get_config as get_habitat_config
 from PIL import Image
-from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+from transformers import AutoProcessor, BitsAndBytesConfig, Qwen2_5_VLForConditionalGeneration
 
 from internnav.configs.evaluator import EvalCfg
 from internnav.evaluator import DistributedEvaluator, Evaluator
@@ -373,11 +373,16 @@ class HabitatVLNEvaluator(DistributedEvaluator):
         load_in_4bit = getattr(self.model_args, 'load_in_4bit', False)
         load_kwargs = dict(attn_implementation=attn_impl)
         if load_in_4bit:
-            load_kwargs['load_in_4bit'] = True
+            load_kwargs['quantization_config'] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
             load_kwargs['device_map'] = {"": device}
         elif load_in_8bit:
-            load_kwargs['load_in_8bit'] = True
-            load_kwargs['device_map'] = {"": device}  # force all layers to GPU; avoids CPU-offload error
+            load_kwargs['quantization_config'] = BitsAndBytesConfig(load_in_8bit=True)
+            load_kwargs['device_map'] = {"": device}
         else:
             load_kwargs['torch_dtype'] = torch.bfloat16
             load_kwargs['device_map'] = {"": device}
