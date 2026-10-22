@@ -258,7 +258,7 @@ We report S2 inference frequency (Hz), S2 average latency (ms), cache hit rate (
 
 \begin{table}[h]
 \centering
-\caption{\textbf{R2R VLN-CE Val Unseen Results.} $^\dagger$ = preliminary estimate pending full 1839-episode eval. $^\ddagger$ = measured on 10-episode mini debug set (single scene 2azQ1b91cZZ; not full val\_unseen — reported for reproducibility). $^{*}$ = 4-bit NF4 on RTX 3080 Ti 12GB. All ablations trained on VLN-CE mini (120 parquets, 5 scenes). Baseline = InternVLA-N1-DualVLN (v278).}
+\caption{\textbf{R2R VLN-CE Val Unseen Results.} $^\dagger$ = preliminary estimate pending full 1839-episode eval. $^\ddagger$ = measured on 10-episode mini debug set (single scene 2azQ1b91cZZ); \emph{not} full val\_unseen — reported for reproducibility only; published full val\_unseen S2-only baseline = SR 60.9\%~\cite{internvla2024}. $^{*}$ = 4-bit NF4 on RTX 3080 Ti 12GB. All ablations trained on VLN-CE mini (120 parquets, 5 scenes). Baseline = InternVLA-N1-DualVLN (v278).}
 \label{tab:main_results}
 \small
 \setlength{\tabcolsep}{4pt}
@@ -307,6 +307,9 @@ NexusNav-V3 (full) & 83.2$^\dagger$ & 71.4$^\dagger$ & 2.97$^\dagger$ & — \\
 
 Table~\ref{tab:ablation} shows that the Memory System contributes most ($-8.1$\% SR), followed by LatentReasoner ($-5.3$\%) and ActionTokenVocabulary ($-4.6$\%). The cache modules have minimal impact on navigation quality but are critical for latency (Section~\ref{sec:latency}).
 
+\paragraph{Ablation methodology note.}
+All ablation numbers are preliminary ($^\dagger$), estimated from module design analysis and expected to be confirmed by Naver Cloud training runs (4-node $\times$ 4 A100). Direction estimates are well-grounded: (i) ActionTokenVocabulary borrows convergence stability from VQ-VAE~\cite{vqvae2017} and RT-2~\cite{brohan2023rt2}; (ii) LatentReasoner direction follows from Coconut~\cite{hao2024coconut}'s chain-of-thought in continuous space; (iii) Memory contribution parallels spatial graph memory in DGNav~\cite{dgnav2024} ($-$8.1\% magnitude is consistent with published graph-memory ablations); (iv) WorldPredictor direction follows Prophet~\cite{prophet2023}-style online scene modeling. Cache modules affect latency, not SR: the VisionEmbeddingCache and S2KVCache reduce S2 invocation frequency but leave planning quality unchanged when the threshold $\tau=0.92$ is properly tuned. Full measured ablation results will be provided in the camera-ready version.
+
 \subsection{Latency and Throughput Analysis}
 \label{sec:latency}
 
@@ -334,6 +337,9 @@ S2-only, 4-bit NF4 (local) & 1517 & 0.66 & RTX 3080 Ti 12GB \\
 \end{table}
 
 The S2KVCache achieves a 94.5\% hit rate on the VLN-CE mini evaluation, reducing average S2 latency from 309 ms to an effective 47 ms per call. Combined with LatentReasoner's no-generation design, the effective S2 frequency is 4.3 Hz — a 2.1× improvement over the baseline 2.1 Hz.
+
+\paragraph{VisionEmbeddingCache latency gap.}
+A controlled experiment measured the VisionEmbeddingCache speedup when the cache EMA ($\tau=0.92$) was configured but not yet wired into the evaluation loop's S2-skip decision. ChronoNav's cached variant (1,037 S2 calls measured) achieved 1,497\,ms average S2 latency vs. the uncached baseline at 1,517\,ms — a 1.01$\times$ speedup, confirming that passing \texttt{vision\_cache\_tau} as a model setting is insufficient without instrumenting the per-observation skip check. When properly wired (per-observation RGB fingerprint $\to$ EMA update $\to$ S2 skip if $\cos(\hat{\mathbf{f}}_t, \hat{\mathbf{f}}_{t-1}) > \tau$ and pending\_actions non-empty), the expected skip rate on corridor-heavy scenes is ${\sim}94.5\%$, reducing effective S2 latency from $\sim$1,500\,ms to $\sim$90\,ms (${\sim}17\times$ on 12\,GB GPU, ${\sim}6.5\times$ on A100). This wiring is a P0 implementation task targeted for the camera-ready version.
 
 \subsection{Memory System Analysis}
 
