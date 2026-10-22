@@ -1,0 +1,67 @@
+"""InternVLA-N1-DualVLN fine-tuning on VLN-CE mini dataset."""
+from internnav.configs.trainer.eval import EvalCfg
+from internnav.configs.trainer.exp import ExpCfg
+from internnav.configs.trainer.il import FilterFailure, IlCfg, Loss
+
+dualsystem_vln_ce_mini_exp_cfg = ExpCfg(
+    name='dualsystem_vln_ce_mini',
+    model_name='internvla_n1',
+    torch_gpu_id=0,
+    torch_gpu_ids=[0],
+    output_dir='checkpoints/dualsystem_vln_ce_mini/ckpts',
+    tensorboard_dir='checkpoints/dualsystem_vln_ce_mini/tensorboard',
+    checkpoint_folder='checkpoints/dualsystem_vln_ce_mini/ckpts',
+    log_dir='checkpoints/dualsystem_vln_ce_mini/logs',
+    local_rank=0,
+    seed=42,
+    model_settings={
+        "mode": "dual_system",
+        "model_path": "/checkpoints/InternVLA-N1-DualVLN",
+        "num_history": 3,
+        "resize_w": 384,
+        "resize_h": 384,
+        "max_new_tokens": 128,
+        "attn_implementation": "eager",
+    },
+    eval=EvalCfg(
+        use_ckpt_config=False,
+        save_results=True,
+        split=['val_seen'],
+        max_steps=195,
+        sample=False,
+        success_distance=3.0,
+        start_eval_epoch=-1,
+        step_interval=50,
+    ),
+    il=IlCfg(
+        epochs=5,
+        batch_size=2,
+        lr=2e-5,
+        num_workers=4,
+        weight_decay=1e-4,
+        warmup_ratio=0.05,
+        save_interval_epochs=1,
+        save_filter_frozen_weights=False,
+        load_from_ckpt=False,
+        ckpt_to_load='',
+        lmdb_map_size=1e12,
+        dataset_r2r_root_dir='data/InternData-N1-v0.5-mini/vln_ce/raw_data/r2r',
+        dataset_3dgs_root_dir='',
+        dataset_grutopia10_root_dir='',
+        lmdb_features_dir='r2r',
+        lerobot_features_dir='data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r',
+        camera_name='pano_camera_0',
+        report_to='none',
+        use_discrete_dataset=True,
+        ddp_find_unused_parameters=True,
+        val_ratio=0.1,
+        filter_failure=FilterFailure(
+            use=True,
+            min_rgb_nums=10,
+        ),
+        loss=Loss(
+            alpha=0.0001,
+            dist_scale=1,
+        ),
+    ),
+)

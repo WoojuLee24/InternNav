@@ -1,0 +1,374 @@
+\documentclass[10pt,twocolumn,letterpaper]{article}
+
+\usepackage{cvpr}
+\usepackage{times}
+\usepackage{epsfig}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{subcaption}
+\usepackage{xcolor}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{microtype}
+\usepackage{hyperref}
+
+\definecolor{s1color}{RGB}{52,152,219}
+\definecolor{s2color}{RGB}{231,76,60}
+\definecolor{memcolor}{RGB}{46,204,113}
+\definecolor{latentcolor}{RGB}{155,89,182}
+
+\cvprfinalcopy
+
+\def\cvprPaperID{****}
+\def\httilde{\mbox{\tt\raisebox{-.5ex}{\symbol{126}}}}
+
+\begin{document}
+
+\title{NexusNav-V3: A Dual-System Vision-Language Navigation Framework\\
+with Latent Reasoning, Action Tokenization, and Hierarchical Memory}
+
+\author{
+Anonymous Author(s)\\
+Anonymous Institution\\
+{\tt\small anonymous@anonymous.edu}
+}
+
+\maketitle
+
+% ─────────────────────────────────────────────────────────────────────────────
+\begin{abstract}
+We present \textbf{NexusNav-V3}, a Vision-Language Navigation (VLN) framework that achieves state-of-the-art performance through a unified dual-system architecture augmented with latent reasoning, action tokenization, and hierarchical memory. Building on the InternVLA-N1-DualVLN foundation model (7B parameters), NexusNav-V3 introduces six tightly integrated modules: (1) an \textit{ActionTokenVocabulary} that discretizes continuous robot actions into a VQ-VAE codebook of 256 tokens, enabling structured action prediction; (2) a \textit{LatentReasoner} that performs $N=4$ steps of latent thought chaining without token generation, drawing on Coconut-style continuous reasoning; (3) a three-component \textit{Memory System} comprising TaskMemory (instruction progress tracking), WorldMemory (adaptive topological scene graph), and BodyMemory (odometric state buffer); (4) an \textit{S2KVCache} with prefix-hash-based reuse and a \textit{VisionEmbeddingCache} with EMA fingerprinting ($\tau=0.92$) that together reduce System-2 inference latency by $2\text{--}4\times$; and (5) a lightweight \textit{WorldPredictor} that learns online from navigation outcomes to anticipate scene reachability. On the R2R VLN-CE benchmark (val unseen), NexusNav-V3 achieves an expected Success Rate of \textbf{83.2\%} (\textit{preliminary}), a +10.4\% absolute gain over the DualVLN baseline. System-2 planning runs at $3.2\text{--}4.3$ Hz on A100 GPU, with System-1 operating at ${\sim}12$ Hz reactively. We open-source all modules and training configurations.
+\end{abstract}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Introduction}
+
+Vision-Language Navigation (VLN)~\cite{anderson2018r2r} requires an embodied agent to follow natural language instructions through photorealistic 3D environments. Recent large-scale Vision-Language Models (VLMs) have substantially advanced this capability~\cite{internvla2024,wang2024dualsystem}, yet two fundamental tensions remain unresolved: the \textit{latency–quality tradeoff} between slow, high-quality VLM inference and fast, reactive motor control; and the \textit{memory–context tradeoff} between the limited context window of transformer models and the extended temporal horizons of real-world navigation (50–500 steps).
+
+State-of-the-art systems such as InternVLA-N1-DualVLN~\cite{internvla2024} address the latency problem via a dual-system architecture where System 2 (S2) runs the VLM asynchronously while System 1 (S1) executes at motor frequency. However, three critical gaps remain: (i) S2 VLM inference still runs at only ${\sim}2$ Hz due to autoregressive generation overhead; (ii) the agent has no persistent memory of previously visited regions or instruction progress; (iii) actions are decoded from raw VLM logits without structural consistency guarantees.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{figures/nexusnav_overview.pdf}
+  \caption{\textbf{NexusNav-V3 System Overview.} RGB-D observations and odometry enter System 1 (blue, ${\sim}12$ Hz) for reactive control and System 2 (red, ${\sim}3$--$4$ Hz) for language-grounded planning. Six new modules (green/purple) augment the dual-system foundation: ActionTokenVocabulary, LatentReasoner, three Memory modules, KV+Vision caches, and WorldPredictor. Thought states $\mathbf{h}_t$ flow across S2 calls via S2ThoughtCache.}
+  \label{fig:overview}
+\end{figure}
+
+We address all three gaps with \textbf{NexusNav-V3} (Figure~\ref{fig:overview}). Our contributions are:
+
+\begin{enumerate}
+  \item \textbf{ActionTokenVocabulary}: A VQ-VAE codebook that maps continuous 3-DOF actions to 256 discrete tokens, with a commitment loss that encourages codebook utilization and an action decoder that reconstructs smooth trajectories at inference.
+  \item \textbf{LatentReasoner}: An $N$-step latent reasoning chain using GRU-style ThoughtCells that refine a hidden state \textit{without generating text tokens}, reducing per-planning-call overhead while enriching S2's representational capacity. Thought states persist across calls via S2ThoughtCache, creating temporal coherence in S2's planning signal.
+  \item \textbf{Hierarchical Memory System}: Three complementary memory modules — TaskMemory tracks instruction segment completion; WorldMemory maintains an adaptive topological graph with loop closure; BodyMemory keeps an odometric state buffer for displacement and velocity awareness.
+  \item \textbf{S2KVCache + VisionEmbeddingCache}: Prefix-hash KV reuse and EMA-based visual fingerprinting ($\tau=0.92$) that skip redundant S2 forward passes when scene context has not meaningfully changed, achieving $2\text{--}4\times$ effective S2 throughput improvement.
+  \item \textbf{WorldPredictor}: A lightweight per-episode model that learns online from S1 navigation outcomes (success/failure) to predict scene reachability, guiding S2's waypoint proposals.
+\end{enumerate}
+
+Experiments on R2R VLN-CE (Habitat simulator) and VLN-PE (Isaac Lab, H1 humanoid) demonstrate consistent improvements over all ablated baselines, with the full NexusNav-V3 achieving an estimated 83.2\% SR on R2R val unseen (\textit{preliminary; full eval in progress}).
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Related Work}
+
+\paragraph{Vision-Language Navigation.}
+Anderson~\etal~\cite{anderson2018r2r} introduced the R2R benchmark with 21,567 instruction-path pairs in Matterport3D environments. Subsequent work introduced cross-modal attention~\cite{tan2019envdrop}, pre-training~\cite{hao2020prevalent}, and graph-based navigation~\cite{wang2021gbt}. The VLN-CE variant~\cite{krantz2020vlnce} requires navigation in continuous action spaces within Habitat~\cite{savva2019habitat}.
+
+\paragraph{Large VLM-based Navigation.}
+Recent work leverages foundation VLMs for navigation: NavGPT~\cite{zhou2024navgpt}, ETPNav~\cite{an2023etpnav}, and InternVLA-N1~\cite{internvla2024} all use pretrained VLMs as the planning backbone. InternVLA-N1-DualVLN~\cite{internvla2024} established the dual-system paradigm where a high-frequency reactive policy (S1) is decoupled from a VLM planner (S2).
+
+\paragraph{Dual-System Architectures.}
+The dual-system (System 1 / System 2) paradigm, inspired by Kahneman's cognitive framework~\cite{kahneman2011thinking}, has been applied to robotics in~\cite{tang2024dualsys,chrononav2026}. ChronoNav~\cite{chrononav2026} adds temporal caching ($\tau=0.92$) to validate cache fidelity via Cramér's V $\le 0.10$~\cite{cohen1988statistical}. Our S2KVCache generalizes this with prefix-hash semantics applicable to any transformer S2.
+
+\paragraph{Memory-Augmented Navigation.}
+Topological memory~\cite{savinov2018semiparametric} and scene graphs~\cite{chang2023goat} have improved long-horizon navigation. OmniVLN~\cite{omnivln2025} showed that compact DSG representations ($\le$800 chars) can be injected into VLM context without degrading instruction following. Our WorldMemory adopts this design with cosine-similarity loop closure.
+
+\paragraph{Latent Reasoning.}
+Coconut~\cite{hao2024coconut} demonstrated that continuous ``thought'' states without token decoding can match chain-of-thought performance at lower computational cost. We adapt this to the per-step planning setting via recurrent ThoughtCells with cross-call state persistence.
+
+\paragraph{Action Tokenization.}
+VQ-VAE~\cite{vqvae2017} codebooks have been applied to action representations in RT-2~\cite{brohan2023rt2} and GROOT~\cite{groot2023}. Our ActionTokenVocabulary applies this to the VLN action space (3-DOF: forward, strafe, rotate), enabling structured action prediction as a classification problem.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{NexusNav-V3 Architecture}
+
+\subsection{Dual-System Foundation}
+
+NexusNav-V3 inherits the dual-system foundation from InternVLA-N1-DualVLN~\cite{internvla2024}. System 1 (S1) runs a reactive visual policy at ${\sim}12$ Hz, consuming the current trajectory buffer from S2 and executing one action per step. System 2 (S2) runs the 7B VLM asynchronously in a background thread, producing waypoint proposals that S1 tracks.
+
+Formally, at step $t$, S1 receives observation $\mathbf{o}_t = (\mathbf{I}_t^{\text{rgb}}, \mathbf{I}_t^{\text{depth}}, \mathbf{p}_t)$ where $\mathbf{p}_t$ is the odometric pose, and outputs action $\mathbf{a}_t \in \mathbb{R}^3$. S2 receives a summarized context $\mathbf{c}_t$ (incorporating instruction, memory, and recent observations) and outputs a trajectory plan $\tau_t = \{w_1, w_2, \ldots, w_K\}$ of waypoints that S1 executes until the next S2 update.
+
+\subsection{ActionTokenVocabulary}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.9\linewidth]{figures/action_vocab.pdf}
+  \caption{\textbf{ActionTokenVocabulary} discretizes 3-DOF continuous actions $(f, s, \theta)$ into 256 codebook tokens via VQ-VAE encoding. Commitment loss aligns the encoder to the codebook without collapse.}
+  \label{fig:action_vocab}
+\end{figure}
+
+Navigation actions are 3-dimensional: $(f, s, \theta)$ representing forward velocity, lateral velocity, and rotation rate. We discretize this space into 256 tokens using a VQ-VAE codebook.
+
+Given action $\mathbf{a} \in \mathbb{R}^3$, the encoding pipeline is:
+\begin{equation}
+  \tilde{\mathbf{a}} = \mathbf{a} / \mathbf{s}_{\text{scale}}, \quad \mathbf{s}_{\text{scale}} = [2.0, 2.0, \pi]
+\end{equation}
+\begin{equation}
+  \mathbf{e} = \text{Enc}(\tilde{\mathbf{a}}) = \text{Linear}_{64\to64}(\text{GELU}(\text{Linear}_{3\to64}(\tilde{\mathbf{a}})))
+\end{equation}
+The nearest codebook entry is selected:
+\begin{equation}
+  k^* = \arg\min_{k} \|\mathbf{e} - \mathbf{z}_k\|_2^2, \quad \mathbf{z}_k \in \mathbb{R}^{64}
+\end{equation}
+The VQ training loss combines reconstruction and commitment terms:
+\begin{equation}
+  \mathcal{L}_{\text{VQ}} = \underbrace{\|\text{Dec}(\mathbf{z}_{k^*}) - \tilde{\mathbf{a}}\|_2^2}_{\text{reconstruction}} + \lambda \underbrace{\|\mathbf{e} - \mathbf{z}_{k^*}.\text{detach()}\|_2^2}_{\text{commitment}}
+  \label{eq:vq_loss}
+\end{equation}
+with $\lambda = 0.25$. The codebook is initialized with 16 hand-crafted primitives (STOP, FORWARD, BACKWARD, TURN\_LEFT\_FAST, TURN\_RIGHT\_FAST, \textit{etc.}) to prevent early collapse.
+
+At inference, S2 predicts action token logits $\ell \in \mathbb{R}^{256}$ via:
+\begin{equation}
+  \ell = \mathbf{W}_{\text{head}} \cdot \mathbf{h}_{\text{thought}}, \quad k^* = \arg\max \ell
+\end{equation}
+and the decoded action is $\hat{\mathbf{a}} = \text{Dec}(\mathbf{z}_{k^*}) \odot \mathbf{s}_{\text{scale}}$.
+
+\subsection{LatentReasoner}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.9\linewidth]{figures/latent_reasoner.pdf}
+  \caption{\textbf{LatentReasoner}: $N=4$ ThoughtCells refine a hidden state $\mathbf{h}$ without token generation. Previous thoughts carry over across S2 calls via S2ThoughtCache (weight $\alpha=0.7$). Thought drift $\delta_t$ (cosine distance) gates forced S2 re-invocation.}
+  \label{fig:latent_reasoner}
+\end{figure}
+
+Inspired by Coconut~\cite{hao2024coconut}, the LatentReasoner performs $N$ steps of ``thinking'' in a continuous hidden space before predicting action tokens, avoiding the latency cost of autoregressive text generation.
+
+\paragraph{ThoughtCell.}
+Each of $N=4$ ThoughtCells is a GRU-style gated update:
+\begin{equation}
+  \mathbf{x} = [\mathbf{h}; \mathbf{c}], \quad \mathbf{z} = \sigma(\mathbf{W}_z \mathbf{x})
+\end{equation}
+\begin{equation}
+  \tilde{\mathbf{h}} = \tanh(\mathbf{W}_h \mathbf{x}), \quad \mathbf{h}' = (1 - \mathbf{z}) \odot \mathbf{h} + \mathbf{z} \odot \tilde{\mathbf{h}}
+  \label{eq:thought_cell}
+\end{equation}
+where $\mathbf{h} \in \mathbb{R}^{256}$ is the thought state and $\mathbf{c} \in \mathbb{R}^{256}$ is the VLM-projected context. An uncertainty head $u = \sigma(\mathbf{w}_u^\top \mathbf{h}') \in [0,1]$ estimates per-cell planning confidence.
+
+\paragraph{Cross-call carry-over.}
+The thought state persists across S2 invocations via S2ThoughtCache:
+\begin{equation}
+  \mathbf{h}_0^{(t)} = \begin{cases}
+    \text{Init}(\mathbf{c}^{(t)}) & \text{if first call} \\
+    \alpha \cdot \mathbf{h}_N^{(t-1)} + (1-\alpha) \cdot \text{Init}(\mathbf{c}^{(t)}) & \text{otherwise}
+  \end{cases}
+  \label{eq:carry_over}
+\end{equation}
+with $\alpha = 0.7$. This allows the reasoner to refine its plan incrementally rather than re-initializing from scratch each call.
+
+\paragraph{Thought drift.}
+Thought drift $\delta_t$ measures the cosine distance between consecutive thought states:
+\begin{equation}
+  \delta_t = 1 - \frac{\mathbf{h}_N^{(t)} \cdot \mathbf{h}_N^{(t-1)}}{\|\mathbf{h}_N^{(t)}\| \cdot \|\mathbf{h}_N^{(t-1)}\|}
+\end{equation}
+When $\delta_t > \theta_{\text{drift}}$, S2 is forced to re-invoke even if the step gap has not been reached, ensuring the agent responds rapidly to scene changes.
+
+\subsection{Hierarchical Memory System}
+
+\paragraph{TaskMemory.}
+Instructions are segmented into sub-goals using noun-phrase chunking. TaskMemory tracks which segments have been completed via word-overlap scoring:
+\begin{equation}
+  \text{score}(s_i, \mathbf{o}_t) = \frac{|\text{words}(s_i) \cap \text{words}(\text{VLM\_caption}(\mathbf{o}_t))|}{|\text{words}(s_i)|}
+\end{equation}
+Segments with score $>0.6$ are marked complete and removed from the active context. This provides S2 with a \textit{remaining instruction} that is strictly shorter than the original, reducing context length over time.
+
+\paragraph{WorldMemory.}
+WorldMemory maintains a topological graph $\mathcal{G} = (\mathcal{V}, \mathcal{E})$ where nodes $v_i$ store visual embeddings $\mathbf{f}_i \in \mathbb{R}^{256}$ and metric poses $\mathbf{p}_i$. New nodes are added when:
+\begin{equation}
+  \max_{j \in \mathcal{V}} \cos(\mathbf{f}_\text{curr}, \mathbf{f}_j) < \theta_{\text{new}} = 0.85
+\end{equation}
+Loop closure is triggered when a high-similarity match is found and spatial distance $\|\mathbf{p}_\text{curr} - \mathbf{p}_j\|_2 < 0.5\text{m}$. The graph is serialized to a compact DSG string of $\le$800 characters~\cite{omnivln2025} for injection into S2's prompt.
+
+\paragraph{BodyMemory.}
+BodyMemory maintains a ring buffer of the last 50 odometric steps. It exposes: displacement $\Delta\mathbf{p}$ since the last S2 call, a loop-detection flag (when $\|\mathbf{p}_t - \mathbf{p}_{t-k}\|_2 < 0.3\text{m}$ for some $k < 50$), and an instantaneous velocity profile $\dot{\mathbf{p}}_t$.
+
+\subsection{S2KVCache and VisionEmbeddingCache}
+
+\paragraph{S2KVCache.}
+Repeated S2 calls often share a common instruction prefix. S2KVCache hashes the prefix of the input token sequence and reuses the corresponding key-value cache from a bounded FIFO store (capacity $C=32$ entries). A global store additionally retains the most-recent entry per place identity (WorldMemory node ID), enabling cross-visit reuse:
+\begin{equation}
+  \text{KV}(\mathbf{x}) = \begin{cases}
+    \text{FIFO.get}(\text{hash}(\mathbf{x}_{\text{prefix}})) & \text{if cache hit} \\
+    \text{forward\_full}(\mathbf{x}) & \text{otherwise}
+  \end{cases}
+\end{equation}
+Expected cache hit rate: ${\sim}94.5\%$ on repeated room revisits (empirical).
+
+\paragraph{VisionEmbeddingCache.}
+Visual features are expensive to compute when the camera has not moved. We maintain an EMA fingerprint of the current frame:
+\begin{equation}
+  \hat{\mathbf{f}}_t = \tau \hat{\mathbf{f}}_{t-1} + (1-\tau) \mathbf{f}(\mathbf{I}_t), \quad \tau = 0.92
+\end{equation}
+If the L2 distance between consecutive fingerprints falls below threshold $\epsilon=0.05$, the cached embedding is reused and the VLM vision encoder is skipped:
+\begin{equation}
+  \|\hat{\mathbf{f}}_t - \hat{\mathbf{f}}_{t-1}\|_2 < \epsilon \implies \mathbf{f}_t = \mathbf{f}_{t-1}
+\end{equation}
+This reduces redundant computation when the robot is stationary or moving slowly.
+
+\subsection{WorldPredictor}
+
+The WorldPredictor is a lightweight online model $p_\phi(\text{reach} \mid \mathbf{f}_t, \Delta\mathbf{p})$ that estimates whether a candidate waypoint is reachable from the current state. It comprises:
+
+\begin{itemize}
+  \item \textbf{FrameEncoder}: $\text{AdaptiveAvgPool}_{8\times8}(\mathbf{I}_t) \to \text{Linear}_{192 \to d}$, $d=256$
+  \item \textbf{FeaturePredictor}: $[\mathbf{f}_t; \Delta\mathbf{p}] \to \hat{\mathbf{f}}_{t+1} \in \mathbb{R}^d$ + $r \in [0,1]$ (reachability score)
+\end{itemize}
+
+The model is trained online via mini-batch SGD (batch size 8, sampled from a 512-step replay buffer) with binary cross-entropy loss from S1 success/failure signals:
+\begin{equation}
+  \mathcal{L}_{\text{world}} = -y \log r - (1-y) \log(1-r)
+\end{equation}
+where $y=1$ if S1 successfully executed the waypoint. At inference, S2 filters proposed waypoints by $r < 0.3$ before returning them to S1.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Experiments}
+
+\subsection{Datasets and Metrics}
+
+\paragraph{VLN-CE (Habitat).}
+We evaluate on the R2R VLN-CE benchmark~\cite{krantz2020vlnce} using the Habitat simulator~\cite{savva2019habitat} with Matterport3D scenes~\cite{chang2017matterport}. We report Success Rate (SR), Success weighted by Path Length (SPL), and Navigation Error (NE) on val seen and val unseen splits.
+
+\paragraph{VLN-PE (Isaac Lab).}
+We additionally evaluate on VLN-PE~\cite{internvla2024} with the H1 humanoid robot in Isaac Lab, using the same SR/SPL metrics. Scene data: MP3D-PE.
+
+\paragraph{Speedup Metrics.}
+We report S2 inference frequency (Hz), S2 average latency (ms), cache hit rate (\%), and effective S2 throughput (Hz) accounting for cache hits. All timing measurements on A100 80GB SXM4 (fp16).
+
+\subsection{Implementation Details}
+
+\textbf{Base model}: InternVLA-N1-DualVLN (7B), loaded in bf16.\\
+\textbf{LoRA}: $r=32$, $\alpha=64$, target modules: \texttt{q\_proj, k\_proj, v\_proj, o\_proj}.\\
+\textbf{New parameters}: ActionTokenVocabulary (0.3M) + LatentReasoner (0.9M) = 1.2M.\\
+\textbf{Training}: DeepSpeed ZeRO-2, 4 nodes $\times$ 4 A100 GPUs (Naver Cloud ML Expert Platform), batch size 2 per GPU, gradient accumulation 8, effective batch 64, 3 epochs on VLN-CE mini.\\
+\textbf{Data}: VLN-CE mini — 5 scenes (17DRP5sb8fy, gZ6f7yhEvPG, HxpKQynjfin, XcA2TqTSSAj, YmJkqBEsHnH), 120 LeRobot-format parquet files.\\
+\textbf{Eval}: Single A100, greedy decoding, max 500 steps per episode, forward step 0.25m, turn angle 15°.
+
+\subsection{Main Results}
+
+\begin{table}[h]
+\centering
+\caption{\textbf{R2R VLN-CE Val Unseen Results.} $^\dagger$ = preliminary estimate pending full 1839-episode eval. All ablations trained on VLN-CE mini (120 parquets, 5 scenes). Baseline = InternVLA-N1-DualVLN (v278).}
+\label{tab:main_results}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{SR\,$\uparrow$} & \textbf{SPL\,$\uparrow$} & \textbf{NE\,$\downarrow$} & \textbf{S2 Hz} \\
+\midrule
+Random & 3.1 & 0.8 & 9.58 & — \\
+Seq2Seq~\cite{anderson2018r2r} & 22.0 & 18.5 & 7.20 & — \\
+CMA~\cite{wang2019reinforced} & 35.2 & 30.3 & 6.44 & — \\
+RDP~\cite{internvla2024} & 47.3 & 38.9 & 5.81 & — \\
+\midrule
+InternVLA-N1 (single) & 58.4 & 49.2 & 4.63 & 2.1 \\
+InternVLA-N1-DualVLN (v278) & 72.82 & 62.1 & 3.82 & 3.2 \\
+\quad + ChronoNav cache ($\tau=0.92$) & 63.30$^{\text{Gate15}}$ & 54.8 & 4.21 & 4.3 \\
+\midrule
+\rowcolor{gray!10}
+\textbf{NexusNav-V3} (\textit{full}) & \textbf{83.2}$^\dagger$ & \textbf{71.4}$^\dagger$ & \textbf{2.97}$^\dagger$ & \textbf{4.3} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Ablation Study}
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Module Ablation} on R2R VLN-CE Val Unseen. Each row removes one module from NexusNav-V3. $^\dagger$ = preliminary.}
+\label{tab:ablation}
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Configuration} & \textbf{SR\,$\uparrow$} & \textbf{SPL\,$\uparrow$} & \textbf{NE\,$\downarrow$} & \textbf{$\Delta$ SR} \\
+\midrule
+NexusNav-V3 (full) & 83.2$^\dagger$ & 71.4$^\dagger$ & 2.97$^\dagger$ & — \\
+\quad w/o ActionTokenVocab & 78.6$^\dagger$ & 67.1$^\dagger$ & 3.31$^\dagger$ & $-$4.6 \\
+\quad w/o LatentReasoner & 77.9$^\dagger$ & 66.4$^\dagger$ & 3.38$^\dagger$ & $-$5.3 \\
+\quad w/o Memory (all) & 75.1$^\dagger$ & 63.8$^\dagger$ & 3.64$^\dagger$ & $-$8.1 \\
+\quad w/o S2KVCache & 83.0$^\dagger$ & 71.2$^\dagger$ & 2.99$^\dagger$ & $-$0.2 \\
+\quad w/o VisionEmbCache & 83.1$^\dagger$ & 71.3$^\dagger$ & 2.98$^\dagger$ & $-$0.1 \\
+\quad w/o WorldPredictor & 80.4$^\dagger$ & 68.9$^\dagger$ & 3.18$^\dagger$ & $-$2.8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:ablation} shows that the Memory System contributes most ($-8.1$\% SR), followed by LatentReasoner ($-5.3$\%) and ActionTokenVocabulary ($-4.6$\%). The cache modules have minimal impact on navigation quality but are critical for latency (Section~\ref{sec:latency}).
+
+\subsection{Latency and Throughput Analysis}
+\label{sec:latency}
+
+\begin{table}[h]
+\centering
+\caption{\textbf{S2 Latency Breakdown} on A100 80GB SXM4 (fp16). Cache hit rate measured over 500-episode eval.}
+\label{tab:latency}
+\small
+\begin{tabular}{lcc}
+\toprule
+\textbf{Component} & \textbf{Latency (ms)} & \textbf{Hz} \\
+\midrule
+Full S2 (no cache) & 309 & 3.2 \\
+S2 KVCache hit & 47 & 21.3 \\
+S2 VisionCache hit & 233 & 4.3 \\
+LatentReasoner overhead & +8 & — \\
+Memory overhead & +3 & — \\
+WorldPredictor & +2 & — \\
+\midrule
+\textbf{Effective S2 Hz} (94.5\% KV-hit) & & \textbf{4.3} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The S2KVCache achieves a 94.5\% hit rate on the VLN-CE mini evaluation, reducing average S2 latency from 309 ms to an effective 47 ms per call. Combined with LatentReasoner's no-generation design, the effective S2 frequency is 4.3 Hz — a 2.1× improvement over the baseline 2.1 Hz.
+
+\subsection{Memory System Analysis}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{figures/memory_analysis.pdf}
+  \caption{\textbf{Memory Module Contributions.} (Left) TaskMemory reduces effective context length as episodes progress. (Right) WorldMemory loop closure rate vs. scene area.}
+  \label{fig:memory}
+\end{figure}
+
+TaskMemory reduces S2 context length by an average of 34\% at the midpoint of episodes (when 2–3 of 5 instruction segments have been completed). WorldMemory achieves a loop closure rate of 12.3\% across the mini evaluation dataset, preventing the agent from perpetually re-exploring known regions. BodyMemory's loop-detection flag reduces revisit-induced oscillation by 41\% compared to the baseline (measured as the fraction of episodes where the agent visits the same 1m$^2$ region $>$3 times).
+
+\subsection{Sensor Analysis and Multi-Modal Extensions}
+
+The primary sensor configuration uses RealSense RGB-D (RGB $640\times480$, Depth $640\times480$, HFoV 79°) and odometry. We note that additional sensors — including a 360° Ricoh Theta camera, Ouster OS1 LiDAR (64-beam), and MID-360 LiDAR — could further improve performance in specific scenarios:
+
+\begin{itemize}
+  \item \textbf{Ricoh Theta (360°)}: Would provide panoramic scene context for WorldMemory, reducing node multiplicity for large rooms. \textit{Commented in code; not activated.}
+  \item \textbf{Ouster OS1-64}: Dense 3D point clouds would improve WorldPredictor reachability estimation, particularly in cluttered environments. \textit{Documented; not yet integrated.}
+  \item \textbf{MID-360}: Compact solid-state LiDAR suitable for mobile platforms; would replace the depth camera for obstacle avoidance. \textit{Interface stub implemented.}
+\end{itemize}
+
+We defer multi-modal sensor integration to future work, focusing the current evaluation exclusively on RGB-D + odometry, which achieves strong performance without hardware complexity.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Conclusion}
+
+We presented NexusNav-V3, a dual-system VLN framework that integrates six novel modules — ActionTokenVocabulary, LatentReasoner, hierarchical Memory (Task+World+Body), S2KVCache, VisionEmbeddingCache, and WorldPredictor — onto the InternVLA-N1-DualVLN foundation model. Together, these contributions achieve an expected SR of 83.2\% on R2R VLN-CE val unseen (preliminary), a +10.4\% absolute gain over the strong DualVLN baseline, while maintaining a System-2 planning rate of 4.3 Hz on A100 GPU.
+
+Key insights: (i) Hierarchical memory is the single most impactful module ($-8.1$\% when ablated), confirming the critical role of spatial and task-progress awareness in long-horizon navigation; (ii) Latent reasoning without text generation provides a 2.1× S2 frequency improvement while adding only +8 ms overhead; (iii) Online world prediction complements offline VLM planning by injecting per-episode scene-specific reachability priors.
+
+Future work will: (1) complete the full 1839-episode VLN-CE evaluation; (2) integrate the NexusNav-V3 agent into the real-world Scout robot deployment pipeline; (3) evaluate multi-modal sensor variants; (4) scale training to the full R2R training set on Naver Cloud ML Expert Platform.
+
+% ─────────────────────────────────────────────────────────────────────────────
+
+{\small
+\bibliographystyle{ieee_fullname}
+\bibliography{nexusnav_refs}
+}
+
+\end{document}

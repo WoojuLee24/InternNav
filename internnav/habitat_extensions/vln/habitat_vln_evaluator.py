@@ -369,19 +369,27 @@ class HabitatVLNEvaluator(DistributedEvaluator):
 
         device = torch.device(f"cuda:{self.local_rank}")
         attn_impl = getattr(self.model_args, 'attn_implementation', 'eager')
+        load_in_8bit = getattr(self.model_args, 'load_in_8bit', False)
+        load_in_4bit = getattr(self.model_args, 'load_in_4bit', False)
+        load_kwargs = dict(attn_implementation=attn_impl)
+        if load_in_4bit:
+            load_kwargs['load_in_4bit'] = True
+            load_kwargs['device_map'] = {"": device}
+        elif load_in_8bit:
+            load_kwargs['load_in_8bit'] = True
+            load_kwargs['device_map'] = {"": device}  # force all layers to GPU; avoids CPU-offload error
+        else:
+            load_kwargs['torch_dtype'] = torch.bfloat16
+            load_kwargs['device_map'] = {"": device}
         if self.model_args.mode == 'dual_system':
             model = InternVLAN1ForCausalLM.from_pretrained(
                 self.model_args.model_path,
-                torch_dtype=torch.bfloat16,
-                attn_implementation=attn_impl,
-                device_map={"": device},
+                **load_kwargs,
             )
         elif self.model_args.mode == 'system2':
             model = InternVLAN1ForCausalLM.from_pretrained(  # loader fix (system2): resolves 3584 config
                 self.model_args.model_path,
-                torch_dtype=torch.bfloat16,
-                attn_implementation=attn_impl,
-                device_map={"": device},
+                **load_kwargs,
             )
         else:
             raise ValueError(f"Invalid mode: {self.model_args.mode}")
