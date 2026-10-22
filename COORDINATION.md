@@ -5,7 +5,7 @@
 > Keep entries short — this is a coordination surface, not documentation.
 
 _Format: update the `_last_updated` line and the relevant row. Do NOT rewrite the whole file._
-_last_updated: 2026-10-22 14:47 UTC by session_01ARwduxfwfZ4FyxfSkDxPoN_
+_last_updated: 2026-10-22 15:22 UTC by session_01ARwduxfwfZ4FyxfSkDxPoN_
 
 ---
 
@@ -59,11 +59,12 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 
 | Container | Model | GPU | Status | Log |
 |-----------|-------|-----|--------|-----|
-| `vln_ce_mini_s2only` | DualVLN S2-only 4-bit | all | ▶ RUNNING (ep 0/10) | `/mnt/nvme0/vln_habitat/logs/vln_ce_mini_s2only_4bit.log` |
+| `vln_ce_mini_chrononav` | ChronoNav S2-only 4-bit | all | ▶ RUNNING full val_unseen (ep 33+, SR=87.5%) | docker logs vln_ce_mini_chrononav |
 
 **Completed containers (results):**
 | Container | Model | Result |
 |-----------|-------|--------|
+| `vln_ce_mini_s2only` | DualVLN S2-only 4-bit | SR=90%, SPL=77.4%, NE=4.50 (10 eps mini) ✅ |
 | `mini_eval_final` | NavDP | S2=7529ms, 0.13Hz — baseline measured |
 | `mini_eval_v3` | DualVLN/ChronoNav/NexusNav | PARTIAL — depth_anything path fix applied |
 | `vln_ce_mini_eval_4bit` | DualVLN 4-bit | CRASHED — memory_encoder dtype mismatch in generate_traj |
@@ -73,15 +74,19 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 ## Work Queue (ordered by priority)
 
 ### IN PROGRESS
-- [x] VLN-CE mini eval: DualVLN S2-only 4-bit — DONE: SR=90%, SPL=77.4%, NE=4.50 (10 eps mini)
-- [ ] VLN-CE mini eval: ChronoNav 4-bit — `vln_ce_mini_chrononav` LAUNCHING NOW
-- [ ] Push 9+ commits to origin/dev (user must run: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`)
+- [ ] ChronoNav FULL val_unseen eval — running (`vln_ce_mini_chrononav`, ep 33/1839, SR=87.5%) — cap at 500 eps
+- [ ] Push 18+ commits to origin/dev (user must run: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`)
 
-### NEXT (sequential — don't start until prior done)
-- [ ] Collect DualVLN VLN-CE baseline SR/SPL/NE
-- [ ] Run ChronoNav mini eval (use `habitat_vln_ce_mini_chrononav_cfg.py`, `load_in_4bit: True`)
-- [ ] Run NexusNav-V3 mini eval (use `habitat_vln_ce_mini_nexusnav_cfg.py`)
-- [ ] Fill real numbers into `paper/nexusnav_v3.tex` ablation table
+### DONE THIS SESSION
+- [x] VLN-CE mini eval: DualVLN S2-only 4-bit — SR=90%, SPL=77.4%, NE=4.50 (10 eps mini)
+- [x] VisionEmbeddingCache wired into `_run_eval_system2()` (wt/wiring → merged to dev)
+- [x] NexusNav paper: ablation paragraph + VisionEmbeddingCache gap analysis + bib (wt/paper → merged to dev)
+- [x] Both wt/wiring and wt/paper merged into dev
+
+### NEXT (sequential)
+- [ ] Monitor ChronoNav eval → collect SR/SPL/NE at ep 500 → update paper table
+- [ ] Run NexusNav-V3 mini eval (use `habitat_vln_ce_mini_nexusnav_cfg.py`, fix to system2 mode)
+- [ ] Wire LatentReasoner + S2ThoughtCache into `internvla_n1_agent.py` (session B, wt/nexusnav-s2)
 - [ ] v280 reannotation (blocked on vLLM server at 10.77.32.231 restart)
 
 ### PARALLEL-SAFE (any session can start independently)
@@ -122,8 +127,8 @@ When finishing a session:
 5. Write 2-line handoff note below:
 
 ### Latest Handoff Note
-**From:** session_01ARwduxfwfZ4FyxfSkDxPoN (2026-10-22 14:47)
-**State:** ChronoNav eval running (`vln_ce_mini_chrononav`, 28+ episodes, SR=0.893). Worktrees created at `/mnt/nvme0/worktrees/`. Two fork agents running: (1) wiring VisionEmbeddingCache into evaluator (wt/wiring worktree), (2) updating paper ablation + latency sections (wt/paper worktree). **CRITICAL**: `dual_system` mode crashes on 12GB GPU — ALWAYS use `mode='system2'` + `load_in_4bit=True`. 13+ commits on dev branch, user must push: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`. OmniNav master plan: see `OMNAV_MASTER.md`. Cross-session coordination active with `internnav-b9` (has useful `collect_metrics.py` + `make_table.py` tools — request them push to origin). Session name: `model-dc`.
+**From:** session_01ARwduxfwfZ4FyxfSkDxPoN (2026-10-22 15:22)
+**State:** ChronoNav FULL val_unseen eval running (`vln_ce_mini_chrononav`), ep 33+/1839, SR=87.5% SPL=0.690 NE=3.88. All single-scene `2azQ1b91cZZ`. Cap at 500 eps per hardstop rule. Two forks completed: (1) VisionEmbeddingCache wired into `_run_eval_system2()` — merged to dev. (2) NexusNav paper ablation + cache gap analysis — merged to dev. Dev now 18 commits ahead of origin. **CRITICAL**: `dual_system` mode crashes on 12GB GPU — ALWAYS use `mode='system2'` + `load_in_4bit=True`. User must push: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`. Next: NexusNav-V3 mini eval + LatentReasoner wiring (wt/nexusnav-s2).
 
 ---
 
