@@ -68,8 +68,9 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 ## Work Queue (ordered by priority)
 
 ### IN PROGRESS
-- [ ] VLN-CE mini eval: DualVLN S2-only 4-bit (10 eps) — `vln_ce_mini_s2only`
-- [ ] Push 7+ commits to origin/dev (blocked by auto-mode, user must run: `git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`)
+- [x] VLN-CE mini eval: DualVLN S2-only 4-bit — DONE: SR=90%, SPL=77.4%, NE=4.50 (10 eps mini)
+- [ ] VLN-CE mini eval: ChronoNav 4-bit — `vln_ce_mini_chrononav` LAUNCHING NOW
+- [ ] Push 9+ commits to origin/dev (user must run: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`)
 
 ### NEXT (sequential — don't start until prior done)
 - [ ] Collect DualVLN VLN-CE baseline SR/SPL/NE
@@ -93,7 +94,7 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 | Model | Container | S2 latency | S2 Hz | VLN-CE SR | Notes |
 |-------|-----------|-----------|-------|-----------|-------|
 | NavDP | `mini_eval_final` | 7529ms | 0.13 Hz | — | S1 only (VLN-PE model) |
-| DualVLN S2-only (4-bit) | `vln_ce_mini_s2only` | ~1s/step | ~1 Hz | **RUNNING** | mode=system2, 10 eps |
+| DualVLN S2-only (4-bit) | `vln_ce_mini_s2only` | 1517ms | 0.66 Hz | **SR=90% SPL=77.4** ✅ | mode=system2, 10 eps, 9/10 success |
 | DualVLN dual_system (4-bit) | pending | — | — | pending | need fp16 cast fix or cloud GPU |
 | ChronoNav | pending | — | — | pending | after s2only result |
 | NexusNav-V3 | pending | — | — | pending | after ChronoNav |

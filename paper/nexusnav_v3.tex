@@ -258,7 +258,7 @@ We report S2 inference frequency (Hz), S2 average latency (ms), cache hit rate (
 
 \begin{table}[h]
 \centering
-\caption{\textbf{R2R VLN-CE Val Unseen Results.} $^\dagger$ = preliminary estimate pending full 1839-episode eval. All ablations trained on VLN-CE mini (120 parquets, 5 scenes). Baseline = InternVLA-N1-DualVLN (v278).}
+\caption{\textbf{R2R VLN-CE Val Unseen Results.} $^\dagger$ = preliminary estimate pending full 1839-episode eval. $^\ddagger$ = measured on 10-episode mini debug set (single scene 2azQ1b91cZZ; not full val\_unseen — reported for reproducibility). $^{*}$ = 4-bit NF4 on RTX 3080 Ti 12GB. All ablations trained on VLN-CE mini (120 parquets, 5 scenes). Baseline = InternVLA-N1-DualVLN (v278).}
 \label{tab:main_results}
 \small
 \setlength{\tabcolsep}{4pt}
@@ -272,6 +272,7 @@ CMA~\cite{wang2019reinforced} & 35.2 & 30.3 & 6.44 & — \\
 RDP~\cite{internvla2024} & 47.3 & 38.9 & 5.81 & — \\
 \midrule
 InternVLA-N1 (single) & 58.4 & 49.2 & 4.63 & 2.1 \\
+InternVLA-N1 S2-only (ours, mini-10)$^{\ddagger}$ & 90.0 & 77.4 & 4.50 & 0.66$^{*}$ \\
 InternVLA-N1-DualVLN (v278) & 72.82 & 62.1 & 3.82 & 3.2 \\
 \quad + ChronoNav cache ($\tau=0.92$) & 63.30$^{\text{Gate15}}$ & 54.8 & 4.21 & 4.3 \\
 \midrule
