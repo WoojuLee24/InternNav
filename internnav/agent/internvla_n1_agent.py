@@ -225,13 +225,19 @@ class InternVLAN1Agent(Agent):
 
                 print("s2 infer finish!!")
 
-                # Update latent thought state (zero context = carry-over only; full context wired at training)
+                # Update latent thought state: use output_latent from S2 when available,
+                # else zero context (graceful degradation — still tracks episode dynamics)
                 try:
-                    _ctx = torch.zeros(1, 256, device=self.device)
+                    _out_latent = getattr(current_s2_output, 'output_latent', None)
+                    if _out_latent is not None and _out_latent.numel() >= 256:
+                        _ctx = _out_latent.detach().reshape(1, -1)[:, :256].to(self.device)
+                    else:
+                        _ctx = torch.zeros(1, 256, device=self.device)
                     with torch.no_grad():
                         _, _thought, _conf = self.latent_reasoner(_ctx, self.s2_thought_cache.current_thought)
                     self.s2_thought_cache.update(_thought)
-                    print(f"[LatentReasoner] {self.s2_thought_cache.stats_str()} conf={_conf.item():.3f}")
+                    _ctx_src = 'latent' if _out_latent is not None else 'zero'
+                    print(f"[LatentReasoner] ctx={_ctx_src} {self.s2_thought_cache.stats_str()} conf={_conf.item():.3f}")
                 except Exception as _le:
                     print(f"[LatentReasoner] update skipped: {_le}")
 

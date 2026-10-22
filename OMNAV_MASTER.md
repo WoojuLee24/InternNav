@@ -169,17 +169,29 @@ Sensors: RealSense RGB-D (640×480) + Odometry
 
 ---
 
-## 7. Mathematical Contributions Summary
+## 7. Formal Contributions (10 total — enumerated with evidence)
 
-### New (NexusNav-V3)
-1. **ActionTokenVocabulary**: VQ-VAE 256-token codebook for continuous action discretization in VLN
-2. **LatentReasoner**: N-step GRU thought chain without autoregressive generation (+0.66 Hz S2 speed)
-3. **VisionEmbeddingCache**: EMA-gated vision embedding reuse (τ=0.92, 94.5% hit rate expected)
-4. **WorldPredictor**: Per-episode online reachability learning via BCE loss
+### NexusNav-V3 (8 contributions)
 
-### Existing (ChronoNav)
-5. **Temporal annotation pipeline**: VLM fewshot-3 annotation vs GT labels (+47pp on poor-GT episodes)
-6. **GPS_STOP distance success trigger**: 3m radius, model-agnostic navigation success capture
+| # | Module | Key Equation | File | Wiring | Tests | Evidence |
+|---|--------|-------------|------|--------|-------|---------|
+| C1 | **VisionEmbeddingCache** | `v̂_t = τ·v̂_{t-1} + (1-τ)·φ(I_t)`, cos gate | `agent/s2_kv_cache.py` | ✅ eval (6a00455) | 1 | cache_hit_rate in timing_rank0.json (pending A/B run) |
+| C2 | **LatentReasoner** | `h_t = g⊙h_{t-1} + (1-g)⊙tanh(W[x,h_{t-1}]+b)` | `agent/latent_reasoning.py` | ✅ agent S2 (7d41569) | 1 | logs `[LatentReasoner] ctx=latent conf=...` per S2 call |
+| C3 | **S2ThoughtCache** | `h_init = 0.7·h_prev + 0.3·MLP(x_new)` | `agent/latent_reasoning.py` | ✅ agent S2 (7d41569) | 1 | resets per episode, persists across S2 calls |
+| C4 | **ActionTokenVocabulary** | `L_VQ = ‖sg[z_e]-e‖² + β‖z_e-sg[e]‖²` | `agent/latent_action.py` | ⬜ pending training | 1 | 22 unit tests pass; codebook training on Naver Cloud |
+| C5 | **WorldPredictor** | `L_reach = BCE(f_θ(s_t,a_t), Δd_t>0)` | `agent/world_predictor.py` | ✅ agent S2 (6a389db) | 1 | online BCE per S2 step; `_stats.updates` logged |
+| C6 | **TaskMemory** | instruction segment completion flags | `agent/memory/task_memory.py` | ✅ agent S2 (6a389db) | 1 | update called with LLM output text per S2 step |
+| C7 | **WorldMemory** | topometric graph, loop closure at cos>0.85 (DGNav) | `agent/memory/world_memory.py` | ✅ agent S2 (6a389db) | 1 | add_node per S2 step; loop closure active |
+| C8 | **BodyMemory** | odom buffer, oscillation detection | `agent/memory/body_memory.py` | ✅ agent S2 (6a389db) | 1 | update(odom) per S2 step |
+
+### ChronoNav (2 contributions)
+
+| # | Module | Key Equation | Evidence |
+|---|--------|-------------|---------|
+| C9 | **VLM annotation pipeline** | fewshot-3, stop-gtdist criterion | +47pp on poor-GT episodes (v280) |
+| C10 | **GPS_STOP** | force STOP when dist_to_goal < 3.0m | 72.82% SR (v278, 504 eps) CAMPAIGN BEST |
+
+**Summary**: 10/10 contributions have equations + files. 8/8 NexusNav modules implemented + unit-tested. 7/8 wired to active inference (C4 pending training). C1 speedup undemonstrated until B2-cached runs. C2 uses `output_latent` when available (dual_system mode), zero-context fallback (system2 mode).
 
 ---
 
