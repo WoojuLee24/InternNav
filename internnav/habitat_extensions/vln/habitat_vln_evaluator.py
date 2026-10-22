@@ -1045,6 +1045,7 @@ class HabitatVLNEvaluator(DistributedEvaluator):
         )
 
     def _run_eval_system2(self) -> tuple:
+        import time as _time
         self.model.eval()
 
         # VisionEmbeddingCache: per-frame EMA fingerprint; skip S2 when scene is static
@@ -1053,6 +1054,11 @@ class HabitatVLNEvaluator(DistributedEvaluator):
         if _use_vision_cache:
             from internnav.agent.s2_kv_cache import VisionEmbeddingCache
             _vision_cache = VisionEmbeddingCache(similarity_threshold=_vision_cache_tau)
+
+        # S2 latency tracking — emitted as timing.json at end of eval
+        _s2_latencies: list = []   # ms per actual model.generate() call (cache hits excluded)
+        _s2_cache_hits: int = 0
+        _eval_wall_t0: float = _time.perf_counter()
 
         # resume from previous results
         sucs, spls, oss, nes, ndtw = self.resume_from_output_path()
@@ -1216,6 +1222,7 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                             _skip_s2 = True
 
                     if not _skip_s2:
+                        _gen_t0 = _time.perf_counter()
                         with torch.no_grad():
                             output_ids = self.model.generate(
                                 **inputs,
@@ -1225,9 +1232,12 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                                 past_key_values=None,
                                 return_dict_in_generate=True,
                             ).sequences
+                        _s2_latencies.append((_time.perf_counter() - _gen_t0) * 1000.0)
                         llm_outputs = self.processor.tokenizer.decode(
                             output_ids[0][inputs.input_ids.shape[1] :], skip_special_tokens=True
                         )
+                    else:
+                        _s2_cache_hits += 1
 
                     _prev_llm_outputs = llm_outputs
                     print('step_id:', step_id, 'output text:', llm_outputs)
@@ -1411,6 +1421,31 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             vis_frames.clear()
             if vis_writer is not None:
                 vis_writer.close()
+
+
+        # Write timing.json — keys match collect_metrics.py --timing schema
+        _total_s2_calls = len(_s2_latencies)
+        _eval_wall_h = (_time.perf_counter() - _eval_wall_t0) / 3600.0
+        _timing: dict = {}
+        if _total_s2_calls > 0:
+            import statistics as _stats
+            _s2_ms = _stats.mean(_s2_latencies)
+            _timing['s2_ms'] = round(_s2_ms, 1)
+            _timing['s2_hz'] = round(1000.0 / _s2_ms, 3)
+            _total_s2_incl_hits = _s2_cache_hits + _total_s2_calls
+            if _total_s2_incl_hits > 0:
+                _timing['cache_hit_rate'] = round(_s2_cache_hits / _total_s2_incl_hits, 4)
+        _timing['gpu_h'] = round(_eval_wall_h, 3)
+        _timing['n_s2_calls'] = _total_s2_calls
+        _timing['n_cache_hits'] = _s2_cache_hits
+        os.makedirs(self.output_path, exist_ok=True)
+        with open(os.path.join(self.output_path, f'timing_rank{self.rank}.json'), 'w') as _tf:
+            json.dump(_timing, _tf, indent=2)
+        print(
+            f"[timing] s2_ms={_timing.get('s2_ms','?')} s2_hz={_timing.get('s2_hz','?')} "
+            f"cache_hits={_s2_cache_hits}/{_s2_cache_hits+_total_s2_calls} gpu_h={_timing['gpu_h']:.3f}",
+            flush=True,
+        )
 
         self.env.close()
 
