@@ -383,13 +383,24 @@ S2-only, 4-bit NF4 (local) & 1517 & 0.66 & RTX 3080 Ti & $\diamondsuit$ \\
 \end{tabular}
 \end{table}
 
+\paragraph{Analytical speedup bound.}
+Let $T_\text{full}=309$\,ms, $T_\text{kv}=47$\,ms, and $T_\text{vis}=233$\,ms be the measured S2 latencies for the no-cache, KVCache-hit, and VisionCache-hit paths respectively (Table~\ref{tab:latency}). With independent KV and vision hit rates $h_\text{kv}$ and $h_\text{vis}$, the expected S2 latency is:
+\begin{equation}
+  \bar{T}(h_\text{kv},\,h_\text{vis}) = h_\text{kv}\,T_\text{kv} + (1-h_\text{kv})\bigl[h_\text{vis}\,T_\text{vis} + (1-h_\text{vis})\,T_\text{full}\bigr]
+  \label{eq:expected_latency}
+\end{equation}
+The speedup factor is $\sigma = T_\text{full}/\bar{T}$.
+For the B2 controlled experiment ($h_\text{kv}{\approx}0$, multi-scene fresh navigation), Eq.~\ref{eq:expected_latency} gives $\sigma_\text{vis}(h_\text{vis}) = 309/(309 - 76\,h_\text{vis})$, yielding $\sigma \in [1.17, 1.24]\times$ for $h_\text{vis}\in[0.6,0.8]$.
+On corridor-heavy scenes with revisits ($h_\text{kv}=0.945$), the combined bound reaches $\sigma \in [5.0, 5.3]\times$, consistent with the $3\text{--}10\times$ estimate in Table~\ref{tab:vision_cache_ab}.
+The B2 experiment will provide the measured $h_\text{vis}$ under multi-scene R2R conditions.
+
 \begin{table}[h]
 \centering
 \caption{\textbf{VisionEmbeddingCache A/B Speedup} on R2R VLN-CE, 50-episode multi-scene val unseen.
 This table will be filled in the camera-ready version from the B2 controlled experiment
 (configs \texttt{habitat\_vln\_ce\_b2\_uncached\_cfg.py} and \texttt{habitat\_vln\_ce\_b2\_cached\_cfg.py},
 same 50-episode multi-scene split, single GPU, 4-bit NF4).
-\textit{Expected}: cache hit rate $\approx$60--80\%, S2 latency reduction $3\text{--}10\times$ on corridor-heavy scenes.}
+\textit{Analytical bound} (Eq.~\ref{eq:expected_latency}): $\sigma_\text{vis}\in[1.2,1.3]\times$ at $h_\text{vis}\in[0.6,0.8]$ (B2 scenario); $\sigma_\text{comb}\in[5.0,5.3]\times$ with $h_\text{kv}=0.945$ (corridor-heavy revisit).}
 \label{tab:vision_cache_ab}
 \small
 \begin{tabular}{lcccc}
