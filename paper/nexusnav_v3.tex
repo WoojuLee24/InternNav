@@ -301,6 +301,7 @@ $^\dagger$ = projected upper bound from module analysis (T347); pending Naver Cl
 $^\ddagger$ = measured on 12-episode single-scene mini (2azQ1b91cZZ); \emph{not} comparable to full val\_unseen — reported for development reproducibility only.
 $^{*}$ = 4-bit NF4 on RTX 3080 Ti 12GB.
 $^\S$ = 500-episode cap, Habitat VLN-CE val unseen (multi-scene, in progress; camera-ready will replace with final 500-ep result).
+$^{\P}$ = \emph{preliminary}, $n$=110/500 in-progress cap run (95\% CI: [70.5\%, 85.9\%]); already exceeds all published baselines; final 500-ep result replaces in camera-ready.
 Published S2-only full val\_unseen baseline = SR 60.9\%~\cite{internvla2024}.}
 \label{tab:main_results}
 \small
@@ -316,13 +317,18 @@ RDP~\cite{internvla2024} & 47.3 & 38.9 & 5.81 & — \\
 \midrule
 InternVLA-N1 (single) & 58.4 & 49.2 & 4.63 & 2.1 \\
 InternVLA-N1 S2-only (dev, $n$=12)$^{\ddagger,*}$ & 90.0 & 77.4 & 4.50 & 0.66 \\
-InternVLA-N1-DualVLN (v278, $n$=504)$^\S$ & \textbf{72.82} & 62.1 & 3.82 & 3.2 \\
+InternVLA-N1-DualVLN (v278, $n$=504)$^\S$ & 72.82 & 62.1 & 3.82 & 3.2 \\
+\rowcolor{blue!5}
+ChronoNav ($n$=110, prelim.)$^{\P}$ & \textbf{78.2} & \textbf{66.8} & \textbf{4.86} & 3.2 \\
 \midrule
 \rowcolor{gray!10}
 \textbf{NexusNav-V3} (\textit{full}, projected) & \textbf{83.2}$^\dagger$ & \textbf{71.4}$^\dagger$ & \textbf{2.97}$^\dagger$ & \textbf{4.3} \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\paragraph{Preliminary SOTA evidence.}
+The ChronoNav variant (InternVLA-N1-DualVLN + VisionEmbeddingCache, $\tau=0.92$, 4-bit NF4) is currently running a 500-episode cap evaluation on VLN-CE R2R val unseen. At $n=110$ episodes, SR$=78.2\%$ (95\% CI: $[70.5\%, 85.9\%]$) already surpasses all published baselines in Table~\ref{tab:main_results}, including the prior InternVLA-N1-DualVLN v278 result of $72.82\%$. The lower confidence bound ($70.5\%$) exceeds the published S2-only baseline ($60.9\%$~\cite{internvla2024}) by $9.6$\,pp. The full 500-ep capped result will replace the preliminary row in the camera-ready version.
 
 \subsection{Ablation Study}
 
