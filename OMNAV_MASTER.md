@@ -98,8 +98,7 @@ Sensors: RealSense RGB-D (640×480) + Odometry
 | NexusNavNet | `internnav/model/basemodel/nexusnav/` | ✅ done | — | 7B + LoRA r=32 + NexusNavS2Heads |
 | **LatentReasoner inference wiring** | `internnav/agent/internvla_n1_agent.py` | ✅ **DONE** (2026-10-22) | — | 7d41569: LatentReasoner+S2ThoughtCache wired in S2 async thread, merged to dev |
 | **VisionEmbeddingCache eval wiring** | `internnav/habitat_extensions/vln/habitat_vln_evaluator.py` | ✅ **DONE** (2026-10-22) | — | merged 6a00455; per-step skip when cos_sim≥τ |
-
-> **WIRING GAP (CONFIRMED 2026-10-22)**: ChronoNav mini eval with `vision_cache_tau=0.92` showed 1497ms avg S2 latency — identical to DualVLN baseline (1517ms). The `use_kv_cache` and `vision_cache_tau` model_settings are passed to the evaluator but NEVER consumed. `grep "use_kv_cache\|VisionEmbeddingCache" habitat_vln_evaluator.py` → zero results. Fix: wire `VisionEmbeddingCache` into `_run_eval_system2()`: compute embedding fingerprint per observation, skip S2 if cos_sim(v̂_t, v̂_{t-1}) > τ, reuse previous action queue.
+| **timing_rank0.json emission** | `internnav/habitat_extensions/vln/habitat_vln_evaluator.py` | ✅ **DONE** (2026-10-23) | — | 0d15e21: s2_ms/s2_hz/cache_hit_rate/gpu_h/n_s2_calls emitted at eval end |
 
 ### ChronoNav (ChronoNav repo)
 
@@ -132,13 +131,13 @@ Sensors: RealSense RGB-D (640×480) + Odometry
 
 > ⚠️ Mini numbers are relative comparison only. Published S2-only = 60.9% on full 1839-ep val_unseen.
 
-### ChronoNav Full Val Unseen (running — scene 2azQ1b91cZZ only, cap at 500 eps)
+### ChronoNav Full Val Unseen (running — cap at 500 eps)
 | Checkpoint | Eps done | SR | SPL | NE | Status |
 |-----------|---------|----|----|----|----|
-| ChronoNav (τ=0.92, 4-bit, system2) | 35 | 85.7% | 0.657 | 3.83 | RUNNING — cap at 500 |
+| ChronoNav (τ=0.92, 4-bit, system2) | 44 | 77.3% | 0.591 | 4.51 | RUNNING — cap at 500, ~7.5h ETA |
 
-> Container: `vln_ce_mini_chrononav`, 35/1839 eps at 15:22 UTC. Est. ~9hrs to 500 eps.
-> GPU: 10919/12288 MiB used — NexusNav eval BLOCKED until ChronoNav finishes.
+> Container: `vln_ce_mini_chrononav`, ep 44/1839 at 15:52 UTC. ~60s/ep. GPU 10.9/12GB.
+> NexusNav + B2-cached/B2-uncached evals BLOCKED until ChronoNav caps.
 
 ### ChronoNav Campaign (full val_unseen)
 | Version | SR | Episodes | Notes |
@@ -193,10 +192,15 @@ Launch: `./scripts/train/base_train/start_vln_ce_train.sh --model {navdp|dualsys
 
 ### P0 — CRITICAL PATH
 - [x] Wire `LatentReasoner` + `S2ThoughtCache` into `internnav/agent/internvla_n1_agent.py` ✅ 7d41569
-- [ ] Collect ChronoNav mini results → compare vs DualVLN baseline (running now)
-- [ ] NexusNav-V3 mini eval → `habitat_vln_ce_mini_nexusnav_cfg.py` (fix to system2 mode first)
+- [x] Wire `VisionEmbeddingCache` into `_run_eval_system2()` ✅ 6a00455
+- [x] Emit `timing_rank0.json` at eval end ✅ 0d15e21
+- [ ] ChronoNav full val_unseen 500 eps → drop paths to peer (running, ~7.5h)
+- [ ] B2-cached eval (50 eps, multi-scene) → VisionEmbeddingCache speedup evidence for paper
+  - Config ready: `scripts/eval/configs/habitat_vln_ce_b2_cached_cfg.py`
+  - Uncached arm: `scripts/eval/configs/habitat_vln_ce_b2_uncached_cfg.py`
+- [ ] NexusNav-V3 mini eval (50 eps) → GPU blocked until ChronoNav caps
 - [ ] v280 vLLM reannotation (unblock: restart server at 10.77.32.231)
-- [ ] Push all 10+ commits to origin/dev
+- [ ] Push all 11+ commits to origin/dev (user: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`)
 
 ### P1 — PAPER QUALITY  
 - [ ] Full 1839-ep val_unseen eval (needs Naver Cloud A100) → get real SR for paper table

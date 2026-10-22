@@ -59,7 +59,7 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 
 | Container | Model | GPU | Status | Log |
 |-----------|-------|-----|--------|-----|
-| `vln_ce_mini_chrononav` | ChronoNav S2-only 4-bit | all | ▶ RUNNING full val_unseen (ep 33+, SR=87.5%) | docker logs vln_ce_mini_chrononav |
+| `vln_ce_mini_chrononav` | ChronoNav S2-only 4-bit | all | ▶ RUNNING full val_unseen (ep 44/1839, SR=77.3% @ 50m elapsed) cap at 500 | docker logs vln_ce_mini_chrononav |
 
 **Completed containers (results):**
 | Container | Model | Result |
@@ -78,21 +78,26 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 - [ ] Push 18+ commits to origin/dev (user must run: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`)
 
 ### DONE THIS SESSION
-- [x] VLN-CE mini eval: DualVLN S2-only 4-bit — SR=90%, SPL=77.4%, NE=4.50 (10 eps mini)
-- [x] VisionEmbeddingCache wired into `_run_eval_system2()` (wt/wiring → merged to dev)
-- [x] NexusNav paper: ablation paragraph + VisionEmbeddingCache gap analysis + bib (wt/paper → merged to dev)
-- [x] Both wt/wiring and wt/paper merged into dev
+- [x] VLN-CE mini eval: DualVLN S2-only 4-bit — SR=91.7% SPL=81.2% NE=4.23 (n=12, strict_lt)
+- [x] VisionEmbeddingCache wired into `_run_eval_system2()` (6a00455, merged to dev)
+- [x] LatentReasoner + S2ThoughtCache wired into `internvla_n1_agent.py` (7d41569, merged to dev)
+- [x] NexusNav paper: ablation + cache gap analysis + bib (b6413a8, merged to dev)
+- [x] timing_rank0.json emission wired into evaluator (0d15e21) — s2_ms/s2_hz/cache_hit_rate/gpu_h
+- [x] timing_rank0.json written for s2only_4bit (s2_ms=1517ms, cache_hit_rate=0.0)
+- [x] Architecture artifact updated with all NexusNav-V3 module statuses
+- [x] peer `debug-duilvn-metrics-validation` ingested B2 timing into comparison.tex (@e43d4a5)
 
-### NEXT (sequential)
-- [ ] Monitor ChronoNav eval → collect SR/SPL/NE at ep 500 → update paper table
-- [ ] Run NexusNav-V3 mini eval (use `habitat_vln_ce_mini_nexusnav_cfg.py`, fix to system2 mode)
-- [x] Wire LatentReasoner + S2ThoughtCache into `internvla_n1_agent.py` — DONE (7d41569, merged)
-- [ ] v280 reannotation (blocked on vLLM server at 10.77.32.231 restart)
+### NEXT (sequential, GPU blocked until ChronoNav caps ~7.5h)
+- [ ] ChronoNav eval → cap at 500 eps → drop paths to `debug-duilvn-metrics-validation`
+- [ ] After cap: launch B2-cached (DualVLN + VisionEmbeddingCache) multi-scene eval → A/B speedup evidence
+- [ ] After B2: dual_system mode test with fp16 cast fix (need free GPU)
+- [ ] After dual_system: NexusNav-V3 eval (`habitat_vln_ce_mini_nexusnav_cfg.py`)
+- [ ] v280 reannotation (blocked: vLLM server at 10.77.32.231 needs restart)
+- [ ] Push 11+ commits to origin/dev (user must run: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`)
 
 ### PARALLEL-SAFE (any session can start independently)
-- [ ] ChronoNav: integrate NexusNav S2 modules into ChronoNav agent loop
-- [ ] NexusNav: wire LatentReasoner + S2ThoughtCache into inference path (`internvla_n1_agent.py`)
-- [ ] OmniNav architecture diagram (update for NexusNav)
+- [ ] NexusNav: wire remaining modules (S2KVCache in evaluator, WorldPredictor in inference)
+- [ ] OmniNav architecture diagram — update with NexusNav-V3 modules ✅ done (artifact updated)
 - [ ] Naver Cloud NavDP training (requires local smoke test to pass first)
 
 ---
@@ -104,10 +109,10 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 | Model | Container | S2 latency | S2 Hz | VLN-CE SR | Notes |
 |-------|-----------|-----------|-------|-----------|-------|
 | NavDP | `mini_eval_final` | 7529ms | 0.13 Hz | — | S1 only (VLN-PE model) |
-| DualVLN S2-only (4-bit) | `vln_ce_mini_s2only` | 1517ms | 0.66 Hz | **SR=90% SPL=77.4** ✅ | mode=system2, 10 eps, 9/10 success |
-| DualVLN dual_system (4-bit) | pending | — | — | pending | need fp16 cast fix or cloud GPU |
-| ChronoNav | pending | — | — | pending | after s2only result |
-| NexusNav-V3 | pending | — | — | pending | after ChronoNav |
+| DualVLN S2-only (4-bit) | `vln_ce_mini_s2only` | 1517ms | 0.66 Hz | **SR=91.7% SPL=81.2%** ✅ | mode=system2, n=12, strict_lt, no cache |
+| DualVLN dual_system (4-bit) | pending | — | — | pending | OOM on 12GB (ChronoNav holding GPU) |
+| ChronoNav | `vln_ce_mini_chrononav` | — | — | **SR=77.3% @ ep44 (running)** | n=44, cap at 500 |
+| NexusNav-V3 | pending | — | — | pending | GPU blocked ~7.5h |
 
 **Session history:**
 - Session 1: mini_eval_final ran NavDP (7529ms), DualVLN/ChronoNav/NexusNav FAILED (depth_anything path)
