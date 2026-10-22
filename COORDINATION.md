@@ -54,21 +54,22 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 
 | Container | Model | GPU | Status | Log |
 |-----------|-------|-----|--------|-----|
-| `vln_ce_mini_eval_4bit` | DualVLN 4-bit | all | ▶ RUNNING (ep 0/10) | `/mnt/nvme0/vln_habitat/logs/vln_ce_mini_dualvln_4bit.log` |
+| `vln_ce_mini_s2only` | DualVLN S2-only 4-bit | all | ▶ RUNNING (ep 0/10) | `/mnt/nvme0/vln_habitat/logs/vln_ce_mini_s2only_4bit.log` |
 
 **Completed containers (results):**
 | Container | Model | Result |
 |-----------|-------|--------|
 | `mini_eval_final` | NavDP | S2=7529ms, 0.13Hz — baseline measured |
 | `mini_eval_v3` | DualVLN/ChronoNav/NexusNav | PARTIAL — depth_anything path fix applied |
+| `vln_ce_mini_eval_4bit` | DualVLN 4-bit | CRASHED — memory_encoder dtype mismatch in generate_traj |
 
 ---
 
 ## Work Queue (ordered by priority)
 
 ### IN PROGRESS
-- [ ] VLN-CE mini eval: DualVLN 4-bit (10 eps) — `vln_ce_mini_eval_4bit`
-- [ ] Push 5 commits to origin/dev (blocked by auto-mode, user must run manually)
+- [ ] VLN-CE mini eval: DualVLN S2-only 4-bit (10 eps) — `vln_ce_mini_s2only`
+- [ ] Push 7+ commits to origin/dev (blocked by auto-mode, user must run: `git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`)
 
 ### NEXT (sequential — don't start until prior done)
 - [ ] Collect DualVLN VLN-CE baseline SR/SPL/NE
@@ -92,14 +93,16 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 | Model | Container | S2 latency | S2 Hz | VLN-CE SR | Notes |
 |-------|-----------|-----------|-------|-----------|-------|
 | NavDP | `mini_eval_final` | 7529ms | 0.13 Hz | — | S1 only (VLN-PE model) |
-| DualVLN (4-bit) | `vln_ce_mini_eval_4bit` | — | — | **RUNNING** | Habitat, 10 eps |
-| ChronoNav | pending | — | — | pending | need DualVLN result first |
-| NexusNav-V3 | pending | — | — | pending | need ChronoNav result first |
+| DualVLN S2-only (4-bit) | `vln_ce_mini_s2only` | ~1s/step | ~1 Hz | **RUNNING** | mode=system2, 10 eps |
+| DualVLN dual_system (4-bit) | pending | — | — | pending | need fp16 cast fix or cloud GPU |
+| ChronoNav | pending | — | — | pending | after s2only result |
+| NexusNav-V3 | pending | — | — | pending | after ChronoNav |
 
-**Three-session history:**
+**Session history:**
 - Session 1: mini_eval_final ran NavDP (7529ms), DualVLN/ChronoNav/NexusNav FAILED (depth_anything path)
 - Session 2: depth_anything fix via CWD symlink applied, mini_eval_v3 container ran — partial results
-- Session 3 (current): Habitat VLN-CE eval configured (4-bit for 12GB GPU), running now
+- Session 3: 4-bit BnB fix applied — crashed on memory_encoder dtype in generate_traj (dual_system)
+- Session 4 (3hr revisit): Switched to mode=system2 (avoids generate_traj) — running cleanly
 
 ---
 
@@ -113,8 +116,8 @@ When finishing a session:
 5. Write 2-line handoff note below:
 
 ### Latest Handoff Note
-**From:** session_01ARwduxfwfZ4FyxfSkDxPoN (2026-10-22)
-**To next session:** DualVLN 4-bit eval running in `vln_ce_mini_eval_4bit`. When done, collect SR/SPL, then launch ChronoNav and NexusNav-V3 evals sequentially. 5 commits ready to push to origin/dev (user must run `git push`). NexusNav paper draft at `paper/nexusnav_v3.tex` — needs real numbers. 3-hour revisit loop armed.
+**From:** session_01ARwduxfwfZ4FyxfSkDxPoN (2026-10-22 — 3hr revisit)
+**To next session:** S2-only eval running in `vln_ce_mini_s2only` (10 eps, mode=system2). Root fix: `memory_encoder` in dual_system mode is incompatible with 4-bit BnB (F.multi_head_attention_forward bypasses dequant hook). Fix applied in `habitat_vln_evaluator.py`: post-load cast `memory_encoder/dit_model/depth_anything` to fp16. S2-only avoids this entirely. When `vln_ce_mini_s2only` completes (check `/mnt/nvme0/vln_habitat/logs/vln_ce_mini_s2only_4bit.log`), collect SR/SPL/NE, then launch `habitat_vln_ce_mini_chrononav_cfg.py`. 9+ commits ready to push to origin/dev (user must run `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`).
 
 ---
 

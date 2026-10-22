@@ -399,6 +399,15 @@ class HabitatVLNEvaluator(DistributedEvaluator):
         else:
             raise ValueError(f"Invalid mode: {self.model_args.mode}")
 
+        # For 4-bit: cast non-quantizable components back to fp16 to avoid dtype mismatch.
+        # memory_encoder and dit_model use F.multi_head_attention_forward which bypasses
+        # the bitsandbytes dequantization hook — keep them in fp16.
+        if load_in_4bit or load_in_8bit:
+            base = model.get_model() if hasattr(model, 'get_model') else model.model
+            for attr in ('memory_encoder', 'dit_model', 'depth_anything'):
+                if hasattr(base, attr):
+                    getattr(base, attr).to(torch.float16)
+
         model.eval()
         self.device = device
 
