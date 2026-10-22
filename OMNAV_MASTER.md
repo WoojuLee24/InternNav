@@ -96,8 +96,8 @@ Sensors: RealSense RGB-D (640×480) + Odometry
 | VisionEmbeddingCache | `internnav/agent/s2_kv_cache.py` | ✅ done | included | EMA: v̂_t = τ·v̂_{t-1} + (1-τ)·φ(I_t) |
 | WorldPredictor | `internnav/agent/world_predictor.py` | ✅ done | included | online BCE reachability |
 | NexusNavNet | `internnav/model/basemodel/nexusnav/` | ✅ done | — | 7B + LoRA r=32 + NexusNavS2Heads |
-| **Inference wiring** | `internnav/agent/internvla_n1_agent.py` | ❌ **TODO** | — | modules not yet called in inference loop |
-| **Evaluator cache wiring** | `internnav/habitat_extensions/vln/habitat_vln_evaluator.py` | ❌ **TODO** | — | VisionEmbeddingCache + S2KVCache not consumed in eval loop |
+| **LatentReasoner inference wiring** | `internnav/agent/internvla_n1_agent.py` | 🔄 IN PROGRESS | — | fork agent aec99b7f wiring in wt/nexusnav-s2 |
+| **VisionEmbeddingCache eval wiring** | `internnav/habitat_extensions/vln/habitat_vln_evaluator.py` | ✅ **DONE** (2026-10-22) | — | merged 6a00455; per-step skip when cos_sim≥τ |
 
 > **WIRING GAP (CONFIRMED 2026-10-22)**: ChronoNav mini eval with `vision_cache_tau=0.92` showed 1497ms avg S2 latency — identical to DualVLN baseline (1517ms). The `use_kv_cache` and `vision_cache_tau` model_settings are passed to the evaluator but NEVER consumed. `grep "use_kv_cache\|VisionEmbeddingCache" habitat_vln_evaluator.py` → zero results. Fix: wire `VisionEmbeddingCache` into `_run_eval_system2()`: compute embedding fingerprint per observation, skip S2 if cos_sim(v̂_t, v̂_{t-1}) > τ, reuse previous action queue.
 
@@ -127,7 +127,7 @@ Sensors: RealSense RGB-D (640×480) + Odometry
 | Model | Mode | SR | SPL | NE | S2 ms | S2 Hz | Container |
 |-------|------|----|----|----|-------|-------|-----------|
 | NavDP | S1 only | — | — | — | 7529 | 0.13 | done |
-| DualVLN S2-only (4-bit) | system2 | **90.0%** | 77.4% | 4.50 | 1517 | 0.66 | done ✅ |
+| DualVLN S2-only (4-bit) | system2 | **91.7%** | 81.2% | 4.23 | 1517 | 0.66 | done ✅ (n=12) |
 | NexusNav-V3 (4-bit) | system2 | pending | — | — | — | — | not started (GPU blocked) |
 
 > ⚠️ Mini numbers are relative comparison only. Published S2-only = 60.9% on full 1839-ep val_unseen.
