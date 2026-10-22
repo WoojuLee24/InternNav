@@ -3,7 +3,7 @@
 > It is the authoritative source for goals, architecture decisions, module inventory, eval results, and agent coordination.  
 > Update it whenever something material changes. Never let it go stale.
 
-_Last updated: 2026-10-22 by session_01ARwduxfwfZ4FyxfSkDxPoN_
+_Last updated: 2026-10-23 by session_01ARwduxfwfZ4FyxfSkDxPoN_
 
 ---
 
@@ -144,9 +144,11 @@ Sensors: RealSense RGB-D (640×480) + Odometry
 ### ChronoNav Full Val Unseen (running — cap at 500 eps)
 | Checkpoint | Eps done | SR | SPL | NE | Status |
 |-----------|---------|----|----|----|----|
-| ChronoNav (τ=0.92, 4-bit, system2) | 66 | 78.8% | 0.639 | 5.07 | RUNNING — cap at 500, ~7h ETA |
+| ChronoNav (τ=0.92, 4-bit, system2) | 88 | 77.3% | 0.644 | 5.25 | RUNNING — cap at 500, ~4.5h ETA |
 
-> Container: `vln_ce_mini_chrononav`, ep 66/1839 at 16:26 UTC. ~60s/ep. GPU 10.9/12GB.
+> Container: `vln_ce_mini_chrononav`, ep 88/1839 at ~17:00 UTC 2026-10-23. ~40s/ep. SR stable ~77%.
+> **⚠ CAP SCRIPT NOT RUNNING** — container will overshoot 500 eps without manual start:
+> `bash scripts/eval/cap_and_launch_b2.sh`
 > NexusNav + B2-cached/B2-uncached evals BLOCKED until ChronoNav caps.
 
 ### ChronoNav Campaign (full val_unseen)
@@ -216,15 +218,23 @@ Launch: `./scripts/train/base_train/start_vln_ce_train.sh --model {navdp|dualsys
 - [x] Wire `LatentReasoner` + `S2ThoughtCache` into `internnav/agent/internvla_n1_agent.py` ✅ 7d41569
 - [x] Wire `VisionEmbeddingCache` into `_run_eval_system2()` ✅ 6a00455
 - [x] Emit `timing_rank0.json` at eval end ✅ 0d15e21
-- [ ] ChronoNav full val_unseen 500 eps → drop paths to peer (running, ~7.5h)
-- [ ] B2-cached eval (50 eps, multi-scene) → VisionEmbeddingCache speedup evidence for paper
+- [x] cap_and_launch_b2.sh auto-cap script ✅ scripts/eval/cap_and_launch_b2.sh
+- [ ] **⚠ START CAP SCRIPT**: `bash scripts/eval/cap_and_launch_b2.sh` (container will overshoot 500 eps without this)
+- [ ] ChronoNav full val_unseen 500 eps → ep 88, SR=77.3%, ~4.5h remaining
+- [ ] B2-cached eval (50 eps, multi-scene) → VisionEmbeddingCache speedup A/B (Table 4 in paper)
   - Config ready: `scripts/eval/configs/habitat_vln_ce_b2_cached_cfg.py`
   - Uncached arm: `scripts/eval/configs/habitat_vln_ce_b2_uncached_cfg.py`
-- [ ] NexusNav-V3 mini eval (50 eps) → GPU blocked until ChronoNav caps
+- [ ] NexusNav-V3 mini eval (50 eps) → GPU blocked until B2 complete
 - [ ] v280 vLLM reannotation (unblock: restart server at 10.77.32.231)
-- [ ] Push all 11+ commits to origin/dev (user: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`)
+- [ ] Push all 17+ commits to origin/dev: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`
 
-### P1 — PAPER QUALITY  
+### P1 — PAPER QUALITY (2026-10-23 session commits)
+- [x] 238b82e: Abstract corrected, Gate15 row removed, latency source annotations, Table 4 B2 placeholder
+- [x] 1449e80: Algorithm 1 — formal dual-system async protocol (Dual async ✅)
+- [x] d244a0d: Related work expanded (T²-Nav, DGNav, OmniVLN, Prophet)
+- [x] f14e478: Citation key fixes, t2nav2026 bib entry
+- [x] 241d7c7: Limitations section (5 paragraphs, CVPR-style)
+- [x] e7fc69c: All unconfirmed numbers qualified (measured vs projected vs estimated)
 - [ ] Full 1839-ep val_unseen eval (needs Naver Cloud A100) → get real SR for paper table
 - [ ] Ablation runs (w/o each module, mini set) → fill `tab:ablation` in `nexusnav_v3.tex`
 - [ ] Memory analysis figures (`paper/figures/memory_analysis.pdf`)
