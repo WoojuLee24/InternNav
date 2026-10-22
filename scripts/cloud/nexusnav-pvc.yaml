@@ -1,0 +1,52 @@
+---
+# DDN High-Performance Storage PVC for NexusNav training data and base checkpoints
+# - ReadWriteMany: all 4 training nodes can read simultaneously
+# - Do NOT set fsGroup on the pod spec — DDN POSIX layer performs recursive chown,
+#   which on 500 GB datasets takes hours and blocks pod startup
+# - Ensure pods run as UID 500 (DDN access control)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexusnav-ddn-pvc
+  namespace: default
+  labels:
+    app: nexusnav
+    storage-type: ddn
+  annotations:
+    # ML Expert Platform DDN annotations (update with values from portal)
+    ncloud.com/storage-class: "ddn"
+    ncloud.com/access-mode: "ReadWriteMany"
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ncloud-ddn    # confirm storage class name in your workspace: kubectl get sc
+  resources:
+    requests:
+      storage: 500Gi              # ~300 GB dataset + ~100 GB base checkpoints + ~100 GB output
+  volumeMode: Filesystem
+
+---
+# NVMe scratch PVC (optional — use EmptyDir in pod spec for per-node scratch)
+# Uncomment if you need a shared fast scratch across restarts (rare)
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: nexusnav-nvme-scratch
+#   namespace: default
+# spec:
+#   accessModes:
+#     - ReadWriteOnce
+#   storageClassName: ncloud-nvme
+#   resources:
+#     requests:
+#       storage: 100Gi
+
+---
+# Registry pull secret template — fill in your NCR credentials and apply once
+# kubectl create secret docker-registry ncr-registry-secret \
+#   --docker-server=<registry>.kr.ncr.ntruss.com \
+#   --docker-username=$NCLOUD_ACCESS_KEY \
+#   --docker-password=$NCLOUD_SECRET_KEY \
+#   -n default
+#
+# Verify: kubectl get secret ncr-registry-secret -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d

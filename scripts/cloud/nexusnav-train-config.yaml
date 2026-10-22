@@ -1,0 +1,98 @@
+# NexusNav V3 Training Configuration
+# 4-node × 4-GPU = 16 GPUs total
+# Effective global batch: per_device=2 × grad_accum=8 × 4 gpus/node × 4 nodes = 256
+# Base model: InternVLA-N1-DualVLN (7B, 4 shards)
+# LoRA trainable: ~10M / 8.3B = 0.12%
+
+model_name: nexusnav_v3
+
+# Checkpoint paths (mounted via DDN PVC)
+base_checkpoint: /data/nexusnav/checkpoints/InternVLA-N1-DualVLN
+output_dir: /tmp/nexusnav_ckpt       # NVMe scratch — copy to DDN after training
+final_output_dir: /data/nexusnav/checkpoints/nexusnav_v3_trained
+
+# LoRA configuration
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+
+# Training data (LeRobot parquet format, mounted from DDN)
+data_path: /data/nexusnav/vln_ce_full     # full VLN-CE dataset
+# data_path: /data/nexusnav/vln_ce_mini   # mini subset for fast iteration
+
+# Batch / gradient
+per_device_train_batch_size: 2
+per_device_eval_batch_size: 2
+gradient_accumulation_steps: 8          # global_batch = 2×8×4×4 = 256
+dataloader_num_workers: 4
+dataloader_pin_memory: true
+
+# Optimizer
+learning_rate: 2.0e-5
+weight_decay: 0.01
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_epsilon: 1.0e-8
+max_grad_norm: 1.0
+
+# Schedule
+num_train_epochs: 3
+warmup_ratio: 0.03
+lr_scheduler_type: cosine
+
+# Precision
+bf16: true
+tf32: true                    # A100 TF32 math on matmul (no precision loss for VLN)
+fp16: false
+
+# Memory efficiency
+gradient_checkpointing: true
+optim: adamw_torch_fused      # fused kernel reduces optimizer step overhead
+
+# Checkpointing
+save_strategy: steps
+save_steps: 500
+save_total_limit: 3           # keep last 3 checkpoints on NVMe scratch
+eval_strategy: steps
+eval_steps: 500
+load_best_model_at_end: false # too slow with 4-shard 7B, eval on separate job
+
+# Logging
+logging_steps: 10
+logging_dir: /tmp/nexusnav_ckpt/logs
+report_to: tensorboard        # accessible via kubectl port-forward
+
+# DeepSpeed ZeRO-2 (shards optimizer state + gradients, keeps weights on each GPU)
+deepspeed: scripts/cloud/ds_config_zero2.json
+
+# Distributed
+ddp_find_unused_parameters: false
+ddp_bucket_cap_mb: 25
+fsdp: ""                      # use DeepSpeed instead of FSDP
+
+# Dataset preprocessing
+max_seq_length: 2048
+preprocessing_num_workers: 8
+
+# Reproducibility
+seed: 42
+data_seed: 42
+
+# NexusNav-specific extras (passed through to NavDP trainer)
+nexusnav:
+  temporal_cache: true
+  kv_cache: true
+  latent_reasoning_steps: 4
+  action_token_vocab_size: 256
+  world_predictor: true
+  memory_modules: true
+  s2_step_gap: 4
+  max_new_tokens: 8

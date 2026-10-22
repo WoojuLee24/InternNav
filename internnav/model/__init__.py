@@ -26,6 +26,10 @@ def get_policy(policy_name):
         from .basemodel.navdp.navdp_policy import NavDPNet
 
         return NavDPNet
+    elif policy_name == 'NexusNav_Policy':
+        from .basemodel.nexusnav.nexusnav_policy import NexusNavNet
+
+        return NexusNavNet
     else:
         raise ValueError(f'Policy {policy_name} not found')
 
@@ -58,5 +62,9 @@ def get_config(policy_name):
         from .basemodel.navdp.navdp_policy import NavDPModelConfig
 
         return NavDPModelConfig
+    elif policy_name == 'NexusNav_Policy':
+        from .basemodel.nexusnav.nexusnav_policy import NexusNavModelConfig
+
+        return NexusNavModelConfig
     else:
         raise ValueError(f'Policy {policy_name} not found')

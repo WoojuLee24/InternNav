@@ -1,0 +1,197 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: nexusnav-train
+  namespace: default
+  labels:
+    app: nexusnav
+    version: v3
+spec:
+  # Fixed 4-node topology: 1 master + 3 workers (16 GPUs total at 4 per node)
+  # No elasticity → reproducible gradient accumulation schedule
+  elasticPolicy:
+    rdzvBackend: etcd-v2
+    rdzvHost: nexusnav-train-master-0
+    rdzvPort: 29400
+    minReplicas: 4
+    maxReplicas: 4
+    maxRestarts: 3
+    metrics:
+      - type: Resource
+        resource:
+          name: nvidia.com/gpu
+          target:
+            type: Utilization
+            averageUtilization: 80
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      restartPolicy: OnFailure
+      template:
+        spec:
+          # UID 500 for DDN high-performance storage access (no fsGroup to avoid recursive chown)
+          securityContext:
+            runAsUser: 500
+            runAsGroup: 500
+            capabilities:
+              add:
+                - IPC_LOCK   # required for InfiniBand RDMA pinned memory
+          containers:
+            - name: pytorch
+              image: ${REGISTRY}/nexusnav:latest
+              imagePullPolicy: Always
+              command:
+                - torchrun
+                - --nnodes=$(PET_NNODES)
+                - --nproc_per_node=$(PET_NPROC_PER_NODE)
+                - --rdzv_id=nexusnav-$(JOB_ID)
+                - --rdzv_backend=etcd-v2
+                - --rdzv_endpoint=$(PET_RDZV_ENDPOINT)
+                - scripts/train/base_train/train.py
+                - --config
+                - /workspace/InternNav/scripts/cloud/nexusnav-train-config.yaml
+              env:
+                - name: PET_NNODES
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.annotations['training.kubeflow.org/replica-count']
+                - name: PET_NPROC_PER_NODE
+                  value: "4"
+                - name: PET_RDZV_ENDPOINT
+                  value: nexusnav-train-master-0:29400
+                - name: JOB_ID
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.name
+                - name: NCCL_IB_DISABLE
+                  value: "0"
+                - name: NCCL_DEBUG
+                  value: "INFO"
+                - name: NCCL_IB_GID_INDEX
+                  value: "3"
+                - name: TORCH_NCCL_ASYNC_ERROR_HANDLING
+                  value: "1"
+                - name: PYTHONPATH
+                  value: /workspace/InternNav
+                # Checkpoint location on fast NVMe scratch
+                - name: OUTPUT_DIR
+                  value: /tmp/nexusnav_ckpt
+              resources:
+                requests:
+                  nvidia.com/gpu: "4"
+                  cpu: "32"
+                  memory: 256Gi
+                limits:
+                  nvidia.com/gpu: "4"
+                  cpu: "64"
+                  memory: 512Gi
+              volumeMounts:
+                - name: ddn-data
+                  mountPath: /data/nexusnav
+                - name: nvme-scratch
+                  mountPath: /tmp/nexusnav_ckpt
+                - name: dshm
+                  mountPath: /dev/shm
+          volumes:
+            - name: ddn-data
+              persistentVolumeClaim:
+                claimName: nexusnav-ddn-pvc
+            - name: nvme-scratch
+              emptyDir: {}
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 64Gi
+          # GPU node selector for ML Expert Platform KR region
+          nodeSelector:
+            ncloud.com/gpu-type: "a100"   # change to v100 or t4 if needed
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+          imagePullSecrets:
+            - name: ncr-registry-secret
+    Worker:
+      replicas: 3
+      restartPolicy: OnFailure
+      template:
+        spec:
+          securityContext:
+            runAsUser: 500
+            runAsGroup: 500
+            capabilities:
+              add:
+                - IPC_LOCK
+          containers:
+            - name: pytorch
+              image: ${REGISTRY}/nexusnav:latest
+              imagePullPolicy: Always
+              command:
+                - torchrun
+                - --nnodes=$(PET_NNODES)
+                - --nproc_per_node=$(PET_NPROC_PER_NODE)
+                - --rdzv_id=nexusnav-$(JOB_ID)
+                - --rdzv_backend=etcd-v2
+                - --rdzv_endpoint=$(PET_RDZV_ENDPOINT)
+                - scripts/train/base_train/train.py
+                - --config
+                - /workspace/InternNav/scripts/cloud/nexusnav-train-config.yaml
+              env:
+                - name: PET_NNODES
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.annotations['training.kubeflow.org/replica-count']
+                - name: PET_NPROC_PER_NODE
+                  value: "4"
+                - name: PET_RDZV_ENDPOINT
+                  value: nexusnav-train-master-0:29400
+                - name: JOB_ID
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.name
+                - name: NCCL_IB_DISABLE
+                  value: "0"
+                - name: NCCL_DEBUG
+                  value: "INFO"
+                - name: NCCL_IB_GID_INDEX
+                  value: "3"
+                - name: TORCH_NCCL_ASYNC_ERROR_HANDLING
+                  value: "1"
+                - name: PYTHONPATH
+                  value: /workspace/InternNav
+                - name: OUTPUT_DIR
+                  value: /tmp/nexusnav_ckpt
+              resources:
+                requests:
+                  nvidia.com/gpu: "4"
+                  cpu: "32"
+                  memory: 256Gi
+                limits:
+                  nvidia.com/gpu: "4"
+                  cpu: "64"
+                  memory: 512Gi
+              volumeMounts:
+                - name: ddn-data
+                  mountPath: /data/nexusnav
+                - name: nvme-scratch
+                  mountPath: /tmp/nexusnav_ckpt
+                - name: dshm
+                  mountPath: /dev/shm
+          volumes:
+            - name: ddn-data
+              persistentVolumeClaim:
+                claimName: nexusnav-ddn-pvc
+            - name: nvme-scratch
+              emptyDir: {}
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 64Gi
+          nodeSelector:
+            ncloud.com/gpu-type: "a100"
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+          imagePullSecrets:
+            - name: ncr-registry-secret

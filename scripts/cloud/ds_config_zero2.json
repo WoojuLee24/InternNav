@@ -1,0 +1,65 @@
+{
+  "_comment": "DeepSpeed ZeRO-2 config for NexusNav 7B LoRA training on Naver Cloud ML Expert Platform.",
+  "_comment_zero2": "ZeRO-2 shards optimizer states + gradients across GPUs; keeps full weights on each GPU (needed for NavDP head forward pass). ZeRO-3 would shard weights too, but breaks our 4-shard checkpoint loading.",
+
+  "zero_optimization": {
+    "stage": 2,
+    "allgather_partitions": true,
+    "allgather_bucket_size": 5e8,
+    "reduce_scatter": true,
+    "reduce_bucket_size": 5e8,
+    "overlap_comm": true,
+    "contiguous_gradients": true,
+    "round_robin_gradients": true
+  },
+
+  "bf16": {
+    "enabled": true
+  },
+
+  "fp16": {
+    "enabled": false
+  },
+
+  "gradient_clipping": 1.0,
+
+  "optimizer": {
+    "type": "AdamW",
+    "params": {
+      "lr": 2e-5,
+      "betas": [0.9, 0.999],
+      "eps": 1e-8,
+      "weight_decay": 0.01
+    }
+  },
+
+  "scheduler": {
+    "type": "WarmupDecayLR",
+    "params": {
+      "warmup_min_lr": 0,
+      "warmup_max_lr": 2e-5,
+      "warmup_num_steps": "auto",
+      "total_num_steps": "auto"
+    }
+  },
+
+  "train_batch_size": "auto",
+  "train_micro_batch_size_per_gpu": "auto",
+  "gradient_accumulation_steps": "auto",
+
+  "steps_per_print": 10,
+  "wall_clock_breakdown": false,
+
+  "activation_checkpointing": {
+    "partition_activations": false,
+    "contiguous_memory_optimization": false
+  },
+
+  "comms_logger": {
+    "enabled": false
+  },
+
+  "flops_profiler": {
+    "enabled": false
+  }
+}

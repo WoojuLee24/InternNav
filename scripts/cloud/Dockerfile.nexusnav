@@ -1,0 +1,55 @@
+FROM nvcr.io/nvidia/pytorch:23.12-py3
+
+# InfiniBand libraries required for DDN high-performance storage on ML Expert Platform
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libibverbs-dev \
+        ibverbs-providers \
+        librdmacm-dev \
+        rdma-core \
+        git \
+        curl \
+        wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pin pip to avoid resolver issues
+RUN pip install --upgrade "pip<24" setuptools wheel
+
+# Core ML dependencies
+# flash-attn prebuilt wheel avoids long compile; fall back to source if wheel unavailable
+RUN pip install \
+        "transformers>=4.45,<4.52" \
+        "peft>=0.17.0" \
+        "accelerate>=0.30.0" \
+        "deepspeed>=0.14.0" \
+        "datasets>=2.18.0" \
+        "huggingface-hub>=0.22.0" \
+        "einops" \
+        "timm" \
+        "pyarrow>=14.0" \
+    && pip install flash-attn --no-build-isolation || \
+       echo "[warn] flash-attn build failed, will use sdpa fallback"
+
+# diffusers pinned (NexusNav NavDP head needs it)
+RUN pip install "diffusers==0.29.2" "imageio" "av" "lerobot"
+
+# Copy internnav source (build context = repo root)
+WORKDIR /workspace/InternNav
+COPY . /workspace/InternNav/
+
+# Install internnav in editable mode (core + internvla_n1 extras)
+RUN pip install -e ".[internvla_n1]" || pip install -e "." || true
+
+# UID/GID 500 required for DDN (high-performance storage) access on ML Expert Platform
+# The DDN POSIX layer checks for uid=500; running as root causes silent I/O errors
+RUN groupadd -g 500 mluser && useradd -u 500 -g 500 -m -s /bin/bash mluser \
+    && chown -R mluser:mluser /workspace/InternNav
+
+USER mluser
+
+ENV PYTHONPATH=/workspace/InternNav:$PYTHONPATH
+ENV NCCL_IB_DISABLE=0
+ENV NCCL_DEBUG=WARN
+ENV TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+
+# torchrun entrypoint — overridden by PyTorchJob spec
+CMD ["torchrun", "--help"]
