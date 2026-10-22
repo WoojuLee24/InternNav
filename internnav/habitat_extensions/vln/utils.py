@@ -88,8 +88,12 @@ def pixel_to_gps(pixel, depth, intrinsic, tf_camera_to_episodic):
         (x, y): (x, y) coordinates in the episodic frame
     '''
     v, u = pixel
+    # bounds-clamp: S2 can predict a pixel-goal outside the frame (e.g. v=485 > H=480) → IndexError crash.
+    # Clamping to the nearest valid pixel is byte-identical for in-bounds pixels and safe for out-of-bounds.
+    H, W = depth.shape[:2]
+    v = int(np.clip(v, 0, H - 1))
+    u = int(np.clip(u, 0, W - 1))
     z = depth[v, u]
-    print("depth: ", z)
 
     x = (u - intrinsic[0, 2]) * z / intrinsic[0, 0]
     y = (v - intrinsic[1, 2]) * z / intrinsic[1, 1]

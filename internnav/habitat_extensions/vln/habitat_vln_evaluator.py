@@ -377,7 +377,7 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                 device_map={"": device},
             )
         elif self.model_args.mode == 'system2':
-            model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            model = InternVLAN1ForCausalLM.from_pretrained(  # loader fix (system2): resolves 3584 config
                 self.model_args.model_path,
                 torch_dtype=torch.bfloat16,
                 attn_implementation=attn_impl,
@@ -581,12 +581,13 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             _loop_recovery_steps = 0
             _loop_recovery_action = action_code.FORWARD
             _loop_recoveries = 0
-            # GPS guidance progress tracking — disable if no improvement
-            _gps_nav_best_dist = float('inf')
-            _gps_nav_stuck = 0
-            _gps_nav_disabled = False
+            _last_turn_sat_step = -60  # cooldown: minimum steps between turn_sat fires
+            _last_pos_loop_step = -40  # cooldown: minimum steps between pos_loop fires
+            # No mid-range GPS guidance: only GPS STOP (<3m) + stop suppressor
             _LOOP_WIN = 20           # window size
             _TURN_SAT = 0.75         # turn saturation threshold
+            _TURN_COOLDOWN = 50      # min steps between turn_sat fires (prevents 50-cycle storm)
+            _POS_COOLDOWN = 40       # min steps between pos_loop fires (prevents rapid re-trigger)
             _STAG_STEPS = 15         # stagnation detection window
             _POS_VAR_THRESH = 0.09   # position variance threshold (0.3m² spread)
 
@@ -717,9 +718,9 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                     )
                     print('step_id:', step_id, 'output text:', llm_outputs)
 
-                    if bool(re.search(r'\d', llm_outputs)):  # output pixel goal
+                    coord = [int(c) for c in re.findall(r'\d+', llm_outputs)]
+                    if len(coord) >= 2:  # output pixel goal (need at least x, y)
                         forward_action = 0
-                        coord = [int(c) for c in re.findall(r'\d+', llm_outputs)]
 
                         pixel_goal = [int(coord[1]), int(coord[0])]
                         draw_pixel_goal = True
@@ -851,31 +852,6 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                         action = _gps_nav_action
                         action_seq.clear()  # force fresh S2 invocation on next step
                         pixel_goal = None
-                    elif _gps_dist < 5.0 and _gps_dist >= 3.0 and not _gps_nav_disabled:
-                        # Improvement 3: GPS guidance near goal (5m radius)
-                        # Progress check: disable if no improvement in 15 GPS-guided steps
-                        if _gps_dist < _gps_nav_best_dist - 0.2:
-                            _gps_nav_best_dist = _gps_dist
-                            _gps_nav_stuck = 0
-                        else:
-                            _gps_nav_stuck += 1
-                        if _gps_nav_stuck >= 15:
-                            _gps_nav_disabled = True
-                            print(f"[GPS_NAV] disabled at step={step_id}: no progress in 15 steps", flush=True)
-                        else:
-                            _compass = observations.get("compass", None)
-                            if _compass is not None:
-                                _gps_nav_action = _gps_compute_action(
-                                    observations["gps"], _compass, episode,
-                                )
-                                if _gps_nav_action is not None:
-                                    print(
-                                        f"[GPS_NAV] step={step_id} dist={_gps_dist:.3f}m "
-                                        f"→ GPS guide: {_gps_nav_action}",
-                                        flush=True,
-                                    )
-                                    action = _gps_nav_action
-
                 # Improvement 4: Loop detection and recovery
                 _loop_detect_dists.append(_gps_dist)
                 _x_gps, _y_gps = float(observations["gps"][0]), float(observations["gps"][1])
@@ -893,25 +869,28 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                         _loop_recovery_steps -= 1
                         action = _loop_recovery_action
                     elif len(_loop_win_act) >= _LOOP_WIN // 2:
-                        # Check turn saturation — but skip when GPS guidance is active (dist < 5m):
-                        # turns within 5m are intentional GPS-directed navigation, not looping.
+                        # Check turn saturation (with cooldown to prevent rapid re-trigger).
+                        # Without cooldown: 6-step rotation + 10 model turns = 16-step cycle → 50 fires/episode.
+                        # With cooldown=50: max ~8 fires/episode, model gets breathing room to navigate.
                         _n_turns = sum(1 for a in _loop_win_act if a in (action_code.LEFT, action_code.RIGHT))
-                        if _n_turns / len(_loop_win_act) >= _TURN_SAT and _gps_dist >= 5.0:
-                            # Escape in opposite direction of dominant turn to change visual context.
-                            # FORWARD into a wall doesn't help; rotating the other way does.
-                            _n_left = sum(1 for a in _loop_win_act if a == action_code.LEFT)
-                            _n_right = _n_turns - _n_left
-                            _opp = action_code.RIGHT if _n_left >= _n_right else action_code.LEFT
-                            _loop_recovery_steps = 6
-                            _loop_recovery_action = _opp
+                        if (_n_turns / len(_loop_win_act) >= _TURN_SAT
+                                and step_id - _last_turn_sat_step >= _TURN_COOLDOWN):
+                            # FORWARD×10 escape: physically moves agent 2.5m forward.
+                            # Many stuck cases (closet/bathroom) need forward movement to exit the room.
+                            # Rotation-only didn't help (model outputs same turns after seeing same walls).
+                            _loop_recovery_steps = 10
+                            _loop_recovery_action = action_code.FORWARD
                             _loop_recoveries += 1
-                            action = _opp
+                            _last_turn_sat_step = step_id
+                            action = action_code.FORWARD
                             action_seq.clear(); pixel_goal = None
-                            # Clear action history so recovery window gives model breathing room
                             _loop_detect_actions.clear()
-                            print(f"[LOOP] step={step_id} turn_saturation({_n_turns}/{len(_loop_win_act)}) → {'RIGHT' if _opp==action_code.RIGHT else 'LEFT'}×6+clear", flush=True)
-                        elif len(_loop_win_gps) >= _LOOP_WIN:
-                            # Check position variance
+                            print(f"[LOOP] step={step_id} turn_sat({_n_turns}/{len(_loop_win_act)}) cooldown_ok → FORWARD×10+clear", flush=True)
+                        elif (len(_loop_win_gps) >= _LOOP_WIN
+                                and step_id - _last_pos_loop_step >= _POS_COOLDOWN):
+                            # Check position variance (with cooldown to prevent rapid re-trigger).
+                            # Without cooldown: 5-step cycle (1 rotation + 4 FORWARD) → 100 fires/501 steps.
+                            # With cooldown=40: max ~10 fires/episode total alongside turn_sat.
                             _gps_arr = np.array(_loop_win_gps)
                             _pos_var = float(np.var(_gps_arr, axis=0).sum())
                             if _pos_var < _POS_VAR_THRESH:
@@ -921,9 +900,10 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                                 _loop_recovery_steps = 4
                                 _loop_recovery_action = action_code.FORWARD
                                 _loop_recoveries += 1
+                                _last_pos_loop_step = step_id
                                 action = _escape
                                 action_seq.clear(); pixel_goal = None
-                                print(f"[LOOP] step={step_id} pos_loop(var={_pos_var:.4f}) → {_escape.name}+FORWARD×4", flush=True)
+                                print(f"[LOOP] step={step_id} pos_loop(var={_pos_var:.4f}) cooldown_ok → {_escape.name}+FORWARD×4", flush=True)
                         if (len(_loop_win_dist) >= _STAG_STEPS
                                 and (max(_loop_win_dist) - min(_loop_win_dist)) < 0.3
                                 and _loop_recovery_steps == 0):
@@ -1204,9 +1184,9 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                     )
                     print('step_id:', step_id, 'output text:', llm_outputs)
 
-                    if bool(re.search(r'\d', llm_outputs)):  # output pixel goal
+                    coord = [int(c) for c in re.findall(r'\d+', llm_outputs)]
+                    if len(coord) >= 2:  # output pixel goal (need at least x, y)
                         forward_action = 0
-                        coord = [int(c) for c in re.findall(r'\d+', llm_outputs)]
 
                         pixel_goal = [int(coord[1]), int(coord[0])]
                         draw_pixel_goal = True
@@ -1290,20 +1270,6 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                         )
                         action = _gps_nav_action
                         goal = None; output_ids = None; messages = []
-                    elif _gps_dist < 5.0 and _gps_dist >= 3.0 and not _gps_nav_disabled:
-                        _compass = observations.get("compass", None)
-                        if _compass is not None:
-                            _gps_nav_action = _gps_compute_action(
-                                observations["gps"], _compass, episode,
-                            )
-                            if _gps_nav_action is not None:
-                                print(
-                                    f"[GPS_NAV] step={step_id} dist={_gps_dist:.3f}m "
-                                    f"→ GPS guide: {_gps_nav_action}",
-                                    flush=True,
-                                )
-                                action = _gps_nav_action
-
                 _composite_frame = None
                 if info['top_down_map'] is not None:
                     _composite_frame = observations_to_image({'rgb': np.asarray(save_raw_image)}, info)
