@@ -59,7 +59,7 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 
 | Container | Model | GPU | Status | Log |
 |-----------|-------|-----|--------|-----|
-| `vln_ce_mini_chrononav` | ChronoNav S2-only 4-bit | all | ▶ RUNNING full val_unseen (ep 44/1839, SR=77.3% @ 50m elapsed) cap at 500 | docker logs vln_ce_mini_chrononav |
+| `vln_ce_mini_chrononav` | ChronoNav S2-only 4-bit | all | ▶ RUNNING full val_unseen (ep 135/500, SR=77.8%) cap at 500 | docker logs vln_ce_mini_chrononav |
 
 **Completed containers (results):**
 | Container | Model | Result |
@@ -74,7 +74,7 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 ## Work Queue (ordered by priority)
 
 ### IN PROGRESS
-- [ ] ChronoNav FULL val_unseen eval — running (`vln_ce_mini_chrononav`, ep 33/1839, SR=87.5%) — cap at 500 eps
+- [ ] ChronoNav FULL val_unseen eval — running (`vln_ce_mini_chrononav`, ep 135/500, SR=77.8%) — cap at 500 eps
 - [ ] Push 18+ commits to origin/dev (user must run: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`)
 
 ### DONE THIS SESSION
@@ -133,7 +133,7 @@ When finishing a session:
 
 ### Latest Handoff Note
 **From:** session_01ARwduxfwfZ4FyxfSkDxPoN (2026-10-22 15:55)
-**State:** ChronoNav FULL val_unseen running (`vln_ce_mini_chrononav`), ep 35/1839, SR=85.7% SPL=0.657 NE=3.83. Scene `2azQ1b91cZZ`, cap at 500 eps. LatentReasoner+S2ThoughtCache now wired into `internvla_n1_agent.py` (commit 7d41569, merged to dev). All P0 wiring tasks complete. Dev ahead of origin — user must push: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`. Next: NexusNav-V3 mini eval (fix `habitat_vln_ce_mini_nexusnav_cfg.py` to system2+4bit, launch container after ChronoNav finishes or on GPU availability).
+**State:** ChronoNav FULL val_unseen running (`vln_ce_mini_chrononav`), ep 135/500, SR=77.8% SPL=0.657 NE=3.83. Scene `2azQ1b91cZZ`, cap at 500 eps. LatentReasoner+S2ThoughtCache now wired into `internvla_n1_agent.py` (commit 7d41569, merged to dev). All P0 wiring tasks complete. Dev ahead of origin — user must push: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`. Next: NexusNav-V3 mini eval (fix `habitat_vln_ce_mini_nexusnav_cfg.py` to system2+4bit, launch container after ChronoNav finishes or on GPU availability).
 
 ---
 

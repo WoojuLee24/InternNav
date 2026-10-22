@@ -63,15 +63,17 @@ def compute_stats(result: dict) -> dict:
 def update_tex(tex: str, s: dict, dry_run: bool) -> str:
     changes = []
 
-    # 1. Update Table 1 ChronoNav preliminary row
-    old_row = r"ChronoNav ($n$=110, prelim.)$^{\P}$ & \textbf{78.2} & \textbf{66.8} & \textbf{4.86} & 3.2 \\"
+    # 1. Update Table 1 ChronoNav preliminary row (match any n= value)
+    old_row_pattern = re.compile(
+        r"ChronoNav \(\$n\$=\d+, prelim\.\)\$\^\{\\P\}\$ & \\textbf\{[\d\.]+\} & \\textbf\{[\d\.]+\} & \\textbf\{[\d\.]+\} & 3\.2 \\\\"
+    )
     new_row = (
         f"ChronoNav ($n$={s['n']}, measured)$^{{\\S}}$ "
         f"& \\textbf{{{s['sr_pct']}}} & \\textbf{{{s['spl_pct']}}} "
         f"& \\textbf{{{s['ne_r']}}} & 3.2 \\\\"
     )
-    if old_row in tex:
-        tex = tex.replace(old_row, new_row)
+    if old_row_pattern.search(tex):
+        tex = old_row_pattern.sub(new_row, tex)
         changes.append(f"Table 1 ChronoNav row: preliminary → n={s['n']} SR={s['sr_pct']}%")
     else:
         print("[WARN] Table 1 ChronoNav row not found (may already be updated)", file=sys.stderr)
