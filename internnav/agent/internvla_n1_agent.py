@@ -12,6 +12,7 @@ from gym import spaces
 from PIL import Image
 
 from internnav.agent.base import Agent
+from internnav.agent.latent_reasoning import LatentReasoner, S2ThoughtCache
 from internnav.configs.agent import AgentCfg
 from internnav.configs.model.base_encoders import ModelCfg
 from internnav.model import get_config, get_policy
@@ -73,6 +74,14 @@ class InternVLAN1Agent(Agent):
         self.s2_output_lock = threading.Lock()
         self.s2_agent_lock = threading.Lock()
 
+        # LatentReasoner: N=4 GRU ThoughtCells, silent chain-of-thought in embedding space
+        _thought_dim = 256
+        self.latent_reasoner = LatentReasoner(
+            thought_dim=_thought_dim, context_dim=_thought_dim, n_steps=4, vocab_size=256
+        ).to(self.device)
+        self.latent_reasoner.eval()
+        self.s2_thought_cache = S2ThoughtCache(thought_dim=_thought_dim)
+
         # Start S2 thread
         self._start_s2_thread()
 
@@ -116,6 +125,9 @@ class InternVLAN1Agent(Agent):
         with self.s2_agent_lock:
             self.policy.reset()
 
+        # Reset latent thought state for new episode
+        self.s2_thought_cache.reset()
+
         if self.vis_debug:
             self.fps_writer = imageio.get_writer(f"{self.debug_path}/fps_{self.episode_idx}.mp4", fps=5)
             self.fps_writer2 = imageio.get_writer(f"{self.debug_path}/fps_{self.episode_idx}_dp.mp4", fps=5)
@@ -133,6 +145,10 @@ class InternVLAN1Agent(Agent):
             [[fx, 0.0, cx, 0.0], [0.0, fy, cy, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
         )
         return intrinsic_matrix
+
+    def get_last_thought(self) -> "torch.Tensor | None":
+        """Return the current latent thought vector from the last S2 call, or None if no call yet."""
+        return self.s2_thought_cache.current_thought
 
     def _start_s2_thread(self):
         def s2_thread_func():
@@ -193,6 +209,17 @@ class InternVLAN1Agent(Agent):
                         continue
 
                 print("s2 infer finish!!")
+
+                # Update latent thought state (zero context = carry-over only; full context wired at training)
+                try:
+                    _ctx = torch.zeros(1, 256, device=self.device)
+                    with torch.no_grad():
+                        _, _thought, _conf = self.latent_reasoner(_ctx, self.s2_thought_cache.current_thought)
+                    self.s2_thought_cache.update(_thought)
+                    print(f"[LatentReasoner] {self.s2_thought_cache.stats_str()} conf={_conf.item():.3f}")
+                except Exception as _le:
+                    print(f"[LatentReasoner] update skipped: {_le}")
+
                 # Update output state
                 with self.s2_output_lock:
                     print("get s2 output lock")
