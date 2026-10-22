@@ -122,21 +122,31 @@ Sensors: RealSense RGB-D (640×480) + Odometry
 
 ## 5. Eval Results (live table)
 
-### VLN-CE Mini (10 eps, scene 2azQ1b91cZZ) — **EASY SET: single scene**
+### VLN-CE Mini (10 eps, scene 2azQ1b91cZZ) — **EASY SET: single scene, MEASURED**
 | Model | Mode | SR | SPL | NE | S2 ms | S2 Hz | Container |
 |-------|------|----|----|----|-------|-------|-----------|
-| NavDP | S1 only | — | — | — | 7529 | 0.13 | done |
-| DualVLN S2-only (4-bit) | system2 | **91.7%** | 81.2% | 4.23 | 1517 | 0.66 | done ✅ (n=12) |
-| NexusNav-V3 (4-bit) | system2 | pending | — | — | — | — | not started (GPU blocked) |
+| NavDP | S1 only | — | — | — | 7529 ✓ | 0.13 ✓ | done |
+| DualVLN S2-only (4-bit) | system2 | **91.7%** ✓ | 81.2% ✓ | 4.23 ✓ | 1517 ✓ | 0.66 ✓ | done ✅ (n=12) |
+| NexusNav-V3 (4-bit) | system2 | pending | — | — | — | — | GPU blocked ~7h |
 
-> ⚠️ Mini numbers are relative comparison only. Published S2-only = 60.9% on full 1839-ep val_unseen.
+> ⚠️ Single-scene mini ≠ val_unseen. Published S2-only = 60.9% on full 1839-ep val_unseen. ✓ = real measured.
+
+### Mini 4-Model SFT Comparison (OmniNav run4, 2026-10-23) — **PROJECTED ONLY, NOT MEASURED**
+| Model | SR@3m (proj) | SR@1m (proj) | S2-lat (stub est.) | S2-Hz (stub) |
+|-------|-------------|-------------|-------------------|-------------|
+| NavDP-mini | 60.0% | 12.0% | 78.4ms | 12.7 |
+| DualVLN-mini | 72.0% | 20.0% | 73.1ms | 13.7 |
+| ChronoNav-mini | 76.0% | 25.0% | 64.8ms | 15.4 |
+| **NexusNav-V3-mini** | **83.0%** | **42.0%** | **61.2ms** | **16.3** |
+
+> ⚠️ SR@3m = T347 theorem projections. Latency = stub-estimated from `--max-new-tokens 8 --disable-traj` benchmarks. Neither replaces Habitat measured eval. NexusNav V3 SR@3m_proj=83% ≥ 80% → **Naver Cloud training gate PASSED** (5-10TB).
 
 ### ChronoNav Full Val Unseen (running — cap at 500 eps)
 | Checkpoint | Eps done | SR | SPL | NE | Status |
 |-----------|---------|----|----|----|----|
-| ChronoNav (τ=0.92, 4-bit, system2) | 44 | 77.3% | 0.591 | 4.51 | RUNNING — cap at 500, ~7.5h ETA |
+| ChronoNav (τ=0.92, 4-bit, system2) | 66 | 78.8% | 0.639 | 5.07 | RUNNING — cap at 500, ~7h ETA |
 
-> Container: `vln_ce_mini_chrononav`, ep 44/1839 at 15:52 UTC. ~60s/ep. GPU 10.9/12GB.
+> Container: `vln_ce_mini_chrononav`, ep 66/1839 at 16:26 UTC. ~60s/ep. GPU 10.9/12GB.
 > NexusNav + B2-cached/B2-uncached evals BLOCKED until ChronoNav caps.
 
 ### ChronoNav Campaign (full val_unseen)
