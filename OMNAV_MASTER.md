@@ -128,10 +128,17 @@ Sensors: RealSense RGB-D (640×480) + Odometry
 |-------|------|----|----|----|-------|-------|-----------|
 | NavDP | S1 only | — | — | — | 7529 | 0.13 | done |
 | DualVLN S2-only (4-bit) | system2 | **90.0%** | 77.4% | 4.50 | 1517 | 0.66 | done ✅ |
-| ChronoNav (τ=0.92, 4-bit) | system2 | **RUNNING** | — | — | — | — | `vln_ce_mini_chrononav` |
-| NexusNav-V3 (4-bit) | system2 | pending | — | — | — | — | not started |
+| NexusNav-V3 (4-bit) | system2 | pending | — | — | — | — | not started (GPU blocked) |
 
 > ⚠️ Mini numbers are relative comparison only. Published S2-only = 60.9% on full 1839-ep val_unseen.
+
+### ChronoNav Full Val Unseen (running — scene 2azQ1b91cZZ only, cap at 500 eps)
+| Checkpoint | Eps done | SR | SPL | NE | Status |
+|-----------|---------|----|----|----|----|
+| ChronoNav (τ=0.92, 4-bit, system2) | 35 | 85.7% | 0.657 | 3.83 | RUNNING — cap at 500 |
+
+> Container: `vln_ce_mini_chrononav`, 35/1839 eps at 15:22 UTC. Est. ~9hrs to 500 eps.
+> GPU: 10919/12288 MiB used — NexusNav eval BLOCKED until ChronoNav finishes.
 
 ### ChronoNav Campaign (full val_unseen)
 | Version | SR | Episodes | Notes |
