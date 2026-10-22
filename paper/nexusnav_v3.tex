@@ -314,18 +314,20 @@ Table~\ref{tab:ablation} shows that the Memory System contributes most ($-8.1$\%
 \caption{\textbf{S2 Latency Breakdown} on A100 80GB SXM4 (fp16). Cache hit rate measured over 500-episode eval.}
 \label{tab:latency}
 \small
-\begin{tabular}{lcc}
+\begin{tabular}{lccc}
 \toprule
-\textbf{Component} & \textbf{Latency (ms)} & \textbf{Hz} \\
+\textbf{Component} & \textbf{Latency (ms)} & \textbf{Hz} & \textbf{GPU} \\
 \midrule
-Full S2 (no cache) & 309 & 3.2 \\
-S2 KVCache hit & 47 & 21.3 \\
-S2 VisionCache hit & 233 & 4.3 \\
-LatentReasoner overhead & +8 & — \\
-Memory overhead & +3 & — \\
-WorldPredictor & +2 & — \\
+Full S2 (no cache) & 309 & 3.2 & A100 fp16 \\
+S2 KVCache hit & 47 & 21.3 & A100 fp16 \\
+S2 VisionCache hit & 233 & 4.3 & A100 fp16 \\
+LatentReasoner overhead & +8 & — & — \\
+Memory overhead & +3 & — & — \\
+WorldPredictor & +2 & — & — \\
 \midrule
-\textbf{Effective S2 Hz} (94.5\% KV-hit) & & \textbf{4.3} \\
+\textbf{Effective S2 Hz} (94.5\% KV-hit) & & \textbf{4.3} & A100 fp16 \\
+\midrule
+S2-only, 4-bit NF4 (local) & 1517 & 0.66 & RTX 3080 Ti 12GB \\
 \bottomrule
 \end{tabular}
 \end{table}
