@@ -328,7 +328,7 @@ ChronoNav ($n$=110, prelim.)$^{\P}$ & \textbf{78.2} & \textbf{66.8} & \textbf{4.
 \end{table}
 
 \paragraph{Preliminary SOTA evidence.}
-The ChronoNav variant (InternVLA-N1-DualVLN + VisionEmbeddingCache, $\tau=0.92$, 4-bit NF4) is currently running a 500-episode cap evaluation on VLN-CE R2R val unseen. At $n=110$ episodes, SR$=78.2\%$ (95\% CI: $[70.5\%, 85.9\%]$) already surpasses all published baselines in Table~\ref{tab:main_results}, including the prior InternVLA-N1-DualVLN v278 result of $72.82\%$. The lower confidence bound ($70.5\%$) exceeds the published S2-only baseline ($60.9\%$~\cite{internvla2024}) by $9.6$\,pp. The full 500-ep capped result will replace the preliminary row in the camera-ready version.
+The ChronoNav variant (InternVLA-N1-DualVLN + VisionEmbeddingCache, $\tau=0.92$, 4-bit NF4) is currently running a 500-episode cap evaluation on VLN-CE R2R val unseen. At $n=110$ episodes, the point estimate is SR$=78.2\%$ ($+5.4$\,pp over v278, $+17.3$\,pp over the published S2-only baseline of $60.9\%$~\cite{internvla2024}). The 95\% CI is $[70.5\%, 85.9\%]$; the lower bound ($70.5\%$) clears the published S2-only baseline ($60.9\%$) by $9.6$\,pp with high confidence. Statistical significance over v278 ($72.82\%$) requires $n\approx 363$ episodes (power 80\%, one-sided); this threshold will be crossed before the 500-ep cap completes. The full 500-ep capped result will replace the preliminary row in the camera-ready version.
 
 \subsection{Ablation Study}
 
