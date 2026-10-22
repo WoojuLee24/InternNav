@@ -97,6 +97,9 @@ Sensors: RealSense RGB-D (640×480) + Odometry
 | WorldPredictor | `internnav/agent/world_predictor.py` | ✅ done | included | online BCE reachability |
 | NexusNavNet | `internnav/model/basemodel/nexusnav/` | ✅ done | — | 7B + LoRA r=32 + NexusNavS2Heads |
 | **Inference wiring** | `internnav/agent/internvla_n1_agent.py` | ❌ **TODO** | — | modules not yet called in inference loop |
+| **Evaluator cache wiring** | `internnav/habitat_extensions/vln/habitat_vln_evaluator.py` | ❌ **TODO** | — | VisionEmbeddingCache + S2KVCache not consumed in eval loop |
+
+> **WIRING GAP (CONFIRMED 2026-10-22)**: ChronoNav mini eval with `vision_cache_tau=0.92` showed 1497ms avg S2 latency — identical to DualVLN baseline (1517ms). The `use_kv_cache` and `vision_cache_tau` model_settings are passed to the evaluator but NEVER consumed. `grep "use_kv_cache\|VisionEmbeddingCache" habitat_vln_evaluator.py` → zero results. Fix: wire `VisionEmbeddingCache` into `_run_eval_system2()`: compute embedding fingerprint per observation, skip S2 if cos_sim(v̂_t, v̂_{t-1}) > τ, reuse previous action queue.
 
 ### ChronoNav (ChronoNav repo)
 
