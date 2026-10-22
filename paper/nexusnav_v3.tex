@@ -99,6 +99,39 @@ NexusNav-V3 inherits the dual-system foundation from InternVLA-N1-DualVLN~\cite{
 
 Formally, at step $t$, S1 receives observation $\mathbf{o}_t = (\mathbf{I}_t^{\text{rgb}}, \mathbf{I}_t^{\text{depth}}, \mathbf{p}_t)$ where $\mathbf{p}_t$ is the odometric pose, and outputs action $\mathbf{a}_t \in \mathbb{R}^3$. S2 receives a summarized context $\mathbf{c}_t$ (incorporating instruction, memory, and recent observations) and outputs a trajectory plan $\tau_t = \{w_1, w_2, \ldots, w_K\}$ of waypoints that S1 executes until the next S2 update.
 
+Algorithm~\ref{alg:dual_system} gives the complete NexusNav-V3 async protocol. Four design choices distinguish it from the baseline: (i) VisionEmbeddingCache gates S2 invocation on visual change rather than a fixed step-gap; (ii) LatentReasoner refines thought state before returning the plan; (iii) S2ThoughtCache carries $\mathbf{h}_N$ across calls; (iv) Memory Triad and WorldPredictor update per S2 step in the background thread, with best-effort exception handling to prevent any memory write from blocking the planning path.
+
+\begin{algorithm}[t]
+\small
+\caption{NexusNav-V3 Dual-System Async Protocol}
+\label{alg:dual_system}
+\begin{algorithmic}[1]
+\STATE \textbf{Shared state:} trajectory buffer $\mathcal{B}$, thought cache $\mathcal{H}$, memory triad $\mathcal{M}$, s2\_lock
+\STATE \textbf{S1 thread} (runs at ${\sim}12$ Hz):
+\WHILE{episode not done}
+  \STATE $\mathbf{o}_t \leftarrow$ observe RGB-D + odometry
+  \STATE Update VisionEmbeddingCache EMA: $\hat{\mathbf{f}}_t \leftarrow \tau\hat{\mathbf{f}}_{t-1} + (1-\tau)\mathbf{f}(\mathbf{I}_t)$
+  \IF{$\|\hat{\mathbf{f}}_t - \hat{\mathbf{f}}_{t-1}\|_2 > \epsilon$ \textbf{or} $|\mathcal{B}| = 0$}
+    \STATE \textbf{signal} S2 with $(\mathbf{o}_t, \mathcal{M}.\text{summarize}())$ \COMMENT{non-blocking write}
+  \ENDIF
+  \STATE $\mathbf{a}_t \leftarrow$ S1-policy($\mathbf{o}_t$, $\mathcal{B}$.\text{peek()}); execute $\mathbf{a}_t$
+\ENDWHILE
+\STATE
+\STATE \textbf{S2 thread} (background, no rate limit):
+\WHILE{episode not done}
+  \STATE $(\mathbf{o}, \mathbf{m}) \leftarrow$ \textbf{wait} for S1 signal (blocking)
+  \STATE $\mathbf{c} \leftarrow$ build\_context($\mathbf{o}$, instruction, $\mathbf{m}$, $\mathcal{M}$)
+  \STATE $\hat{\mathbf{f}}_{\text{ctx}} \leftarrow$ VisionEmbCache.get\_or\_compute($\mathbf{c}$) \COMMENT{S2KVCache hit}
+  \STATE $(\text{text}, \tau, \mathbf{e}_{\text{out}}) \leftarrow$ VLM.generate($\hat{\mathbf{f}}_{\text{ctx}}$) \COMMENT{S2KVCache miss: full forward}
+  \STATE $\mathbf{h}_0 \leftarrow \mathcal{H}.\text{init}(\mathbf{e}_{\text{out}})$ \COMMENT{Eq.~\ref{eq:carry_over}: $\alpha\mathbf{h}_N^{(t-1)} + (1-\alpha)\text{Init}(\mathbf{e}_{\text{out}})$}
+  \STATE $\mathbf{h}_N, \text{conf} \leftarrow$ LatentReasoner($\mathbf{e}_{\text{out}}$, $\mathbf{h}_0$) \COMMENT{$N=4$ ThoughtCells, Eq.~\ref{eq:thought_cell}}
+  \STATE $\mathcal{H}.\text{update}(\mathbf{h}_N)$; $\mathcal{B}.\text{replace}(\tau)$ \COMMENT{s2\_lock protected}
+  \STATE \textbf{try:} $\mathcal{M}.\text{update}(\mathbf{o}, \text{text})$; WorldPredictor.update($\mathbf{o}$, $\Delta\mathbf{p}$)
+  \STATE \textbf{except:} pass \COMMENT{memory never blocks planning}
+\ENDWHILE
+\end{algorithmic}
+\end{algorithm}
+
 \subsection{ActionTokenVocabulary}
 
 \begin{figure}[t]
