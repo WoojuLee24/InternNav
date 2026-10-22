@@ -13,6 +13,10 @@ from PIL import Image
 
 from internnav.agent.base import Agent
 from internnav.agent.latent_reasoning import LatentReasoner, S2ThoughtCache
+from internnav.agent.memory.body_memory import BodyMemory
+from internnav.agent.memory.task_memory import TaskMemory
+from internnav.agent.memory.world_memory import WorldMemory
+from internnav.agent.world_predictor import WorldPredictor
 from internnav.configs.agent import AgentCfg
 from internnav.configs.model.base_encoders import ModelCfg
 from internnav.model import get_config, get_policy
@@ -82,6 +86,14 @@ class InternVLAN1Agent(Agent):
         self.latent_reasoner.eval()
         self.s2_thought_cache = S2ThoughtCache(thought_dim=_thought_dim)
 
+        # Memory Triad: passive state trackers updated per S2 step (no LLM input change)
+        self.task_memory = TaskMemory()
+        self.world_memory = WorldMemory(max_nodes=200)
+        self.body_memory = BodyMemory()
+
+        # WorldPredictor: online BCE reachability (Prophet-style), generates training signal
+        self.world_predictor = WorldPredictor(feature_dim=256, device=str(self.device))
+
         # Start S2 thread
         self._start_s2_thread()
 
@@ -125,8 +137,11 @@ class InternVLAN1Agent(Agent):
         with self.s2_agent_lock:
             self.policy.reset()
 
-        # Reset latent thought state for new episode
+        # Reset latent thought state and memory triad for new episode
         self.s2_thought_cache.reset()
+        self.task_memory.reset([])
+        self.world_memory.reset()
+        self.body_memory.reset()
 
         if self.vis_debug:
             self.fps_writer = imageio.get_writer(f"{self.debug_path}/fps_{self.episode_idx}.mp4", fps=5)
@@ -219,6 +234,33 @@ class InternVLAN1Agent(Agent):
                     print(f"[LatentReasoner] {self.s2_thought_cache.stats_str()} conf={_conf.item():.3f}")
                 except Exception as _le:
                     print(f"[LatentReasoner] update skipped: {_le}")
+
+                # Memory Triad: passive per-step updates (no LLM input change; state for training)
+                try:
+                    _pose = self.s2_input.pose  # [x, y, theta] or None
+                    if _pose is not None:
+                        _odom = (_pose[0], _pose[1], _pose[2] if len(_pose) > 2 else 0.0)
+                        self.body_memory.update(_odom)
+                        _pose_arr = np.array(_odom, dtype=np.float32)
+                        _emb_vec = np.zeros(256, dtype=np.float32)
+                        self.world_memory.add_node(_pose_arr, _emb_vec)
+                    _llm_text = getattr(current_s2_output, 'output_text', '') or ''
+                    if _llm_text and self.s2_input.instruction:
+                        self.task_memory.update(_llm_text, [self.s2_input.instruction])
+                except Exception as _me:
+                    pass  # memory updates are best-effort
+
+                # WorldPredictor: online BCE reachability update
+                try:
+                    if self.s2_input.rgb is not None and _pose is not None:
+                        _rgb_t = torch.from_numpy(
+                            np.array(self.s2_input.rgb, dtype=np.float32).transpose(2, 0, 1) / 255.0
+                        ).unsqueeze(0)
+                        _dp = torch.tensor([_odom[0], _odom[1], _odom[2]], dtype=torch.float32)
+                        _reward = 1.0 if getattr(current_s2_output, 'output_action', [0])[0] != 0 else 0.0
+                        self.world_predictor.update(_rgb_t, _dp, _reward)
+                except Exception:
+                    pass  # world predictor updates are best-effort
 
                 # Update output state
                 with self.s2_output_lock:
