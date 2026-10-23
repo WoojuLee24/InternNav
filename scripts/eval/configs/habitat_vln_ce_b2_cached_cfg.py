@@ -19,7 +19,7 @@ eval_cfg = EvalCfg(
             "resize_h": 384,
             "max_new_tokens": 64,
             "vis_debug": False,
-            "attn_implementation": "eager",
+            "attn_implementation": "sdpa",
             "load_in_4bit": True,
             "use_kv_cache": True,
             "vision_cache_tau": 0.92,  # VisionEmbeddingCache active
@@ -34,7 +34,7 @@ eval_cfg = EvalCfg(
     ),
     eval_type='habitat_vln',
     eval_settings={
-        "output_path": "./logs/vln_ce_b2/cached",
+        "output_path": "./logs/vln_ce_b2/cached_v7",
         "save_video": False,
         "epoch": 0,
         "max_steps_per_episode": 500,

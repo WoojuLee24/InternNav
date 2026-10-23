@@ -48,10 +48,16 @@ def load_progress(path):
 
 
 def main():
+    for _d in ["cached_v7", "cached_v6", "cached_v5", "cached_v4", "cached_v3", "cached_v2", "cached"]:
+        if (BASE / _d / "timing_rank0.json").exists():
+            cached_dir = _d
+            break
+    else:
+        cached_dir = "cached_v4"
     uncached_timing = load_json(BASE / "uncached" / "timing_rank0.json")
-    cached_timing = load_json(BASE / "cached" / "timing_rank0.json")
+    cached_timing = load_json(BASE / cached_dir / "timing_rank0.json")
     uncached_prog = load_progress(BASE / "uncached" / "progress_rank0.json")
-    cached_prog = load_progress(BASE / "cached" / "progress_rank0.json")
+    cached_prog = load_progress(BASE / cached_dir / "progress_rank0.json")
 
     missing = []
     if uncached_timing is None: missing.append("B2-uncached timing")

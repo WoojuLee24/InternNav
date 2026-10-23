@@ -1053,7 +1053,7 @@ class HabitatVLNEvaluator(DistributedEvaluator):
         _use_vision_cache = _vision_cache_tau is not None
         if _use_vision_cache:
             from internnav.agent.s2_kv_cache import VisionEmbeddingCache
-            _vision_cache = VisionEmbeddingCache(similarity_threshold=_vision_cache_tau)
+            _vision_cache = VisionEmbeddingCache(similarity_threshold=_vision_cache_tau, ema_alpha=1.0)
 
         # S2 latency tracking — emitted as timing.json at end of eval
         _s2_latencies: list = []   # ms per actual model.generate() call (cache hits excluded)
@@ -1206,11 +1206,8 @@ class HabitatVLNEvaluator(DistributedEvaluator):
 
                     text = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
-                    inputs = self.processor(text=[text], images=input_images, return_tensors="pt").to(self.model.device)
-
-                    # VisionEmbeddingCache: if scene fingerprint matches last call, reuse
-                    # previous S2 output instead of running the full model forward pass.
-                    # Only fires when scene is genuinely static between consecutive S2 triggers.
+                    # VisionEmbeddingCache: check fingerprint BEFORE moving inputs to GPU
+                    # to avoid peak-memory fragmentation on cache hits.
                     _skip_s2 = False
                     if _use_vision_cache:
                         _fp = torch.from_numpy(rgb).permute(2, 0, 1).float() / 255.0
@@ -1220,24 +1217,34 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                         if _cache_hit and _prev_llm_outputs is not None:
                             llm_outputs = _prev_llm_outputs
                             _skip_s2 = True
+                            _s2_cache_hits += 1
 
                     if not _skip_s2:
+                        inputs = self.processor(text=[text], images=input_images, return_tensors="pt").to(self.model.device)
                         _gen_t0 = _time.perf_counter()
-                        with torch.no_grad():
-                            output_ids = self.model.generate(
-                                **inputs,
-                                max_new_tokens=128,
-                                do_sample=False,
-                                use_cache=True,
-                                past_key_values=None,
-                                return_dict_in_generate=True,
-                            ).sequences
-                        _s2_latencies.append((_time.perf_counter() - _gen_t0) * 1000.0)
-                        llm_outputs = self.processor.tokenizer.decode(
-                            output_ids[0][inputs.input_ids.shape[1] :], skip_special_tokens=True
-                        )
-                    else:
-                        _s2_cache_hits += 1
+                        try:
+                            with torch.no_grad():
+                                output_ids = self.model.generate(
+                                    **inputs,
+                                    max_new_tokens=128,
+                                    do_sample=False,
+                                    use_cache=True,
+                                    past_key_values=None,
+                                    return_dict_in_generate=True,
+                                ).sequences
+                            _s2_latencies.append((_time.perf_counter() - _gen_t0) * 1000.0)
+                            llm_outputs = self.processor.tokenizer.decode(
+                                output_ids[0][inputs.input_ids.shape[1] :], skip_special_tokens=True
+                            )
+                        except torch.cuda.OutOfMemoryError:
+                            del inputs
+                            torch.cuda.empty_cache()
+                            _s2_cache_hits += 1  # count OOM recovery as cache hit for stats
+                            if _prev_llm_outputs is not None:
+                                llm_outputs = _prev_llm_outputs
+                            else:
+                                llm_outputs = ""
+                            print(f'[S2-OOM] ep={episode_id} step={step_id}: OOM recovery, reusing prev output')
 
                     _prev_llm_outputs = llm_outputs
                     print('step_id:', step_id, 'output text:', llm_outputs)

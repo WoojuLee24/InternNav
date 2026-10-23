@@ -1,0 +1,38 @@
+{
+  "generated_by": "fill_paper_table4.py",
+  "b2_uncached": {
+    "timing": {
+      "s2_ms": 981.2,
+      "s2_hz": 1.019,
+      "cache_hit_rate": 0.0,
+      "gpu_h": 0.829,
+      "n_s2_calls": 2020,
+      "n_cache_hits": 0
+    },
+    "progress": {
+      "n": 60,
+      "SR": 83.3,
+      "SPL": 66.0,
+      "NE": 4.04
+    }
+  },
+  "b2_cached": {
+    "timing": {
+      "s2_ms": 646.8,
+      "s2_hz": 1.546,
+      "cache_hit_rate": 0.8788,
+      "gpu_h": 0.717,
+      "n_s2_calls": 803,
+      "n_cache_hits": 5823
+    },
+    "progress": {
+      "n": 50,
+      "SR": 18.0,
+      "SPL": 18.0,
+      "NE": 7.35
+    }
+  },
+  "speedup_x": 1.52,
+  "cache_hit_pct": 87.9,
+  "delta_sr": -65.3
+}
