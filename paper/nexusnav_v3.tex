@@ -301,7 +301,7 @@ $^\dagger$ = projected upper bound from module analysis (T347); pending Naver Cl
 $^\ddagger$ = measured on 12-episode single-scene mini (2azQ1b91cZZ); \emph{not} comparable to full val\_unseen — reported for development reproducibility only.
 $^{*}$ = 4-bit NF4 on RTX 3080 Ti 12GB.
 $^\S$ = 500-episode cap, Habitat VLN-CE val unseen (multi-scene, in progress; camera-ready will replace with final 500-ep result).
-$^{\P}$ = \emph{preliminary}, $n$=162/500 in-progress cap run; SR$=79.0\%$ is SOTA over all published baselines ($z=5.66$, $p{<}0.001$ vs published best $60.9\%$~\cite{internvla2024}); already statistically significant over internal best v278 ($z=1.94$, $p{<}0.05$ one-sided); 95\% CI $[72.7\%, 85.3\%]$; final 500-ep result replaces in camera-ready.
+$^{\P}$ = \emph{capped} at $n$=500 multi-scene episodes; SR$=70.8\%$ is SOTA over all published baselines ($z=4.87$, $p{<}0.001$ vs published best $60.9\%$~\cite{internvla2024}); 95\% CI $[66.8\%, 74.8\%]$; result is not significantly different from v278 ($z=-0.99$, $p=0.16$).
 Published S2-only full val\_unseen baseline = SR 60.9\%~\cite{internvla2024}.}
 \label{tab:main_results}
 \small
@@ -319,7 +319,7 @@ InternVLA-N1 (single) & 58.4 & 49.2 & 4.63 & 2.1 \\
 InternVLA-N1 S2-only (dev, $n$=12)$^{\ddagger,*}$ & 90.0 & 77.4 & 4.50 & 0.66 \\
 InternVLA-N1-DualVLN (v278, $n$=504)$^\S$ & 72.82 & 62.1 & 3.82 & 3.2 \\
 \rowcolor{blue!5}
-ChronoNav ($n$=162, prelim.)$^{\P}$ & \textbf{79.0} & \textbf{68.1} & \textbf{4.78} & 3.2 \\
+ChronoNav ($n$=500, capped)$^{\P}$ & \textbf{70.8} & \textbf{58.4} & \textbf{5.04} & 3.2 \\
 \midrule
 \rowcolor{gray!10}
 \textbf{NexusNav-V3} (\textit{full}, projected) & \textbf{83.2}$^\dagger$ & \textbf{71.4}$^\dagger$ & \textbf{2.97}$^\dagger$ & \textbf{4.3} \\
@@ -327,14 +327,14 @@ ChronoNav ($n$=162, prelim.)$^{\P}$ & \textbf{79.0} & \textbf{68.1} & \textbf{4.
 \end{tabular}
 \end{table}
 
-\paragraph{SOTA evidence (preliminary).}
-The ChronoNav variant (InternVLA-N1-DualVLN + VisionEmbeddingCache, $\tau=0.92$, 4-bit NF4) is currently running a 500-episode cap evaluation on VLN-CE R2R val unseen.
+\paragraph{SOTA result (capped 500-episode multi-scene eval).}
+The ChronoNav variant (InternVLA-N1-DualVLN + VisionEmbeddingCache, $\tau=0.92$, 4-bit NF4) completed a 500-episode cap evaluation on VLN-CE R2R val unseen across multiple Matterport3D scenes.
 
-\textbf{External SOTA}: At $n=162$ episodes, SR$=79.0\%$ establishes a new state of the art over all \emph{published} VLN-CE R2R val unseen baselines. Against the best published baseline of $60.9\%$~\cite{internvla2024}: $z=5.66$, $p<0.001$; 95\% CI $[72.7\%, 85.3\%]$ clears $60.9\%$ entirely. This is statistically decisive — \textbf{ChronoNav is already SOTA over all published systems}.
+\textbf{External SOTA}: At $n=500$ episodes, SR$=70.8\%$ establishes a new state of the art over all \emph{published} VLN-CE R2R val unseen baselines. Against the best published baseline of $60.9\%$~\cite{internvla2024}: $z=4.87$, $p<0.001$; 95\% CI $[66.8\%, 74.8\%]$ clears $60.9\%$ entirely. \textbf{ChronoNav is SOTA over all published systems by +9.9\,pp}.
 
-\textbf{Internal best (v278)}: Our own prior run v278 achieved $72.82\%$ on $n=504$ episodes. The current run ($79.0\%$, $+6.2$\,pp) now achieves $z=1.94$, $p{<}0.05$ one-sided significance over v278. Two-sided significance ($z{\geq}1.96$) requires $n{\approx}167$, within 5 episodes of the current count.
+\textbf{Internal comparison (v278)}: Our own prior InternVLA-N1-DualVLN v278 achieved $72.82\%$ on $n=504$ episodes. ChronoNav ($70.8\%$) is $-2.0$\,pp below v278 ($z=-0.99$, $p=0.16$, not significant). The difference is within sampling noise and reflects the known single-scene warm-up bias in early-episode SR. The VisionEmbeddingCache at $\tau=0.92$ trades marginal SR for measured inference speedup (see Table~\ref{tab:latency}); the optimal threshold warrants further tuning.
 
-The full 500-ep capped result will replace the preliminary row in the camera-ready version.
+\textbf{Note on single-scene warm-up}: Early-episode SR ($n{<}200$) measured $\sim79\%$ on the first scene (2azQ1b91cZZ, narrow corridors favoring system-2); multi-scene SR settled to $70.8\%$, consistent with the v278 campaign result. All preliminary paper rows before this correction reflected single-scene bias and have been updated.
 
 \subsection{Ablation Study}
 
