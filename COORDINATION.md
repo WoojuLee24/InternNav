@@ -5,7 +5,7 @@
 > Keep entries short — this is a coordination surface, not documentation.
 
 _Format: update the `_last_updated` line and the relevant row. Do NOT rewrite the whole file._
-_last_updated: 2026-10-22 15:55 UTC by session_01ARwduxfwfZ4FyxfSkDxPoN_
+_last_updated: 2026-10-23 14:00 UTC by session_01ARwduxfwfZ4FyxfSkDxPoN_
 
 ---
 
@@ -43,7 +43,7 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 | `internnav/model/basemodel/nexusnav/` | session_01ARw | ✅ done | NexusNavNet, NexusNavS2Heads, NexusNavModelConfig |
 | `internnav/model/__init__.py` | session_01ARw | ✅ done | NexusNav_Policy registered |
 | `internnav/habitat_extensions/vln/habitat_vln_evaluator.py` | session_01ARw | ✅ done | 4-bit/8-bit device_map fix |
-| `paper/nexusnav_v3.tex` | session_01ARw | 🔄 draft | 8-page CVPR draft, needs measured results |
+| `paper/nexusnav_v3.tex` | session_01ARw | 🔄 updating | Table 4 filled (B2 σ=1.52×, SR -65.3%). Ablation table being added by fork. |
 | `paper/nexusnav_refs.bib` | session_01ARw | 🔄 draft | 22 refs |
 | `scripts/eval/configs/habitat_*_vln_ce_mini_*.py` | session_01ARw | ✅ done | 4 model eval configs |
 | `scripts/train/base_train/configs/*_vln_ce_mini.py` | session_01ARw | ✅ done | 4 model training configs |
@@ -73,9 +73,17 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 
 ## Work Queue (ordered by priority)
 
-### IN PROGRESS
-- [ ] ChronoNav FULL val_unseen eval — running (`vln_ce_mini_chrononav`, DONE n=500 SR=70.8% (capped manually) — cap at 500 eps
-- [ ] Push 18+ commits to origin/dev (user must run: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`)
+### IN PROGRESS (session 2026-10-23)
+- [ ] Paper ablation table + 90-100% path section (fork: paper-update)
+- [ ] Artifact updates — NexusNav architecture + eval results (fork: artifacts-update)
+- [ ] Memory/COORDINATION files updated ✅ (this session)
+
+### RECENTLY COMPLETED (session 2026-10-23)
+- [x] B2 A/B A/B results encoded in paper Table 4 (21763ad) — σ=1.52×, SR 83%→18%
+- [x] B2 negative result framed: motivates Action Token approach
+- [x] All repos pushed: InternNav-dev (21763ad), ChronoNav (a8ac2a9), ChronoNav-gates (7a097bf) — all CLEAN
+- [x] Memory files updated: omnav_master_plan.md, project_state.md (90-100% target encoded)
+- [x] SOTA chain documented: 60.9% → 72.82% → 83% → 90-100%
 
 ### DONE THIS SESSION
 - [x] VLN-CE mini eval: DualVLN S2-only 4-bit — SR=91.7% SPL=81.2% NE=4.23 (n=12, strict_lt)
