@@ -63,6 +63,9 @@ def parse():
     ap.add_argument('--data_root', default='data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r')
     ap.add_argument('--scene_root', default='data/scene_data/mp3d_ce/mp3d')
     ap.add_argument('--rig', default='125cm_30deg')
+    ap.add_argument('--navmesh_dir', default=None,
+                    help='vln_ce 씬 navmesh 를 이 폴더의 <scene>.navmesh 로 (예: vln_pe H1 반지름으로 다시 만든 것, 03h1_build_navmesh.py). '
+                         'None = 공식 navmesh (vln_ce 로봇 반지름 0.10 m, 이전 동작). r_b 는 navmesh 의 agent_radius 를 따른다')
     ap.add_argument('--push_margin', type=float, default=npth.RefineCfg.push_margin_m)
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--stairs_mode', default='split', choices=['split', 'none'],
@@ -129,10 +132,16 @@ def run_noeun(args, cfg):
     return {'scene': 'noeun_station', 'kind': 'noeun', 'r_b': sc.agent_radius}, rows, arrays
 
 
+def vlnce_navmesh(args, s: str) -> str:
+    if getattr(args, 'navmesh_dir', None):
+        return f'{args.navmesh_dir}/{s}.navmesh'
+    return f'{args.scene_root}/{s}/{s}.navmesh'
+
+
 def run_vlnce(args, cfg):
     import vlnce_gt
     s = args.scene
-    pf = nu.load_pathfinder(f'{args.scene_root}/{s}/{s}.navmesh')
+    pf = nu.load_pathfinder(vlnce_navmesh(args, s))
     sc = npth.NavScene(pf)
     sc_ref = npth.NavScene(pf, stairs_group='none') if args.stairs_mode == 'none' else sc
     meta = json.load(open(GS / 'logs' / 'scene_meta' / f'{s}.json'))
@@ -267,7 +276,7 @@ def aggregate(args):
                 if r['kind'] == 'noeun':
                     pf = nu.load_pathfinder(str(HERE / 'logs' / '01_build_navmesh' / 'noeun_station' / 'noeun_station.navmesh'))
                 else:
-                    pf = nu.load_pathfinder(f"{args.scene_root}/{key}/{key}.navmesh")
+                    pf = nu.load_pathfinder(vlnce_navmesh(args, key))
                 cache[key] = (npth.NavScene(pf), np.load(out / 'scenes' / f'{key}_traj.npz'))
             sc, A = cache[key]
             pre = f"{r['id']}" if r['kind'] == 'noeun' else f"{r['ep']}_{r['mode']}"
