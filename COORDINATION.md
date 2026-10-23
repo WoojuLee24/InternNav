@@ -5,7 +5,7 @@
 > Keep entries short — this is a coordination surface, not documentation.
 
 _Format: update the `_last_updated` line and the relevant row. Do NOT rewrite the whole file._
-_last_updated: 2026-10-23 (2aac473 mini-train scripts + trainer fix) by session_01ARwduxfwfZ4FyxfSkDxPoN_
+_last_updated: 2026-10-24 (f7234f2 pushed — NexusNav script + full eval cfg) by session_01ARwduxfwfZ4FyxfSkDxPoN_
 
 ---
 
@@ -167,8 +167,8 @@ When finishing a session:
 5. Write 2-line handoff note below:
 
 ### Latest Handoff Note
-**From:** session_01ARwduxfwfZ4FyxfSkDxPoN (2026-10-23 continued)
-**State:** All eval containers done. B2 A/B complete: σ=1.52× speedup but SR 83.3%→18.0% at τ=0.92 (negative result, Table 4 filled, commit 21763ad). ChronoNav BEST=72.82% (v278, n=504). Two fork agents running: (1) paper-update adding ablation table + 90-100% SR path to nexusnav_v3.tex; (2) artifacts-update updating NexusNav Architecture + ChronoNav Eval Results artifacts with 90-100% target and B2 findings. Target SOTA chain: 60.9%→72.82%→83%→90-100%. All repos pushed and clean (InternNav-dev: 15cdcb2, ChronoNav: a8ac2a9). **Next session:** (1) check fork outputs and commit if good; (2) wire remaining modules into eval path for ablation measurement; (3) NexusNav-V3 mini eval (50 eps) to get first projected→measured gap; (4) ActionTokenVocab Naver Cloud training once SR≥75% gate confirmed.
+**From:** session_01ARwduxfwfZ4FyxfSkDxPoN (2026-10-24)
+**State:** All training scripts committed and pushed (InternNav-dev: f7234f2). peer=debug-duilvn-metrics-validation is building vlnav/nexusnav-train:local image and will launch DualVLN mini training (port 29501) then NexusNav (port 29502). NavDP DROPPED from VLN-CE comparison (continuous action output incompatible with discrete CE). 5-eval plan: DualVLN-original / DualVLN-finetuned / ChronoNav-DualVLN / NexusNav-finetuned / ChronoNav-NexusNav — all on full val_unseen 1839. Full ChronoNav eval config (acc8a3f) ready for Nov-1. User wants: artifact updates (architecture, comparison results, paper draft contributions clarity), measured mini results table (no projections), and Naver Cloud projection after mini measured. **Next:** (1) peer runs training + evals, reports measured SR; (2) artifact + paper updates with measured comparison table; (3) contributions clarity pass on nexusnav_v3.tex.
 
 ---
 
