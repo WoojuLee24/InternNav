@@ -5,7 +5,7 @@
 > Keep entries short — this is a coordination surface, not documentation.
 
 _Format: update the `_last_updated` line and the relevant row. Do NOT rewrite the whole file._
-_last_updated: 2026-10-23 (continued) by session_01ARwduxfwfZ4FyxfSkDxPoN_
+_last_updated: 2026-10-23 (714feaf paper+ablation, artifacts fork running) by session_01ARwduxfwfZ4FyxfSkDxPoN_
 
 ---
 
@@ -43,7 +43,7 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 | `internnav/model/basemodel/nexusnav/` | session_01ARw | ✅ done | NexusNavNet, NexusNavS2Heads, NexusNavModelConfig |
 | `internnav/model/__init__.py` | session_01ARw | ✅ done | NexusNav_Policy registered |
 | `internnav/habitat_extensions/vln/habitat_vln_evaluator.py` | session_01ARw | ✅ done | 4-bit/8-bit device_map fix |
-| `paper/nexusnav_v3.tex` | session_01ARw | 🔄 updating | Table 4 filled (B2 σ=1.52×, SR -65.3%). Ablation table being added by fork. |
+| `paper/nexusnav_v3.tex` | session_01ARw | ✅ done | Table 4 (B2 σ=1.52×), ablation table, 90%+ path section — commit 714feaf |
 | `paper/nexusnav_refs.bib` | session_01ARw | 🔄 draft | 22 refs |
 | `scripts/eval/configs/habitat_*_vln_ce_mini_*.py` | session_01ARw | ✅ done | 4 model eval configs |
 | `scripts/train/base_train/configs/*_vln_ce_mini.py` | session_01ARw | ✅ done | 4 model training configs |
@@ -78,10 +78,10 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 ## Work Queue (ordered by priority)
 
 ### IN PROGRESS (session 2026-10-23 continued)
-- [ ] Paper ablation table + 90-100% path section (fork: paper-update — running)
+- [x] Paper ablation table + 90-100% path section — DONE (714feaf) by fork: paper-update
 - [ ] Artifact updates — NexusNav architecture + eval results (fork: artifacts-update — running)
-- [x] COORDINATION.md updated with B2 container results + handoff (this session)
-- [ ] Commit COORDINATION.md changes once forks complete
+- [x] COORDINATION.md updated with B2 container results + handoff (committed in 714feaf)
+- [x] ChronoNav COORDINATION.md updated with B2 results + 90-100% target (a5fe0ff)
 
 ### RECENTLY COMPLETED (session 2026-10-23)
 - [x] B2 A/B A/B results encoded in paper Table 4 (21763ad) — σ=1.52×, SR 83%→18%
