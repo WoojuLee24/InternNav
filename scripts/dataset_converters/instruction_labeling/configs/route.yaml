@@ -316,3 +316,6 @@ stop_select:                # route.stop_select=<key>: A·P·R 후보 캐시(lab
     mode: rotate
     priority: [stairs_top, stairs_bottom, doorway, A, room]
     line: "You stop {cue} (from scene annotation)."
+motion:                     # route.motion=<key>: 번호 목록(PATH MOTION SEQUENCE)을 프롬프트에서 뺀다. list = b0/b1 그대로 (cfg 에서 None)
+  none:                     # 이동 정보는 그림(frames.overlay / frames.select=topdown-v1)으로만 준다. 방 순서 줄·정지 단서 줄은 남긴다
+    header: "PATH FACTS:"   # 템플릿의 "PATH MOTION SEQUENCE:" 자리

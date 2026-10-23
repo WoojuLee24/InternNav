@@ -12,12 +12,14 @@ args:
     rig: 125cm_0deg            # 기본 rig (pose 기준)
     extra_rigs: []             # 프레임마다 함께 넣을 rig, 예: [125cm_30deg]
     approach: none             # none | v1 (도착 직전 프레임; frames.yaml approach)
+    overlay: none              # none | arrow-v1 (사진 위 진행 방향 화살표·바닥선; frames.yaml overlay. route.motion=none 과 함께)
     max_images: 16             # 프롬프트당 이미지 상한 = 프레임 수 x rig 수 (서버 limit-mm-per-prompt 와 맞춘다)
   route:                       # 경로 단어
     words: v1                  # route.yaml words.<key>
     start_turn: always         # always | gtrate-v1 (route.yaml start_turn_rate)
     slight: omit               # say | omit (slight_deg 미만 회전은 말하지 않음)
     rooms: house-v2            # none | house-v1 (MP3D .house 방 순서를 경로 단어 뒤에 한 줄로; route.yaml rooms)
+    motion: list               # list | none (none = 번호 목록 빼고 그림으로만; route.yaml motion)
     stop_cue: none             # none | A-grounded-v1 (정지 지점 근처 보이는 annotation 물체; route.yaml stop_cue)
     stop_select: none          # none | rule-v1 | vlm-v1 | rotate-v1 (A·P·R 후보 캐시에서 정지 단서 고르기; route.yaml stop_select)
     turn_deg: 30

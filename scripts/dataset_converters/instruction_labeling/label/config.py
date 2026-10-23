@@ -80,6 +80,8 @@ def resolve(m: dict) -> dict:
     route['slight'] = rt['slight']
     rooms_key = rt.get('rooms', 'none')
     route['rooms'] = None if rooms_key == 'none' else route_res['rooms'][rooms_key]
+    motion_key = rt.get('motion', 'list')  # list = 번호 목록 (b0/b1) -> None (gen_hash 에서 빠짐)
+    route['motion'] = None if motion_key == 'list' else route_res['motion'][motion_key]
     cue_key = rt.get('stop_cue', 'none')
     route['stop_cue'] = None if cue_key == 'none' else route_res['stop_cue'][cue_key]
     sel_key = rt.get('stop_select', 'none')
@@ -125,6 +127,16 @@ def resolve(m: dict) -> dict:
     assert not (style['fewshot_match'] and not style['fewshot']), 'style.fewshot_match 는 style.fewshot > 0 일 때만'
     assert not (style['sibling'] and style['fewshot_match']) or \
         [p['name'] for p in style['sibling']] == style['fewshot_match']['profiles'], 'sibling 과 fewshot_match 의 방식 순서가 같아야 한다'
+    select_def = frames_res['select'][fr['select']]
+    if select_def.get('topdown'):  # 평면도 정의: 키 -> 내용 (gen_hash 에 들어가게)
+        select_def = dict(select_def, topdown=frames_res['topdown'][select_def['topdown']])
+    overlay = None if fr.get('overlay', 'none') == 'none' else frames_res['overlay'][fr['overlay']]
+    visual = bool(overlay) or bool(select_def.get('topdown'))  # 작성자 B·C: 이동 정보를 그림으로 (label/visual.py)
+    assert not (overlay and select_def.get('topdown')), 'frames.overlay 와 frames.select=topdown 은 함께 쓰지 않는다'
+    assert not route['motion'] or visual, 'route.motion=none 은 frames.overlay 또는 frames.select=topdown 과 함께 (이동 정보가 없어진다)'
+    assert not visual or (a['delivery'] == 'image' and not fr['extra_rigs'] and not style['sibling'] and not style['pathrule']
+                          and not route['stop_cue'] and not route['stop_select'] and fr.get('approach', 'none') == 'none'), \
+        'frames.overlay / topdown 은 delivery=image, 기본 rig 하나, sibling·pathrule·stop_cue·stop_select·approach 없이'
     delivery = _yaml(CONF / 'delivery' / f'{a["delivery"]}.yaml')
     assert delivery['name'] == a['delivery']
     model = _yaml(CONF / 'model' / f'{a["model"]}.yaml')
@@ -132,7 +144,7 @@ def resolve(m: dict) -> dict:
     return {
         'method': m['method'], 'seed': m['seed'], 'workers': m['workers'], 'fail_abort_rate': m['fail_abort_rate'],
         'args': a,
-        'frames': {'select': fr['select'], 'select_def': frames_res['select'][fr['select']],
+        'frames': {'select': fr['select'], 'select_def': select_def, 'overlay': overlay,
                    'approach': None if fr.get('approach', 'none') == 'none' else frames_res['approach'][fr['approach']],
                    'turn_deg': fr['keyframe_deg'], 'rig': fr['rig'],
                    'rigs': [fr['rig']] + list(fr['extra_rigs']), 'max_images': fr['max_images']},

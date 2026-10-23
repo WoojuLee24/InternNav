@@ -14,7 +14,28 @@ select:
       - {at: start, turn_deg: 90, label: start_left, caption: "start position, looking to your left"}
       - {at: start, turn_deg: -90, label: start_right, caption: "start position, looking to your right"}
       - {at: start, turn_deg: 180, label: start_behind, caption: "start position, looking behind you"}
+  topdown-v1:                # 작성자 C: 평면도 1장 + 출발·도착 사진 (topdown.v1)
+    views: null
+    topdown: v1
 approach:                    # frames.approach=<key>: 도착 직전 프레임 추가 (궤적을 따라 남은 거리 dist_m 지점, 진행 방향을 봄)
   v1:                        # GT 도착 명사의 41 % 는 도착 프레임이 아닌 다른 프레임에서만 보인다 (2stage 장면 요약 실측)
     dist_m: [3.0, 1.5]
     caption: "approaching the destination"
+# frames.select=topdown-v1 (작성자 C): 궤적 사진 대신 "경로를 그린 평면도" + 출발·도착 사진. route.motion=none 과 함께 쓴다.
+#   평면도 = MP3D .house 방 바닥 다각형 (label/visual.py). 출발 때 바라보는 방향이 위쪽이 되게 돌린다 (사진의 좌·우와 맞춘다).
+topdown:
+  v1:
+    size_px: 640
+    margin_m: 3.0           # 경로 bounding box 바깥 여백
+    max_dz_m: 1.0           # 경로 점 높이와 이만큼 가까운 층의 방만 그린다
+    intro: "Image 1 is a floor plan of the house with the path drawn on it. The other images were taken at the start and at the destination.\n\n"
+    caption: "floor plan (from scene annotation), rotated so that the direction you face at the start points up. The green line is the path, the blue dot with the arrow is the start and the way you face, the red star is where you stop. Room names are written on the plan"
+# frames.overlay=<key> (작성자 B): 궤적 사진 위에 "여기서 경로가 어느 쪽으로 가는지" 를 그린다. route.motion=none 과 함께 쓴다.
+#   프레임 = 출발 + waypoint 에 도착한 순간(돌기 전, 옛 방향을 봄) + 도착. 사진 설명에 회전 글은 넣지 않는다.
+overlay:
+  arrow-v1:
+    lookahead_m: 1.5        # 화살표가 가리키는 점 = 남은 경로를 따라 이만큼 앞
+    line_m: 12.0            # 바닥 초록선 = 남은 경로 이 길이까지
+    occlusion_m: 0.4        # 바닥선 점이 depth 보다 이만큼 이상 뒤면 (벽 뒤) 그리지 않는다
+    intro: "The {n_images} images above were taken along one path, in order. On each image, the arrow in the white circle at the bottom shows which way the path goes from that spot (up = straight ahead, left or right = turn that way, down = turn around), and the green line on the floor, where visible, is the path ahead.\n\n"
+    captions: {start: "start position, the direction you face before moving", waypoint: "along the path", goal: "destination, where you stop"}
