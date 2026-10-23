@@ -17,7 +17,7 @@
 | R6 rgb | 프레임 평균 밝기 | > 15/255 인 프레임 ≥ 99 % | GS 가 그려졌는지(검은 화면 = NuRec 로드 실패) |
 
 사용 (habitat 컨테이너, 저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/06b_check_noeun_render.py
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/06b_check_noeun_render.py
 """
 
 import argparse
@@ -27,7 +27,7 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]   # nav3d/ (이 파일은 nav3d/checks/ 에 있다)
 sys.path.insert(0, str(HERE))
 import nav3d_report as R  # noqa: E402
 import nav3d_utils as nu  # noqa: E402

@@ -11,7 +11,7 @@
 | 회전 °/m | 경로 전체 |
 
 사용 (habitat 컨테이너, 저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/03ab_stairs_compare.py
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/03ab_stairs_compare.py
 """
 
 import argparse
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]   # nav3d/ (이 파일은 nav3d/checks/ 에 있다)
 sys.path.insert(0, str(HERE))
 
 MODES = ('split', 'none')

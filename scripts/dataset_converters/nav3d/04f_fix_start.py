@@ -15,13 +15,16 @@
 """
 
 import argparse
-import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from mesh_probe import start_flat  # noqa: E402
+from walk_inputs import r2r_initial, resample, start_yaw  # noqa: E402
 D04 = 'scripts/dataset_converters/nav3d/logs/04_export_paths/noeun_station'
 D06K = 'scripts/dataset_converters/nav3d/logs/06k_rbq_walk'
 
@@ -40,31 +43,23 @@ def parse():
     return ap.parse_args()
 
 
-def _load(name, file):
-    sp = importlib.util.spec_from_file_location(name, HERE / file)
-    m = importlib.util.module_from_spec(sp)
-    sp.loader.exec_module(m)
-    return m
-
-
 def main():
     import trimesh
     args = parse()
-    m4d = _load('m04d', '04d_replace_episodes.py')
     mesh = trimesh.load(args.mesh, force='mesh')
     d = json.loads(Path(args.paths_json).read_text())
     E = json.loads(Path(args.eps_json).read_text())
     eps_by_id = {e['key'].split(':')[1]: e for e in E['episodes']}
-    init = m4d.r2r_initial(args.r2r_raw)
+    init = r2r_initial(args.r2r_raw)
     moved, kept, stuck = [], 0, []
     for e in d['episodes']:
         T = np.asarray(e['trajectory'], np.float64)
-        ok0, bad0, _ = m4d.start_flat(mesh, T[0], args.disk_m, args.dz_m)
+        ok0, bad0, _ = start_flat(mesh, T[0], args.disk_m, args.dz_m)
         if ok0:
             kept += 1
             continue
         L = np.r_[0, np.cumsum(np.linalg.norm(np.diff(T[:, :2], axis=0), axis=1))]
-        j = next((i for i in range(1, len(T)) if L[i] <= args.max_shift_m and m4d.start_flat(mesh, T[i], args.disk_m, args.dz_m)[0]), None)
+        j = next((i for i in range(1, len(T)) if L[i] <= args.max_shift_m and start_flat(mesh, T[i], args.disk_m, args.dz_m)[0]), None)
         if j is None:
             stuck.append(e['episode_id'])
             e['start_shift'] = {'applied': False, 'why': f'{args.max_shift_m} m 안에 U6 통과 점 없음', 'bad0': bad0}
@@ -95,7 +90,7 @@ def main():
         k = str(e['episode_id'])
         if k in moved_ids:
             T = np.asarray(e['trajectory'], np.float64)
-            out.append(dict(eps_by_id[k], waypoints=m4d.resample(T).tolist(), start_yaw=m4d.start_yaw(e, T, args.start_seed, init)))
+            out.append(dict(eps_by_id[k], waypoints=resample(T).tolist(), start_yaw=start_yaw(e, T, args.start_seed, init)))
         else:
             out.append(eps_by_id[k])
     e_out = Path(args.eps_json).with_name(f'eps_noeun_{args.out_tag}.json')

@@ -23,11 +23,7 @@
 """
 
 import argparse
-import gzip
-import hashlib
-import importlib.util
 import json
-import math
 import sys
 from pathlib import Path
 
@@ -35,6 +31,12 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import nav3d_path as npth  # noqa: E402
+import nav3d_scenes as scenes  # noqa: E402
+import nav3d_utils as nu  # noqa: E402
+from mesh_probe import start_flat  # noqa: E402,F401
+from path_quality import judge, load_holes, one, segments  # noqa: E402
+from walk_inputs import resample, r2r_initial, start_yaw  # noqa: E402,F401
 D04 = 'scripts/dataset_converters/nav3d/logs/04_export_paths/noeun_station'
 D06K = 'scripts/dataset_converters/nav3d/logs/06k_rbq_walk'
 
@@ -59,39 +61,13 @@ def parse():
     return ap.parse_args()
 
 
-def _load(name, file):
-    sp = importlib.util.spec_from_file_location(name, HERE / file)
-    m = importlib.util.module_from_spec(sp)
-    sp.loader.exec_module(m)
-    return m
-
-
-def start_flat(mesh, p, disk_m, dz_m, probe_up=1.0):
-    """U6: 출발점 중심 반지름 disk_m 원 안 0.1 m 격자의 아래 광선 hit 높이 − 중심 hit 높이. (통과, 나쁜 점 수, 점 수)."""
-    g = np.arange(-disk_m, disk_m + 1e-6, 0.1)
-    G = np.array([(x, y) for x in g for y in g if x * x + y * y <= disk_m * disk_m + 1e-9])
-    O = np.c_[p[0] + G[:, 0], p[1] + G[:, 1], np.full(len(G), p[2] + probe_up)]
-    loc, idx, _ = mesh.ray.intersects_location(O, np.tile([0, 0, -1.0], (len(O), 1)), multiple_hits=False)
-    z = np.full(len(O), np.nan)
-    z[idx] = loc[:, 2]
-    c = int(np.argmin(np.linalg.norm(G, axis=1)))
-    if not np.isfinite(z[c]):
-        return False, len(G), len(G)
-    bad = int((~np.isfinite(z) | (np.abs(z - z[c]) > dz_m)).sum())
-    return bad == 0, bad, len(G)
-
-
 def failed_keys(walk_json):
     return [r['key'] for r in json.loads(Path(walk_json).read_text())['results'] if not r['success']]
 
 
 def stage_gen(args):
-    m04 = _load('m04', '04_export_paths.py')
-    m03 = _load('m03', '03_refine_paths.py')
-    b01 = _load('b01', '01_build_navmesh.py')
-    npth, nu = m04.npth, m04.nu
     import trimesh
-    spec = b01.SCENES['noeun_station']
+    spec = scenes.SCENES['noeun_station']
     d01 = HERE / 'logs' / '01_build_navmesh' / 'noeun_station'
     pf = nu.load_pathfinder(str(d01 / 'noeun_station.navmesh'))
     sc = npth.NavScene(pf)
@@ -100,10 +76,10 @@ def stage_gen(args):
     floor = trimesh.load('data/scene_data/noeun_station/noeun_station_mid.ply', force='mesh')   # 04b·04c 와 같은 바닥 mesh
     cfg = npth.RefineCfg()
     r_b = sc.agent_radius
-    holes = m04.load_holes('scripts/dataset_converters/nav3d/logs/00_mesh_gs/noeun_station/holes.csv')
+    holes = load_holes('scripts/dataset_converters/nav3d/logs/00_mesh_gs/noeun_station/holes.csv')
     a04 = argparse.Namespace(flat_min_m=3.0, flat_max_m=40.0)
     rng = np.random.default_rng(args.seed)
-    pts = b01.sample_storey_points(pf, sc.levels, sc.lv2st, per_bucket=400, seed=args.seed + 1)
+    pts = scenes.sample_storey_points(pf, sc.levels, sc.lv2st, per_bucket=400, seed=args.seed + 1)
     P = {str(e['episode_id']): e for e in json.loads(Path(args.paths_json).read_text())['episodes']}
     keys = failed_keys(args.walk_json)
     print(f'[04d gen] 바꿀 ep {len(keys)}: {keys}', flush=True)
@@ -130,9 +106,9 @@ def stage_gen(args):
             if Pth is None:
                 why_n['U1 경로 없음'] = why_n.get('U1 경로 없음', 0) + 1
                 continue
-            row, r = m03.one(sc, Pth, md, r_b, cfg)
+            row, r = one(sc, Pth, md, r_b, cfg)
             X, st = r['traj'].astype(np.float64), np.asarray(r['stairs'], bool)
-            why = m04.judge(row, X, kind, holes, r_b, a04)
+            why = judge(row, X, kind, holes, r_b, a04)
             if kind == 'multifloor' and not (abs(X[0, 2] - old['trajectory_navmesh_z'][0]) < 0.5 and abs(X[-1, 2] - old['trajectory_navmesh_z'][-1]) < 0.5):
                 why.append('층 쌍 다름')
             if why:
@@ -141,7 +117,7 @@ def stage_gen(args):
                 continue
             out.append({'episode_id': old['episode_id'], 'replaces': key, 'cand': got, 'kind': kind, 'from_storey': sa, 'to_storey': sb,
                         'source': '04d', 'start': X[0].tolist(), 'goal': X[-1].tolist(), 'trajectory': X.tolist(),
-                        'trajectory_z': X[:, 2].tolist(), 'floor_z': float(X[0, 2]), 'segments': m04.segments(st, X[:, 2]),
+                        'trajectory_z': X[:, 2].tolist(), 'floor_z': float(X[0, 2]), 'segments': segments(st, X[:, 2]),
                         'path_length_m': float(row['ref_length_m']), 'mesh_clear_min_m': float(row['ref_mesh_clear_min_m']),
                         'margin_min_m': float(row['ref_margin_min_m']), 'stairs_frac': float(np.mean(st))})
             got += 1
@@ -152,30 +128,6 @@ def stage_gen(args):
     doc.update(episodes=out, replace_source={'args': vars(args), 'stat': stat, 'criteria': 'U1~U5 (04) + U6 (04d)'})
     Path(args.cand_json).write_text(json.dumps(doc))
     print(f'-> {args.cand_json} ({len(out)} 후보)')
-
-
-def resample(T, s=0.5):
-    """06k 경유점: 경로를 수평 길이 0.5 m 간격으로 (eps_noeun_all_v2 와 같음 — 200/200 일치 확인)."""
-    L = np.r_[0, np.cumsum(np.linalg.norm(np.diff(T[:, :2], axis=0), axis=1))]
-    u = np.r_[np.arange(0, L[-1], s), L[-1]]
-    return np.c_[[np.interp(u, L, T[:, k]) for k in range(3)]].T
-
-
-def r2r_initial(raw_json):
-    """06 start_yaw_for(r2r_train) 와 같은 분포 (R2R train 시작 방향 − 첫 구간, 도)."""
-    out = []
-    for e in json.load(gzip.open(raw_json))['episodes']:
-        p, q = e['reference_path'][0], e['reference_path'][1]
-        seg = math.degrees(math.atan2(q[0] - p[0], -(q[2] - p[2])))
-        st = -math.degrees(2 * math.atan2(e['start_rotation'][1], e['start_rotation'][3]))
-        out.append((seg - st + 180) % 360 - 180)
-    return np.asarray(out)
-
-
-def start_yaw(ep, T, seed, init):
-    d = T[min(len(T) - 1, 5), :2] - T[0, :2]
-    rng = np.random.default_rng(int(hashlib.sha1(f"{seed}:{ep['episode_id']}".encode()).hexdigest()[:8], 16))
-    return float(np.arctan2(d[1], d[0]) + np.radians(float(rng.choice(init))))
 
 
 def stage_eps(args):

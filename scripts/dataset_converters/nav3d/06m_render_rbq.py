@@ -31,10 +31,8 @@ GS = HERE.parent / 'gs_vlnpe'
 for p in (str(GS), str(GS / 'apply_real')):
     if p not in sys.path:
         sys.path.insert(0, p)
-
-T_BASE_OS = np.array([0.3, 0.0, 0.05])
-T_OS_CAM = np.array([0.065151, 0.002019, -0.015822])
-Q_OS_CAM_XYZW = np.array([-0.000391, 0.128428, 0.001329, 0.991718])
+from render_poses import T_BASE_OS, T_OS_CAM, Q_OS_CAM_XYZW, quat_wxyz_to_R, trunk_to_cam_cv, frames_to_poses  # noqa: E402,F401
+from render_poses import c2w_to_vlnpe_quat, ce_to_pe_actions  # noqa: E402
 
 
 def parse():
@@ -64,35 +62,6 @@ def _load(name, path):
     sys.modules[name] = m
     sp.loader.exec_module(m)
     return m
-
-
-def quat_wxyz_to_R(q):
-    w, x, y, z = q
-    return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-                     [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
-                     [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)]])
-
-
-def trunk_to_cam_cv() -> np.ndarray:
-    """trunk(base_link) → OpenCV 카메라 4×4."""
-    x, y, z, w = Q_OS_CAM_XYZW
-    R_link = quat_wxyz_to_R([w, x, y, z])
-    R_link_cv = np.column_stack([-np.array([0, 1, 0.0]), -np.array([0, 0, 1.0]), np.array([1, 0, 0.0])])   # cv x=-y, y=-z, z=x
-    T = np.eye(4)
-    T[:3, :3] = R_link @ R_link_cv
-    T[:3, 3] = T_BASE_OS + T_OS_CAM
-    return T
-
-
-def frames_to_poses(frames) -> np.ndarray:
-    M = trunk_to_cam_cv()
-    out = []
-    for f in frames:
-        T = np.eye(4)
-        T[:3, :3] = quat_wxyz_to_R(f['quat_wxyz'])
-        T[:3, 3] = f['pos']
-        out.append(T @ M)
-    return np.stack(out)
 
 
 def main() -> int:
@@ -150,14 +119,13 @@ def main() -> int:
     else:
         vw = _load('vw_06m', GS / 'vlnpe_writer.py')
         e05 = _load('ex05p_06m', GS / '05_export_vlnpe.py')
-        m6p = _load('m06p', HERE / '06p_render_noeun_vlnpe.py')
         schema, stats_fn = vw.load_schema(args.pe_schema_ref), vw.load_stats_fn()
         root = Path(out_root) / 'traj_data' / 'r2r'
         assert not (root / args.out_scene / 'meta' / 'episodes.jsonl').exists(), f'{root / args.out_scene} 에 이미 meta 가 있다'
         ph = [{'text': 'placeholder instruction (to be labeled).', 'tokens': [0] * 200}] * 3
         for ei, r in enumerate(ok):
             P = frames_to_poses(r['frames'])
-            a_pe = m6p.ce_to_pe_actions(np.array([f['action'] for f in r['frames']]))
+            a_pe = ce_to_pe_actions(np.array([f['action'] for f in r['frames']]))
             rgb, depth_m = r4.render_along(cas, P)
             xy = np.array([f['pos'][:2] for f in r['frames']])
             L = np.r_[0, np.cumsum(np.linalg.norm(np.diff(xy, axis=0), axis=1))]
@@ -165,7 +133,7 @@ def main() -> int:
             for i, f in enumerate(r['frames']):
                 Rt = quat_wxyz_to_R(f['quat_wxyz'])
                 fw = P[i, :3, 2]
-                buf.append({'camera_position': P[i, :3, 3], 'camera_orientation': m6p.c2w_to_vlnpe_quat(P[i, :3, :3]),
+                buf.append({'camera_position': P[i, :3, 3], 'camera_orientation': c2w_to_vlnpe_quat(P[i, :3, :3]),
                             'camera_yaw': float(np.arctan2(fw[1], fw[0])), 'robot_position': np.asarray(f['pos']),
                             'robot_orientation': list(f['quat_wxyz']), 'robot_yaw': float(np.arctan2(Rt[1, 0], Rt[0, 0])),
                             'progress': float(L[i] / max(L[-1], 1e-9)), 'action': int(a_pe[i]),

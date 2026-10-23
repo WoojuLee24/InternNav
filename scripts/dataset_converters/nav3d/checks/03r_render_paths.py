@@ -16,9 +16,9 @@
 `--check_gt` 로 다시 확인한다.
 
 사용 (habitat 컨테이너, 저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/03r_render_paths.py --what stairs_label
-    /usr/bin/python scripts/dataset_converters/nav3d/03r_render_paths.py --what compare_2d
-    /usr/bin/python scripts/dataset_converters/nav3d/03r_render_paths.py --check_gt --scene 1LXtFkjw3qL --ep 0
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/03r_render_paths.py --what stairs_label
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/03r_render_paths.py --what compare_2d
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/03r_render_paths.py --check_gt --scene 1LXtFkjw3qL --ep 0
 """
 
 import argparse
@@ -28,7 +28,7 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]   # nav3d/ (이 파일은 nav3d/checks/ 에 있다)
 GS = HERE.parent / 'gs_vlnpe'
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(GS))

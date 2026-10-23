@@ -25,7 +25,6 @@
 
 import argparse
 import glob
-import importlib.util
 import json
 import sys
 import time
@@ -39,17 +38,10 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(GS))
 import nav3d_path as npth  # noqa: E402
 import nav3d_utils as nu  # noqa: E402
-from esdf_utils import discrete_frechet_distance  # noqa: E402
+import nav3d_scenes as scenes  # noqa: E402
+from path_quality import DOOR_WIDTH_M, gt_metrics, stairs_points, one  # noqa: E402,F401
 
-DOOR_WIDTH_M = 0.8
 MULTIFLOOR_DZ_M = 0.5
-
-
-def _load(name, file):
-    sp = importlib.util.spec_from_file_location(name, HERE / file)
-    m = importlib.util.module_from_spec(sp)
-    sp.loader.exec_module(m)
-    return m
 
 
 def parse():
@@ -73,42 +65,15 @@ def parse():
     return ap.parse_args()
 
 
-def gt_metrics(X, gt):
-    fr = discrete_frechet_distance(X[:, :2], gt[:, :2])
-    return {'frechet_m': fr, 'same_route': bool(fr < DOOR_WIDTH_M)}
-
-
-def stairs_points(sc, X):
-    """평가용 계단 라벨 — 다듬는 방식과 무관하게 기본 NavScene 라벨(점 아래 삼각형)로 잰다(split · none 같은 자)."""
-    _, idx = sc.surf.track_idx(X[:, :2], z0=X[0, 2])
-    return np.where(idx >= 0, sc.stairs_tri[np.maximum(idx, 0)], False)
-
-
-def one(sc, P, md, r_b, cfg, gt=None, sc_ref=None):
-    """sc = 평가용(기본 계단 라벨), sc_ref = 다듬기용(없으면 sc). --stairs_mode none 이면 sc_ref 의 계단이 비어 있다."""
-    t = time.time()
-    r = npth.refine(sc_ref or sc, P, cfg)
-    e0 = npth.evaluate(sc, r['raw'], stairs_points(sc, r['raw']), r['raw_on'], md, r_b)
-    e1 = npth.evaluate(sc, r['traj'], stairs_points(sc, r['traj']), r['traj_on'], md, r_b)
-    row = {'sec': time.time() - t, 'n_stairs_runs': r['n_stairs_runs'], 'n_fallback': r['n_fallback'],
-           **{f'raw_{k}': v for k, v in e0.items()}, **{f'ref_{k}': v for k, v in e1.items()}}
-    if gt is not None:
-        row.update({f'raw_gt_{k}': v for k, v in gt_metrics(r['raw'], gt).items()})
-        row.update({f'ref_gt_{k}': v for k, v in gt_metrics(r['traj'], gt).items()})
-        row['gt_turn_per_m_deg'] = npth.turn_per_m(gt)
-    return row, r
-
-
 def run_noeun(args, cfg):
-    b01 = _load('b01', '01_build_navmesh.py')
-    spec = b01.SCENES['noeun_station']
+    spec = scenes.SCENES['noeun_station']
     d01 = HERE / 'logs' / '01_build_navmesh' / 'noeun_station'
     pf = nu.load_pathfinder(str(d01 / 'noeun_station.navmesh'))
     sc = npth.NavScene(pf)
     sc_ref = npth.NavScene(pf, stairs_group='none') if args.stairs_mode == 'none' else sc
     mesh = nu.add_box_blockers(nu.load_mesh_zup(spec['mesh']), spec.get('blockers', []))
     md = nu.MeshDistance(mesh)
-    pts = b01.sample_storey_points(pf, sc.levels, sc.lv2st, seed=args.seed)
+    pts = scenes.sample_storey_points(pf, sc.levels, sc.lv2st, seed=args.seed)
     by_isl = {}
     for (st, il), v in pts.items():
         by_isl.setdefault(il, {})[st] = v

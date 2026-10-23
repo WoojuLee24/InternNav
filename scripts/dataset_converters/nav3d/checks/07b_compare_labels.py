@@ -16,7 +16,7 @@
 | (참고) sg | 시작·끝만 준 경로라 사람 경로와 다를 수 있다 | 판정 안 함 |
 
 사용 (habitat 컨테이너, 저장소 루트):
-    PYTHONPATH=/ws/src/InternNav/.venv_label/site /usr/bin/python scripts/dataset_converters/nav3d/07b_compare_labels.py
+    PYTHONPATH=/ws/src/InternNav/.venv_label/site /usr/bin/python scripts/dataset_converters/nav3d/checks/07b_compare_labels.py
 """
 
 import argparse
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]   # nav3d/ (이 파일은 nav3d/checks/ 에 있다)
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / 'instruction_labeling' / 'eval'))
 sys.path.insert(0, str(HERE.parent / 'instruction_labeling' / 'render'))

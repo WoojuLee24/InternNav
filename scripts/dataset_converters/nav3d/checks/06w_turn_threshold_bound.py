@@ -16,7 +16,7 @@
 p99 / p1 을 쓰는 이유: 짝짓기·경로 차이로 생기는 소수 이상치를 빼려고. max/min 도 같이 적는다.
 
 사용 (habitat 컨테이너, 저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/06w_turn_threshold_bound.py
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/06w_turn_threshold_bound.py
 """
 
 import argparse
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]   # nav3d/ (이 파일은 nav3d/checks/ 에 있다)
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / 'gs_vlnpe'))
 import nav3d_utils as nu  # noqa: E402

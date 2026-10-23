@@ -14,7 +14,7 @@
 사용 (habitat 컨테이너, 저장소 루트) — 01 을 두 키로 먼저:
     /usr/bin/python scripts/dataset_converters/nav3d/01_build_navmesh.py --scene noeun_station --agent_height 0.9 --out_dir scripts/dataset_converters/nav3d/logs/01_height/h0.9
     /usr/bin/python scripts/dataset_converters/nav3d/01_build_navmesh.py --scene noeun_station --agent_height 1.8 --out_dir scripts/dataset_converters/nav3d/logs/01_height/h1.8
-    /usr/bin/python scripts/dataset_converters/nav3d/01h_height_compare.py
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/01h_height_compare.py
 """
 
 import argparse
@@ -25,9 +25,10 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]   # nav3d/ (이 파일은 nav3d/checks/ 에 있다)
 sys.path.insert(0, str(HERE))
 import nav3d_path as npth  # noqa: E402
+import nav3d_scenes as scenes  # noqa: E402
 import nav3d_utils as nu  # noqa: E402
 
 
@@ -39,13 +40,6 @@ def parse():
     ap.add_argument('--n_random', type=int, default=100)
     ap.add_argument('--seed', type=int, default=0)
     return ap.parse_args()
-
-
-def load_b01():
-    sp = importlib.util.spec_from_file_location('b01', HERE / '01_build_navmesh.py')
-    m = importlib.util.module_from_spec(sp)
-    sp.loader.exec_module(m)
-    return m
 
 
 def on_surface(sc, P, tol=0.3):
@@ -87,8 +81,7 @@ def main():
     import trimesh
     h_lo, h_hi = args.heights
     root = Path(args.root)
-    b01 = load_b01()
-    spec = b01.SCENES['noeun_station']
+    spec = scenes.SCENES['noeun_station']
     mesh = nu.add_box_blockers(nu.load_mesh_zup(spec['mesh']), spec.get('blockers', []))
     md = nu.MeshDistance(mesh)
     pf = {h: nu.load_pathfinder(str(root / f'h{h}' / 'noeun_station' / 'noeun_station.navmesh')) for h in (h_lo, h_hi)}
@@ -190,7 +183,7 @@ def main():
     fig.savefig(out / 'lost_area.png', dpi=70, bbox_inches='tight'); plt.close(fig)
     # 3D 확인: 원본 mesh 점(회색, intensity 0) + 낮은 키 navmesh 점(파랑, 0.3) + 높은 키에서 빠진 곳(빨강, 1.0)
     sys.path.insert(0, str(HERE))
-    s03 = importlib.util.spec_from_file_location('s03', HERE / '03s_stairs_label_check.py')
+    s03 = importlib.util.spec_from_file_location('s03', HERE / 'checks' / '03s_stairs_label_check.py')
     m03 = importlib.util.module_from_spec(s03)
     s03.loader.exec_module(m03)
     sp, _ = trimesh.sample.sample_surface(mesh, int(min(3_000_000, mesh.area / 0.05 ** 2)), seed=0)
