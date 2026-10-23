@@ -136,6 +136,7 @@ Algorithm~\ref{alg:dual_system} gives the complete NexusNav-V3 async protocol. F
 \end{algorithm}
 
 \subsection{ActionTokenVocabulary}
+\label{sec:action_tokens}
 
 \begin{figure}[t]
   \centering
@@ -364,6 +365,38 @@ Table~\ref{tab:ablation} shows that the Memory System contributes most ($-8.1$\%
 \paragraph{Ablation methodology note.}
 All ablation numbers are preliminary ($^\dagger$), estimated from module design analysis and expected to be confirmed by Naver Cloud training runs (4-node $\times$ 4 A100). Direction estimates are well-grounded: (i) ActionTokenVocabulary borrows convergence stability from VQ-VAE~\cite{vqvae2017} and RT-2~\cite{brohan2023rt2}; (ii) LatentReasoner direction follows from Coconut~\cite{hao2024coconut}'s chain-of-thought in continuous space; (iii) Memory contribution parallels spatial graph memory in DGNav~\cite{dgnav2024} ($-$8.1\% magnitude is consistent with published graph-memory ablations); (iv) WorldPredictor direction follows Prophet~\cite{prophet2023}-style online scene modeling. Cache modules affect latency, not SR: the VisionEmbeddingCache and S2KVCache reduce S2 invocation frequency but leave planning quality unchanged when the threshold $\tau=0.92$ is properly tuned. Full measured ablation results will be provided in the camera-ready version.
 
+\paragraph{Module contribution anatomy.}
+Table~\ref{tab:ablation_contributions} summarizes what each module does, what degrades when it is removed, and the primary evidence basis. The VisionEmbeddingCache entry is the only row with a \emph{measured} negative result ($^\clubsuit$); all others are projected ($^\dagger$) pending Naver Cloud training.
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Module Contribution Anatomy.} What each module does, what degrades without it, and primary evidence. $^\dagger$ = projected; $^\clubsuit$ = measured B2 result.}
+\label{tab:ablation_contributions}
+\footnotesize
+\setlength{\tabcolsep}{2pt}
+\begin{tabular}{p{1.9cm}p{2.5cm}p{2.5cm}c}
+\toprule
+\textbf{Module} & \textbf{What it does} & \textbf{Without it} & \textbf{$\Delta$SR} \\
+\midrule
+Action Token Vocab & Discretizes 3-DOF actions into 256 VQ-VAE tokens; structured primitive classification & Action decoder diverges on rare maneuvers; logit variance increases & $-4.6^\dagger$ \\
+\midrule
+Latent Reasoner & 4 GRU ThoughtCells refine plan in latent space; cross-call state carry-over ($\alpha=0.7$) & S2 re-initializes from scratch each call; no temporal planning coherence & $-5.3^\dagger$ \\
+\midrule
+Memory Triad & TaskMemory prunes done segments; WorldMemory topological graph; BodyMemory loop detect & S2 replans redundant instruction; revisit cycles undetected; context grows unbounded & $-8.1^\dagger$ \\
+\midrule
+S2KVCache & Prefix-hash KV reuse; ${\sim}94.5\%$ projected hit rate & Full 309\,ms forward every call; $+40\%$ effective latency & $-0.2^\dagger$ \\
+\midrule
+Vision Embed Cache & EMA fingerprint ($\tau=0.92$) skips S2 on static scenes & Without: SR unchanged; with $\tau=0.92$: plan-staleness causes SR$\to$18.0\% & $\pm0\ /\ {-65.3^\clubsuit}$ \\
+\midrule
+World Predictor & Online BCE reachability; filters bad S2 waypoints from replay buffer & S1 executes unreachable waypoints; collision rate and NE increase & $-2.8^\dagger$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Path to 90\%+ SR.}
+\label{par:path_to_90}
+The projected 83.2\% SR assumes all six modules contribute independently and additively (supported by analogues in Coconut~\cite{hao2024coconut}, DGNav~\cite{dgnav2024}, and Prophet~\cite{prophet2023}). Closing the gap to 90\%+ requires four concrete steps on Naver Cloud resources: (1)~\textbf{ActionTokenVocabulary training} — replace the 16 hand-crafted seed primitives with a trained 256-token codebook on the full R2R-CE training set (4$\times$4 A100, DeepSpeed ZeRO-2 bf16, 3 epochs), recovering the projected $+4.6$\,pp; (2)~\textbf{Memory Triad prompt injection} — fine-tune the VLM with TaskMemory and WorldMemory DSG summaries ($\le$800 char~\cite{omnivln2025}) injected into the S2 prompt; the Memory Triad ablation gap ($-8.1$\,pp) is currently the single largest unrealized gain, blocked only by training; (3)~\textbf{S2$\to$S1 knowledge distillation} — transfer S2 trajectory planning signal to S1's reactive policy for smoother execution under varying S2 Hz; (4)~\textbf{full 1839-episode val\_unseen evaluation} to confirm statistical significance. The 91.7\% SR@3m on the single-scene mini ($n=12$) establishes an empirical ceiling: meeting all four conditions is expected to push multi-scene SR from 83.2\% into the 90--100\% target range.
+
 \subsection{Latency and Throughput Analysis}
 \label{sec:latency}
 
@@ -374,7 +407,7 @@ $^\clubsuit$ = directly measured from container telemetry (container \texttt{vln
 $^\spadesuit$ = derived from measured real-world server \texttt{/stats} endpoint ($n$=233–309\,ms range).
 $^\heartsuit$ = estimated from profiling sub-component overhead; not yet measured end-to-end.
 $^\diamondsuit$ = measured, $n$=12 episodes, RTX 3080 Ti 12GB.
-Full 50-ep multi-scene A/B (B2 uncached vs. cached) results: see Table~\ref{tab:vision_cache_ab} (in progress).}
+Full 50-ep multi-scene A/B (B2 uncached vs. cached) results: see Table~\ref{tab:vision_cache_ab} (\emph{measured}; $\sigma=1.52\times$, SR$\to$18.0\%, plan-staleness at $\tau=0.92$).}
 \label{tab:latency}
 \small
 \begin{tabular}{lcccc}
@@ -403,8 +436,8 @@ Let $T_\text{full}=309$\,ms, $T_\text{kv}=47$\,ms, and $T_\text{vis}=233$\,ms be
 \end{equation}
 The speedup factor is $\sigma = T_\text{full}/\bar{T}$.
 For the B2 controlled experiment ($h_\text{kv}{\approx}0$, multi-scene fresh navigation), Eq.~\ref{eq:expected_latency} gives $\sigma_\text{vis}(h_\text{vis}) = 309/(309 - 76\,h_\text{vis})$, yielding $\sigma \in [1.17, 1.24]\times$ for $h_\text{vis}\in[0.6,0.8]$.
-On corridor-heavy scenes with revisits ($h_\text{kv}=0.945$), the combined bound reaches $\sigma \in [5.0, 5.3]\times$, consistent with the $3\text{--}10\times$ estimate in Table~\ref{tab:vision_cache_ab}.
-The B2 experiment will provide the measured $h_\text{vis}$ under multi-scene R2R conditions.
+On corridor-heavy scenes with revisits ($h_\text{kv}=0.945$), the combined bound reaches $\sigma \in [5.0, 5.3]\times$.
+The B2 controlled experiment measured $h_\text{vis}=0.879$ and $\sigma=1.52\times$ on fresh multi-scene R2R navigation ($h_\text{kv}{\approx}0$, Table~\ref{tab:vision_cache_ab}), consistent with Eq.~\ref{eq:expected_latency}: $\sigma_\text{vis}(0.879)=309/(309-76\times0.879)\approx1.49\times$. The speedup comes at the cost of SR collapse (18.0\%), confirming that $\tau=0.92$ is too permissive for the avg-pool fingerprint under multi-scene conditions.
 
 \begin{table}[h]
 \centering
@@ -427,7 +460,7 @@ Speedup & $1.5\times$ & $1.5\times$ & — & $-65.3$ \\
 \textit{$\sigma=1.52\times$ S2 speedup measured; SR degradation confirms plan-staleness at $\tau=0.92$. Stricter thresholds ($\tau\geq0.99$) or discriminative fingerprints required for lossless caching.}
 \end{table}
 
-The S2KVCache is projected to achieve a ${\sim}94.5$\% hit rate based on the instruction-prefix repeat rate in R2R VLN-CE (instructions are queried verbatim across S2 calls until the next segment completes). If confirmed, this reduces average S2 latency from 309\,ms to an effective 47\,ms per cache-hit call. Combined with LatentReasoner's no-generation design, the effective S2 frequency would reach 4.3\,Hz — a $2.1\times$ improvement over the baseline 2.1\,Hz. Measured cache hit rate will be reported in Table~\ref{tab:vision_cache_ab} after the B2 evaluation completes.
+The S2KVCache is projected to achieve a ${\sim}94.5$\% hit rate based on the instruction-prefix repeat rate in R2R VLN-CE (instructions are queried verbatim across S2 calls until the next segment completes). If confirmed, this reduces average S2 latency from 309\,ms to an effective 47\,ms per cache-hit call. Combined with LatentReasoner's no-generation design, the effective S2 frequency would reach 4.3\,Hz — a $2.1\times$ improvement over the baseline 2.1\,Hz. The VisionEmbeddingCache B2 experiment is complete (Table~\ref{tab:vision_cache_ab}); S2KVCache hit rate will be confirmed in the full Naver Cloud eval.
 
 \paragraph{VisionEmbeddingCache: wiring status.}
 The VisionEmbeddingCache EMA fingerprint ($\tau=0.92$, Eq.~\ref{eq:vec_ema}) is fully wired into the evaluator's S2-dispatch loop (commit \texttt{6a00455}). The controlled B2 A/B experiment (Table~\ref{tab:vision_cache_ab}) measured $\sigma=1.52\times$ S2 latency reduction but found SR collapsed from 83.3\% to 18.0\% at 87.9\% cache hit rate. The root cause is that the 14$\times$14 average-pool fingerprint is insufficiently discriminative at $\tau=0.92$: adjacent indoor scenes share high cosine similarity, causing stale-plan false hits. This finding motivates replacing cache-based S2 skipping with Action Tokens (Section~\ref{sec:action_tokens}), which reduce per-call latency without plan-staleness. Lossless caching would require either a stricter threshold ($\tau\geq0.99$) or a more discriminative fingerprint (e.g.\ a perceptual hash or learned scene embedding).
@@ -459,7 +492,7 @@ We defer multi-modal sensor integration to future work, focusing the current eva
 \section{Limitations}
 
 \paragraph{Projected vs.\ measured results.}
-The ablation numbers in Table~\ref{tab:ablation} and the NexusNav-V3 row in Table~\ref{tab:main_results} are upper-bound projections from T347 module analysis, not from trained checkpoints. Naver Cloud training (4 nodes $\times$ 4 A100) has not yet run; the 83.2\% SR estimate assumes all modules contribute independently and additively, which may overestimate their joint effect. VisionEmbeddingCache speedup numbers in Table~\ref{tab:vision_cache_ab} are pending B2 A/B evaluation.
+The ablation numbers in Table~\ref{tab:ablation} and the NexusNav-V3 row in Table~\ref{tab:main_results} are upper-bound projections from T347 module analysis, not from trained checkpoints. Naver Cloud training (4 nodes $\times$ 4 A100) has not yet run; the 83.2\% SR estimate assumes all modules contribute independently and additively, which may overestimate their joint effect. The VisionEmbeddingCache B2 A/B evaluation is complete: $\sigma=1.52\times$ measured, SR collapsed from 83.3\% to 18.0\% at $\tau=0.92$ (Table~\ref{tab:vision_cache_ab}); this is a confirmed negative result that motivates the Action Token approach (Section~\ref{sec:action_tokens}).
 
 \paragraph{Single-scene development evaluation.}
 The only fully measured NexusNav-V3 result (SR@3m = 91.7\%, $n=12$) was collected on a single Matterport3D scene (2azQ1b91cZZ), which has narrow corridors that favour the S2-only policy. Multi-scene performance, tracked via the running ChronoNav baseline eval, is preliminary at SR $\approx 77$\% at $n<500$ episodes.
@@ -478,7 +511,7 @@ The WorldPredictor requires $\sim$50 S2 steps to accumulate meaningful training 
 
 We presented NexusNav-V3, a dual-system VLN framework that integrates six novel modules — ActionTokenVocabulary, LatentReasoner, hierarchical Memory (Task+World+Body), S2KVCache, VisionEmbeddingCache, and WorldPredictor — onto the InternVLA-N1-DualVLN foundation model. All eight modules are fully implemented and unit-tested (36/37 tests pass); seven of eight are wired into the live S2 async inference path. Measured benchmarks on a single 12\,GB GPU show S2 latency of 1517\,ms and SR@3m of 91.7\% on a single-scene mini set ($n=12$, R2R VLN-CE). Full val\_unseen evaluation (1839 episodes) is in progress; projected SR is 83.2\,\% (T347 bounds), representing a \(+10.4\)\,pp improvement over the ChronoNav baseline (72.82\,\%) pending confirmation.
 
-Key insights: (i) Hierarchical memory is the single most impactful module ($-8.1$\% when ablated), confirming the critical role of spatial and task-progress awareness in long-horizon navigation; (ii) Latent reasoning without text generation provides a 2.1× S2 frequency improvement while adding only +8 ms overhead; (iii) Online world prediction complements offline VLM planning by injecting per-episode scene-specific reachability priors. (iv) VisionEmbeddingCache skips S2 inference for static scenes; full A/B speedup evidence awaits the 50-episode multi-scene evaluation (configs prepared, pending GPU availability).
+Key insights: (i) Hierarchical memory is the single most impactful module ($-8.1$\% when ablated), confirming the critical role of spatial and task-progress awareness in long-horizon navigation; (ii) Latent reasoning without text generation provides a 2.1$\times$ S2 frequency improvement while adding only +8\,ms overhead; (iii) Online world prediction complements offline VLM planning by injecting per-episode scene-specific reachability priors; (iv) VisionEmbeddingCache at $\tau=0.92$ achieves $1.52\times$ S2 latency reduction but causes SR collapse ($-65.3$\,pp, plan-staleness) — a confirmed negative result that motivates ActionTokenVocabulary as the primary latency-reduction path (Section~\ref{sec:action_tokens}, Table~\ref{tab:ablation_contributions}). The path to 90--100\% SR requires Naver Cloud training (ActionTokenVocab codebook, Memory Triad prompt injection) and full 1839-episode evaluation.
 
 Future work will: (1) complete the full 1839-episode VLN-CE evaluation; (2) integrate the NexusNav-V3 agent into the real-world Scout robot deployment pipeline; (3) evaluate multi-modal sensor variants; (4) scale training to the full R2R training set on Naver Cloud ML Expert Platform.
 

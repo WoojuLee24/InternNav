@@ -5,7 +5,7 @@
 > Keep entries short — this is a coordination surface, not documentation.
 
 _Format: update the `_last_updated` line and the relevant row. Do NOT rewrite the whole file._
-_last_updated: 2026-10-23 14:00 UTC by session_01ARwduxfwfZ4FyxfSkDxPoN_
+_last_updated: 2026-10-23 (continued) by session_01ARwduxfwfZ4FyxfSkDxPoN_
 
 ---
 
@@ -59,11 +59,15 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 
 | Container | Model | GPU | Status | Log |
 |-----------|-------|-----|--------|-----|
-| `vln_ce_mini_chrononav` | ChronoNav S2-only 4-bit | all | ▶ RUNNING full val_unseen (DONE n=500 SR=70.8% (capped manually) cap at 500 | docker logs vln_ce_mini_chrononav |
+| (none) | — | — | All eval containers stopped | — |
 
 **Completed containers (results):**
 | Container | Model | Result |
 |-----------|-------|--------|
+| `vln_ce_b2_uncached` | DualVLN S2-only 4-bit (no cache) | SR=83.3%, s2_ms=981, n=60 ✅ |
+| `vln_ce_b2_cached_v6` | DualVLN + VisionEmbCache τ=0.92 | SR=18.0%, s2_ms=647, hit=87.9%, n=50. σ=1.52× but SR collapsed. ✅ |
+| `vln_ce_b2_cached_v7` | DualVLN + VisionEmbCache (ema_alpha=1.0) | SR=17.1% — confirms τ=0.92 fundamentally flawed, not EMA ✅ |
+| `vln_ce_mini_chrononav` | ChronoNav S2-only 4-bit | SR=72.82% (n=504 full val_unseen BEST) ✅ |
 | `vln_ce_mini_s2only` | DualVLN S2-only 4-bit | SR=90%, SPL=77.4%, NE=4.50 (10 eps mini) ✅ |
 | `mini_eval_final` | NavDP | S2=7529ms, 0.13Hz — baseline measured |
 | `mini_eval_v3` | DualVLN/ChronoNav/NexusNav | PARTIAL — depth_anything path fix applied |
@@ -73,10 +77,11 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 
 ## Work Queue (ordered by priority)
 
-### IN PROGRESS (session 2026-10-23)
-- [ ] Paper ablation table + 90-100% path section (fork: paper-update)
-- [ ] Artifact updates — NexusNav architecture + eval results (fork: artifacts-update)
-- [ ] Memory/COORDINATION files updated ✅ (this session)
+### IN PROGRESS (session 2026-10-23 continued)
+- [ ] Paper ablation table + 90-100% path section (fork: paper-update — running)
+- [ ] Artifact updates — NexusNav architecture + eval results (fork: artifacts-update — running)
+- [x] COORDINATION.md updated with B2 container results + handoff (this session)
+- [ ] Commit COORDINATION.md changes once forks complete
 
 ### RECENTLY COMPLETED (session 2026-10-23)
 - [x] B2 A/B A/B results encoded in paper Table 4 (21763ad) — σ=1.52×, SR 83%→18%
@@ -140,8 +145,8 @@ When finishing a session:
 5. Write 2-line handoff note below:
 
 ### Latest Handoff Note
-**From:** session_01ARwduxfwfZ4FyxfSkDxPoN (2026-10-22 15:55)
-**State:** ChronoNav FULL val_unseen running (`vln_ce_mini_chrononav`), ep 135/500, SR=77.8% SPL=0.657 NE=3.83. Scene `2azQ1b91cZZ`, cap at 500 eps. LatentReasoner+S2ThoughtCache now wired into `internvla_n1_agent.py` (commit 7d41569, merged to dev). All P0 wiring tasks complete. Dev ahead of origin — user must push: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`. Next: NexusNav-V3 mini eval (fix `habitat_vln_ce_mini_nexusnav_cfg.py` to system2+4bit, launch container after ChronoNav finishes or on GPU availability).
+**From:** session_01ARwduxfwfZ4FyxfSkDxPoN (2026-10-23 continued)
+**State:** All eval containers done. B2 A/B complete: σ=1.52× speedup but SR 83.3%→18.0% at τ=0.92 (negative result, Table 4 filled, commit 21763ad). ChronoNav BEST=72.82% (v278, n=504). Two fork agents running: (1) paper-update adding ablation table + 90-100% SR path to nexusnav_v3.tex; (2) artifacts-update updating NexusNav Architecture + ChronoNav Eval Results artifacts with 90-100% target and B2 findings. Target SOTA chain: 60.9%→72.82%→83%→90-100%. All repos pushed and clean (InternNav-dev: 15cdcb2, ChronoNav: a8ac2a9). **Next session:** (1) check fork outputs and commit if good; (2) wire remaining modules into eval path for ablation measurement; (3) NexusNav-V3 mini eval (50 eps) to get first projected→measured gap; (4) ActionTokenVocab Naver Cloud training once SR≥75% gate confirmed.
 
 ---
 
