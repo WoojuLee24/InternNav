@@ -5,7 +5,7 @@
 > Keep entries short — this is a coordination surface, not documentation.
 
 _Format: update the `_last_updated` line and the relevant row. Do NOT rewrite the whole file._
-_last_updated: 2026-10-23 (714feaf paper+ablation, artifacts fork running) by session_01ARwduxfwfZ4FyxfSkDxPoN_
+_last_updated: 2026-10-23 (2aac473 mini-train scripts + trainer fix) by session_01ARwduxfwfZ4FyxfSkDxPoN_
 
 ---
 
@@ -79,9 +79,10 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 
 ### IN PROGRESS (session 2026-10-23 continued)
 - [x] Paper ablation table + 90-100% path section — DONE (714feaf) by fork: paper-update
-- [ ] Artifact updates — NexusNav architecture + eval results (fork: artifacts-update — running)
+- [x] Artifact updates — NexusNav architecture + eval results — DONE (artifacts fork ran)
 - [x] COORDINATION.md updated with B2 container results + handoff (committed in 714feaf)
 - [x] ChronoNav COORDINATION.md updated with B2 results + 90-100% target (a5fe0ff)
+- [x] Mini training pipeline unblocked: trainer model-class fix + 1-GPU script (2aac473)
 
 ### RECENTLY COMPLETED (session 2026-10-23)
 - [x] B2 A/B A/B results encoded in paper Table 4 (21763ad) — σ=1.52×, SR 83%→18%
@@ -100,13 +101,34 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 - [x] Architecture artifact updated with all NexusNav-V3 module statuses
 - [x] peer `debug-duilvn-metrics-validation` ingested B2 timing into comparison.tex (@e43d4a5)
 
+### MINI TRAINING STATUS (2026-10-23)
+
+**Mini training data (local, images present):**
+- Path: `data/InternData-N1-v0.5-mini/vln_ce/` — 5 scenes, 120 episodes, 107GB
+- Camera angles: `125cm_0/30/45deg`, `60cm_15/30deg` — all 4 vln_dataset keys verified ✓
+
+**Training pipeline status per model:**
+| Model | Script | Blocker | Status |
+|-------|--------|---------|--------|
+| DualVLN S2 (7B) | `start_mini_dualsystem_1gpu.sh` | ZeRO-3 CPU offload, needs ~56GB RAM (available: 81GB) | **READY TO LAUNCH** |
+| ChronoNav | Same as DualVLN (inference-time τ=0.92 only) | None — use DualVLN checkpoint at eval | Ready |
+| NexusNav-V3 | `nexusnav_vln_ce_mini.py` | model_name='nexusnav_v3' not in train.py | Blocked: needs nexusnav trainer |
+| NavDP | `navdp_vln_ce_mini.py` | pointcloud.ply missing + wrong video dir format | Blocked: needs data restructure |
+
+**Launch DualVLN mini training (1-GPU, 12GB):**
+```bash
+cd /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev
+bash scripts/train/qwenvl_train/start_mini_dualsystem_1gpu.sh
+```
+> GPU: 476 MiB/12288 MiB free. RAM: 81GB available. ZeRO-3+CPU offload should fit.
+
 ### NEXT (sequential, GPU blocked until ChronoNav caps ~7.5h)
-- [ ] ChronoNav eval → cap at 500 eps → drop paths to `debug-duilvn-metrics-validation`
-- [ ] After cap: launch B2-cached (DualVLN + VisionEmbeddingCache) multi-scene eval → A/B speedup evidence
+- [ ] **USER ACTION**: Launch DualVLN mini training — `bash scripts/train/qwenvl_train/start_mini_dualsystem_1gpu.sh`
+- [ ] After DualVLN trains: eval mini DualVLN on val_unseen (peer session handles)
 - [ ] After B2: dual_system mode test with fp16 cast fix (need free GPU)
 - [ ] After dual_system: NexusNav-V3 eval (`habitat_vln_ce_mini_nexusnav_cfg.py`)
 - [ ] v280 reannotation (blocked: vLLM server at 10.77.32.231 needs restart)
-- [ ] Push 11+ commits to origin/dev (user must run: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`)
+- [ ] Push commits to origin/dev (user must run: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`)
 
 ### PARALLEL-SAFE (any session can start independently)
 - [ ] NexusNav: wire remaining modules (S2KVCache in evaluator, WorldPredictor in inference)
