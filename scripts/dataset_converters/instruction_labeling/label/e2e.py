@@ -138,6 +138,9 @@ def select_frames(cfg: dict, ep: dict, track: dict) -> list:
 
 def build_request(cfg: dict, ep: dict, track: dict) -> tuple:
     """VLM 요청 content, 기록용 입력 요약, episode 별 style."""
+    if cfg['frames'].get('overlay') or cfg['frames']['select_def'].get('topdown'):  # 작성자 B·C: 이동 정보를 그림으로
+        from visual import build_request_visual
+        return build_request_visual(cfg, ep, track)
     rc = cfg['route']
     sel = select_frames(cfg, ep, track)
     sib = track['item'].get('sib_idx', 0)
