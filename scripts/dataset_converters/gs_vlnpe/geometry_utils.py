@@ -431,9 +431,14 @@ def load_scene_mesh(mesh_root: Path, scene: str):
     """씬 mesh를 trimesh 객체로 로드. absolute 모드/`check_against_scene_mesh`의 공용 진입점.
 
     호출부는 이걸 **한 번만** 호출해 재사용할 것 — 프레임마다 다시 로드하면 느리다.
+
+    호출부는 전부 형상(거리·voxelize)만 쓴다. 텍스처까지 읽으면 `force='mesh'` 가 jpg 수백 장을
+    아틀라스 하나로 합치느라 큰 씬(vyrNrziPKCB, jpg 270장)에서 RAM 100 GB 를 넘긴다
+    (2026-10-12 PC 멈춤의 원인) → `skip_materials=True`. 형상은 텍스처 로드와 동일하다.
     """
     import trimesh  # absolute 모드 전용 — 모듈 상단에 두면 trimesh 없는 환경에서 import가 깨진다
-    return trimesh.load(str(find_scene_mesh(mesh_root, scene)), process=False, force='mesh')
+    return trimesh.load(str(find_scene_mesh(mesh_root, scene)), process=False, force='mesh',
+                        skip_materials=True)
 
 
 def compute_mesh_distance(points_world: np.ndarray, mesh) -> np.ndarray:
@@ -576,7 +581,7 @@ def check_against_scene_mesh(data_root: Path, mesh_root: Path, scene: str, episo
         frames = [f for f in frames if 0 <= f < len(poses)]
     assert frames, f'검사할 프레임이 없다 (episode 길이={len(poses)})'
 
-    mesh = trimesh.load(str(find_scene_mesh(mesh_root, scene)), process=False, force='mesh')
+    mesh = load_scene_mesh(mesh_root, scene)
     proximity = trimesh.proximity.ProximityQuery(mesh)
 
     per_frame, all_d = {}, []

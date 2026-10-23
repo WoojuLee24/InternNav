@@ -389,8 +389,42 @@ _NEIGHBORS = [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
               (-1, 1, np.sqrt(2.0)), (-1, -1, np.sqrt(2.0))]
 
 
+def astar_edge_mask(esdf: np.ndarray, factor: int, coarse_shape) -> dict:
+    """A* 격자 이동 하나하나가 **0.05 m 격자의 장애물을 가로지르는지** 미리 계산한다 (옵션).
+
+    `downsample_navigable` 은 블록 단위로 통과 여부를 정하므로, 두께 1~2 셀(0.05~0.1 m)짜리
+    얇은 벽 양쪽 블록이 모두 navigable 이면 A* 가 그 벽을 **한 칸 이동으로 건너뛴다**.
+    refine 은 점만 옮기므로 선분은 계속 벽을 지난다 — vln_ce(`plan_r_b 0.10`)에서 관통 904 중
+    709 가 refine 후 waypoint **선분**에서 이미 벽을 지났다(점 여유는 0.15). 2026-10-13 실측.
+
+    셀 중심 사이 선분의 **내부**(양 끝 제외)를 fine 셀의 1/5 간격으로 찍어 장애물(esdf==0)을
+    만나면 그 이동을 막는다. 양 끝을 빼는 이유: majority 블록의 중심 셀이 장애물일 수 있는데,
+    그 점은 refine 이 옮기므로 노드 자체를 끊으면 연결성만 잃는다.
+
+    Returns: `{(dx, dy): (hc, wc) bool}` — `[iy, ix]` 에서 (dx, dy) 로 가는 이동이 벽을 안 지나면 True.
+    """
+    hc, wc = coarse_shape
+    h, w = esdf.shape
+    iy, ix = np.mgrid[0:hc, 0:wc]
+    cx, cy = (ix + 0.5) * factor, (iy + 0.5) * factor          # fine 셀 단위 좌표
+    n = int(np.ceil(factor * np.sqrt(2.0) * 5)) + 2
+    ts = np.linspace(0.0, 1.0, n)[1:-1]
+    out = {}
+    for dx, dy, _ in _NEIGHBORS:
+        ok = np.ones((hc, wc), dtype=bool)
+        for t in ts:
+            fx = np.floor(cx + t * dx * factor).astype(int)
+            fy = np.floor(cy + t * dy * factor).astype(int)
+            inside = (fx >= 0) & (fx < w) & (fy >= 0) & (fy < h)
+            v = np.zeros((hc, wc), dtype=esdf.dtype)
+            v[inside] = esdf[fy[inside], fx[inside]]
+            ok &= v > 1e-9
+        out[(dx, dy)] = ok
+    return out
+
+
 def astar(navigable: np.ndarray, start_ij, goal_ij, connectivity: int = 8,
-         clearance: np.ndarray = None, clearance_weight: float = 0.0):
+         clearance: np.ndarray = None, clearance_weight: float = 0.0, edge_ok: dict = None):
     """격자 A* (논문 5단계). `navigable`은 (Ny,Nx) bool, 좌표는 `(ix, iy)`.
 
     8-이웃(기본), 대각 비용 sqrt(2), 유클리드 heuristic(admissible). 저장소에 격자 A*가 없어 신규 구현.
@@ -402,6 +436,8 @@ def astar(navigable: np.ndarray, start_ij, goal_ij, connectivity: int = 8,
     **동일 비용 경로들 사이의 tie-break**을 벽에서 먼 쪽으로 살짝 미는 옵션이다.
     `edge_cost = max(step - clearance_weight * clearance[ny,nx], 1e-6)` — 가중치 0이면 `clearance`를
     줘도 완전한 no-op이라 기존 호출부(`astar(nav, start, goal)`)는 100% 그대로 동작한다.
+
+    `edge_ok`(기본 None = 종전 동작)는 `astar_edge_mask` 결과 — False 인 이동은 건너뛴다.
 
     Returns: (N,2) int `(ix, iy)` 경로, 또는 실패 시 `None`
     """
@@ -442,6 +478,8 @@ def astar(navigable: np.ndarray, start_ij, goal_ij, connectivity: int = 8,
                 continue
             # 대각 이동은 양옆이 모두 열려 있어야 한다 — 벽 모서리를 대각으로 통과하는 것을 막는다.
             if dx and dy and not (navigable[iy, nx] and navigable[ny, ix]):
+                continue
+            if edge_ok is not None and not edge_ok[(dx, dy)][iy, ix]:
                 continue
             edge_cost = step
             if clearance is not None and clearance_weight:
@@ -1454,7 +1492,23 @@ if __name__ == '__main__':
     _p_bias = astar(_bias_room, (0, 2), (10, 2), clearance=_clr, clearance_weight=5.0)
     assert not any(int(iy) == 3 for ix, iy in _p_bias), 'clearance bias가 낮은 row(3)를 여전히 지난다'
     assert any(int(iy) == 1 for ix, iy in _p_bias), 'clearance bias가 높은 row(1)로 안 갔다'
-    print('[1g/5] A* 파라미터 (connectivity 4/8-이웃 / clearance tie-break no-op·효과) OK')
+
+    # edge_ok: 두께 1 셀 벽(fine x=40, 문 없음)을 4x 다운샘플이 지운다 -> 끄면 건너뛰고, 켜면 막힌다.
+    # 벽 아래쪽(y>=60)만 뚫어 두면 켰을 때 그쪽으로 돌아가야 한다.
+    _occ = np.zeros((80, 80), dtype=bool)
+    _occ[:60, 40] = True
+    _ew = compute_esdf_2d(_occ, 0.05)
+    _nc = downsample_navigable(_ew > 0, 4, 'majority')
+    assert _nc.all(), '전제: majority 다운샘플이 얇은 벽을 지워야 한다'
+    _em = astar_edge_mask(_ew, 4, _nc.shape)
+    _pa = astar(_nc, (2, 5), (17, 5))
+    assert np.array_equal(_pa, astar(_nc, (2, 5), (17, 5), edge_ok=None)), 'edge_ok=None 은 no-op 이어야 한다'
+    _seg = lambda p: check_path_navigable(cell_to_world(p, np.zeros(3), 0.2), _ew, np.zeros(3), 0.05)['hard_n']
+    assert _seg(_pa) > 0, '전제: edge_ok 없이는 A* 가 얇은 벽을 건너뛰어야 한다'
+    _pb = astar(_nc, (2, 5), (17, 5), edge_ok=_em)
+    assert _pb is not None and _seg(_pb) == 0, 'edge_ok 가 얇은 벽 관통을 막지 못했다'
+    assert _pb[:, 1].max() >= 15, 'edge_ok 경로가 뚫린 곳(y>=15)으로 돌아가지 않았다'
+    print('[1g/5] A* 파라미터 (connectivity 4/8-이웃 / clearance tie-break no-op·효과 / edge_ok 얇은 벽) OK')
 
     # ---- [1h] compute_scan_coverage_mask: 전체 높이에서 점유가 0인 열만 False여야 한다 ----
     _occ_cov = np.zeros((4, 3, 5), dtype=bool)   # (Nx=4, Ny=3, Nz=5)
