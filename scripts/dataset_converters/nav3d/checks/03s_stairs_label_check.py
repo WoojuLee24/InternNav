@@ -17,9 +17,9 @@ CloudCompare: 열고 scalar field = intensity 로 색칠.
 03 이 저장한 raw 경로(`logs/03_refine_paths/scenes/<S>_traj.npz`)를 다시 쓴다 — 경로 계획은 새로 하지 않는다.
 
 사용 (habitat 컨테이너, 저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/03s_stairs_label_check.py --scene noeun_station
-    ls data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r | xargs -P 4 -I{} /usr/bin/python scripts/dataset_converters/nav3d/03s_stairs_label_check.py --scene {}
-    /usr/bin/python scripts/dataset_converters/nav3d/03s_stairs_label_check.py --aggregate
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/03s_stairs_label_check.py --scene noeun_station
+    ls data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r | xargs -P 4 -I{} /usr/bin/python scripts/dataset_converters/nav3d/checks/03s_stairs_label_check.py --scene {}
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/03s_stairs_label_check.py --aggregate
 """
 
 import argparse
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]   # nav3d/ (이 파일은 nav3d/checks/ 에 있다)
 sys.path.insert(0, str(HERE))
 import nav3d_path as npth  # noqa: E402
 import nav3d_utils as nu  # noqa: E402
@@ -158,11 +158,8 @@ def write_ply(path, xyz, rgb, intensity, faces=None):
 def scene_mesh(s):
     if s == 'noeun_station':
         sys.path.insert(0, str(HERE))
-        import importlib.util
-        sp = importlib.util.spec_from_file_location('b01', HERE / '01_build_navmesh.py')
-        b01 = importlib.util.module_from_spec(sp)
-        sp.loader.exec_module(b01)
-        spec = b01.SCENES['noeun_station']
+        import nav3d_scenes
+        spec = nav3d_scenes.SCENES['noeun_station']
         return nu.add_box_blockers(nu.load_mesh_zup(spec['mesh']), spec.get('blockers', []))
     meta = json.load(open(HERE.parent / 'gs_vlnpe' / 'logs' / 'scene_meta' / f'{s}.json'))
     return nu.load_mesh_zup(meta['mesh_path'])

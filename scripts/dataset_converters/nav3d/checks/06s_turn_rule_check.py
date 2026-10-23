@@ -19,7 +19,7 @@
 2026-10-20 실측: S1 은 R2R 경유점을 목표로 두면 전진 프레임 |err| 중앙 34~45° — 릴리스 생성기는 R2R 경유점을 바로 목표로 하지 않는다 (자 설계 실패, S2 로 대신).
 
 사용 (habitat 컨테이너, 저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/06s_turn_rule_check.py
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/06s_turn_rule_check.py
 """
 
 import argparse

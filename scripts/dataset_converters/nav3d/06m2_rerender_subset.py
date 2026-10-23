@@ -29,6 +29,7 @@ GS = HERE.parent / 'gs_vlnpe'
 for p in (str(GS), str(GS / 'apply_real')):
     if p not in sys.path:
         sys.path.insert(0, p)
+from render_poses import c2w_to_vlnpe_quat, ce_to_pe_actions, frames_to_poses, quat_wxyz_to_R  # noqa: E402
 
 
 def parse():
@@ -71,7 +72,6 @@ def clone_tree(src: Path, dst: Path, link_suffixes=('.jpg', '.png', '.npy')):
 
 def main() -> int:
     args = parse()
-    m6m = _load('m06m', HERE / '06m_render_rbq.py')
     W = json.loads(Path(args.walk_json).read_text())
     ok = [r for r in W['results'] if r['success']]
     keys = [k for k in args.keys.split(',') if k] or W.get('merge', {}).get('changed', [])
@@ -106,7 +106,7 @@ def main() -> int:
             r = ok[ei]
             for p in list(rgb_dir.glob(f'episode_{ei:06d}_*.jpg')) + list(dep_dir.glob(f'episode_{ei:06d}_*.png')):
                 p.unlink()                                                     # 하드링크 끊기 (이전 데이터셋은 그대로)
-            P = m6m.frames_to_poses(r['frames'])
+            P = frames_to_poses(r['frames'])
             rgb, depth_m = r4.render_along(cas, P)
             for i in range(len(P)):
                 save_jpg(rgb[i], rgb_dir / f'episode_{ei:06d}_{i}.jpg')
@@ -124,7 +124,6 @@ def main() -> int:
         du = _load('du_06m2', GS / 'dataset_utils.py')
         vw = _load('vw_06m2', GS / 'vlnpe_writer.py')
         e05 = _load('ex05p_06m2', GS / '05_export_vlnpe.py')
-        m6p = _load('m06p', HERE / '06p_render_noeun_vlnpe.py')
         cas = r4.build_renderer(*du.VLNPE_IMG_WH, du.VLNPE_K, usd, args.light, None, args.rtx_ambient, args.film_iso)
         schema, stats_fn = vw.load_schema(args.pe_schema_ref), vw.load_stats_fn()
         root = Path(args.out_root) / 'traj_data' / 'r2r'
@@ -138,16 +137,16 @@ def main() -> int:
             for p in (dst_scene / 'videos' / 'chunk-000').glob(f'*/episode_{ei:06d}.npy'):
                 p.unlink()
             (dst_scene / 'data' / 'chunk-000' / f'episode_{ei:06d}.parquet').unlink(missing_ok=True)
-            P = m6m.frames_to_poses(r['frames'])
-            a_pe = m6p.ce_to_pe_actions(np.array([f['action'] for f in r['frames']]))
+            P = frames_to_poses(r['frames'])
+            a_pe = ce_to_pe_actions(np.array([f['action'] for f in r['frames']]))
             rgb, depth_m = r4.render_along(cas, P)
             xy = np.array([f['pos'][:2] for f in r['frames']])
             Lc = np.r_[0, np.cumsum(np.linalg.norm(np.diff(xy, axis=0), axis=1))]
             buf = []
             for i, f in enumerate(r['frames']):
-                Rt = m6m.quat_wxyz_to_R(f['quat_wxyz'])
+                Rt = quat_wxyz_to_R(f['quat_wxyz'])
                 fw = P[i, :3, 2]
-                buf.append({'camera_position': P[i, :3, 3], 'camera_orientation': m6p.c2w_to_vlnpe_quat(P[i, :3, :3]),
+                buf.append({'camera_position': P[i, :3, 3], 'camera_orientation': c2w_to_vlnpe_quat(P[i, :3, :3]),
                             'camera_yaw': float(np.arctan2(fw[1], fw[0])), 'robot_position': np.asarray(f['pos']),
                             'robot_orientation': list(f['quat_wxyz']), 'robot_yaw': float(np.arctan2(Rt[1, 0], Rt[0, 0])),
                             'progress': float(Lc[i] / max(Lc[-1], 1e-9)), 'action': int(a_pe[i]),

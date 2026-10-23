@@ -8,7 +8,7 @@
 - turn0      : 경로 첫 방향 − 출발 yaw [°] (출발 직후 제자리 회전량).
 
 사용 (habitat 컨테이너, 저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/06k_start_check.py --walk_json <walk json> --episodes_json <eps json>
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/06k_start_check.py --walk_json <walk json> --episodes_json <eps json>
 """
 
 import argparse

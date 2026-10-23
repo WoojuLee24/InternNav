@@ -23,7 +23,7 @@
 | C6 회귀 | 이전 렌더와 같은 에피소드의 SSIM 중앙값 | ≥ 0.98 | 같은 코드·설정이면 렌더러 비결정성(평균 0.8/255)만 남는다 |
 
 사용 (isaac 또는 habitat 컨테이너, 저장소 루트 — 이미지만 읽는다):
-    python scripts/dataset_converters/nav3d/05x_vlnce_isaac_render_check.py
+    python scripts/dataset_converters/nav3d/checks/05x_vlnce_isaac_render_check.py
 """
 
 import argparse
@@ -33,7 +33,7 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]   # nav3d/ (이 파일은 nav3d/checks/ 에 있다)
 sys.path.insert(0, str(HERE))
 import nav3d_report as R  # noqa: E402
 

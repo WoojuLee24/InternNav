@@ -14,7 +14,7 @@
 불일치 지도 색: 어두운 회색 = 같음 · 회색 = 1 mm(정수화 경계) · 노랑 = > 1 mm · **자홍 = 우리 0, 릴리스 값 있음**.
 
 사용 (habitat 컨테이너, 저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/05c_vlnce_compare_viewer.py
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/05c_vlnce_compare_viewer.py
 """
 
 import argparse
@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]   # nav3d/ (이 파일은 nav3d/checks/ 에 있다)
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / 'instruction_labeling' / 'render'))
 

@@ -19,8 +19,8 @@
 gs_vlnpe 파일은 읽기만 한다.
 
 사용 (habitat 컨테이너, 저장소 루트):
-    ls data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r | xargs -P 4 -I{} /usr/bin/python scripts/dataset_converters/nav3d/03c_compare_2d.py --scene {}
-    /usr/bin/python scripts/dataset_converters/nav3d/03c_compare_2d.py --aggregate
+    ls data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r | xargs -P 4 -I{} /usr/bin/python scripts/dataset_converters/nav3d/checks/03c_compare_2d.py --scene {}
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/03c_compare_2d.py --aggregate
 """
 
 import argparse
@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]   # nav3d/ (이 파일은 nav3d/checks/ 에 있다)
 GS = HERE.parent / 'gs_vlnpe'
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(GS))

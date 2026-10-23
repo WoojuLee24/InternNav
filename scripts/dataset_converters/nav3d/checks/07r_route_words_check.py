@@ -14,7 +14,7 @@
 | T2 개선 | wp 일치율이 rdp(기존)보다 높다 |
 
 사용 (habitat 컨테이너, 저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/07r_route_words_check.py
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/07r_route_words_check.py
 """
 
 import argparse
@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]   # nav3d/ (이 파일은 nav3d/checks/ 에 있다)
 LABEL = HERE.parent / 'instruction_labeling'
 for p in (str(HERE), str(LABEL / 'label'), str(LABEL / 'render')):
     if p not in sys.path:

@@ -27,6 +27,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from floor_mesh import stairs_mask_from_segments  # noqa: E402
+from mesh_probe import side_dists  # noqa: E402,F401
 
 
 def parse():
@@ -41,23 +42,6 @@ def parse():
     ap.add_argument('--min_clear_m', type=float, default=0.2, help='새 직선이 mesh 에서 떨어져야 할 최소 거리 (다리 높이)')
     ap.add_argument('--max_ray_m', type=float, default=3.0)
     return ap.parse_args()
-
-
-def side_dists(mesh, P, H, hs, max_ray):
-    """경로 점마다 (왼쪽, 오른쪽) 수평 거리 — 높이들 중 최소."""
-    d = np.gradient(P[:, :2], axis=0)
-    n = np.linalg.norm(d, axis=1, keepdims=True)
-    d = d / np.maximum(n, 1e-9)
-    left = np.c_[-d[:, 1], d[:, 0], np.zeros(len(P))]
-    L = np.full(len(P), max_ray)
-    R = np.full(len(P), max_ray)
-    for h in hs:
-        O = np.c_[P[:, :2], H + h]
-        for D, out in ((left, L), (-left, R)):
-            loc, idx, _ = mesh.ray.intersects_location(O, D, multiple_hits=False)
-            dist = np.linalg.norm(loc[:, :2] - O[idx, :2], axis=1)
-            out[idx] = np.minimum(out[idx], np.minimum(dist, max_ray))
-    return L, R, left[:, :2]
 
 
 def clearance(mesh, Q, hs):

@@ -37,16 +37,8 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import nav3d_utils as nu  # noqa: E402
+from nav3d_scenes import SCENES, sample_storey_points  # noqa: E402,F401
 
-SCENES = {
-    # noeun_station_mid.ply 는 이름과 달리 **역 전체** 충돌 mesh 다 — usdz 안 mesh.ply 와 꼭짓점·면이 완전히 같다
-    # (2026-10-13 확인. usdz 의 mesh.usd 에는 xform 이 없어 world = ply 좌표).
-    'noeun_station': {'mesh': 'data/scene_data/noeun_station/noeun_station_mid.ply',
-                      'compare_2d': 'scripts/dataset_converters/gs_vlnpe/apply_real/esdf/noeun_station_mid.npz',
-                      # 3DGS 가 못 살린 투명 유리 — mesh 에 벽 상자를 더한다. 사용자 확인(2026-10-13): 대합실 남쪽 y=-15.5
-                      # 칸막이는 유리, 문은 x 0.8~1.95 (틀 하단 1.9 m). 기둥 x -4.25..0.75 사이 판넬은 바닥~0.9 m 가 비어 있었다.
-                      'blockers': [{'name': 'glass_B1_south', 'min': [-4.3, -15.55, -0.30], 'max': [0.8, -15.45, 0.95]}]},
-}
 STEP_RMS_M = 0.05          # 이 이상이면 계단 (실측: 계단 0.13~0.16, 매끈한 경사 ≤ 0.023)
 
 
@@ -164,25 +156,6 @@ def v3_compare_2d(npz_path, tris, lv, lv2st, levels, storeys, mesh_up):
             '2d_only_no_floor_m2': float((only2d & ~floor).sum() * c2),
             '2d_only_with_floor_m2': float((only2d & floor).sum() * c2),
             'nav_mask': nav, 'mask2d': mask2d, 'floor': floor, 'origin': org[:2].tolist(), 'cell': c}
-
-
-def sample_storey_points(pf, levels, lv2st, per_bucket=40, tol=0.3, tries=300000, seed=0):
-    """무작위 navmesh 점을 (층, 섬) 칸에 모은다 — 작은 층(출구 계단 위 16 m2 등)도 같은 섬이면 뽑히게."""
-    pf.seed(seed)
-    Lz = np.array([L['z'] for L in levels])
-    pts = {}
-    for _ in range(tries):
-        q = np.asarray(pf.get_random_navigable_point())
-        if not np.isfinite(q).all():
-            continue
-        p = nu.hab_to_ours(q)
-        k = int(np.argmin(np.abs(Lz - p[2])))
-        if abs(Lz[k] - p[2]) > tol:
-            continue
-        b = (int(lv2st[k]), int(pf.get_island(q)))
-        if len(pts.setdefault(b, [])) < per_bucket:
-            pts[b].append(q)
-    return pts
 
 
 def project_path(surf, D):

@@ -35,6 +35,7 @@ GS = HERE.parent / 'gs_vlnpe'
 for p in (str(GS), str(GS / 'apply_real')):
     if p not in sys.path:
         sys.path.insert(0, p)
+from render_poses import c2w_to_vlnpe_quat, ce_to_pe_actions, episode_poses, start_yaw_for  # noqa: E402,F401
 
 
 def parse():
@@ -71,27 +72,12 @@ def _load(name, path):
     return m
 
 
-def c2w_to_vlnpe_quat(R_cv: np.ndarray) -> list:
-    """OpenCV c2w 회전 -> vln_pe camera_orientation (w, x, y, z). dataset_utils.vlnpe_orientation_to_c2w_rotation 의 역."""
-    from scipy.spatial.transform import Rotation
-    r = np.column_stack([R_cv[:, 2], -R_cv[:, 0], -R_cv[:, 1]])
-    x, y, z, w = Rotation.from_matrix(r).as_quat()
-    return [float(w), float(x), float(y), float(z)]
-
-
 def yaw_quat(yaw: float) -> list:
     return [float(np.cos(yaw / 2)), 0.0, 0.0, float(np.sin(yaw / 2))]
 
 
-def ce_to_pe_actions(a_ce: np.ndarray) -> np.ndarray:
-    """vln_ce action (a[0] = −1, a[t] = t 로 온 action) -> vln_pe (a[i] = i 에서 한 action, 마지막 0)."""
-    a = np.asarray(a_ce, dtype=np.int64)
-    return np.r_[a[1:], 0]
-
-
 def main() -> int:
     args = parse()
-    m06 = _load('m06', HERE / '06_render_noeun_vlnce.py')
     du = _load('du_06p', GS / 'dataset_utils.py')
     vw = _load('vw_06p', GS / 'vlnpe_writer.py')
     ex = _load('ex05p', GS / '05_export_vlnpe.py')
@@ -114,8 +100,8 @@ def main() -> int:
     placeholder = [{'text': 'placeholder instruction (to be labeled).', 'tokens': [0] * 200}] * 3
     for ei, ep in enumerate(eps):
         traj = np.asarray(ep['trajectory'], dtype=np.float64)
-        y0 = m06.start_yaw_for(ep, traj, args.start_heading, args.start_seed, args.r2r_raw)
-        disc, zb, P = m06.episode_poses(traj, prof, args.forward_m, args.waypoint_spacing_m, initial_yaw=y0)
+        y0 = start_yaw_for(ep, traj, args.start_heading, args.start_seed, args.r2r_raw)
+        disc, zb, P = episode_poses(traj, prof, args.forward_m, args.waypoint_spacing_m, initial_yaw=y0)
         rgb, depth_m = r4.render_along(cas, P)
         a_pe = ce_to_pe_actions(disc['action'])
         L = np.r_[0, np.cumsum(np.linalg.norm(np.diff(disc['xy'], axis=0), axis=1))]

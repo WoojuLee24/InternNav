@@ -16,7 +16,7 @@
 | 참고 | 라벨링 P1-A: habitat GreedyGeodesicFollower 완전 일치 0.3 %, 편집거리/길이 0.27 |
 
 사용 (habitat 컨테이너, 저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/06u_rule_replay_sweep.py
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/06u_rule_replay_sweep.py
 """
 
 import argparse
@@ -28,7 +28,7 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]   # nav3d/ (이 파일은 nav3d/checks/ 에 있다)
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / 'gs_vlnpe'))
 import nav3d_utils as nu  # noqa: E402

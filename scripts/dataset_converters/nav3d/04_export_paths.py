@@ -26,8 +26,6 @@
 """
 
 import argparse
-import csv
-import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -39,13 +37,8 @@ sys.path.insert(0, str(HERE))
 import nav3d_path as npth  # noqa: E402
 import nav3d_report as R  # noqa: E402
 import nav3d_utils as nu  # noqa: E402
-
-
-def _load(name, file):
-    sp = importlib.util.spec_from_file_location(name, HERE / file)
-    m = importlib.util.module_from_spec(sp)
-    sp.loader.exec_module(m)
-    return m
+import nav3d_scenes as scenes  # noqa: E402
+from path_quality import load_holes, near_hole, segments, judge, one  # noqa: E402,F401
 
 
 def parse():
@@ -61,56 +54,11 @@ def parse():
     return ap.parse_args()
 
 
-def load_holes(path):
-    out = []
-    for r in csv.DictReader(open(path)):
-        if r['flag'] == 'CRITICAL' and r['kind'].startswith('mesh'):
-            out.append((float(r['x']), float(r['y']), float(r['z']), float(r['inscribed_diam_m']) / 2))
-    return np.array(out) if out else np.zeros((0, 4))
-
-
-def near_hole(X, holes, r_b):
-    if len(holes) == 0:
-        return 0
-    d = np.linalg.norm(X[:, None, :2] - holes[None, :, :2], axis=2)
-    dz = np.abs(X[:, None, 2] - holes[None, :, 2])
-    hit = (d < r_b + holes[None, :, 3]) & (dz < 0.5)
-    return int(hit.any(1).sum())
-
-
-def segments(stairs_mask, floor_z):
-    """점별 계단 표시 -> [{kind, i0, i1, floor_z}] (gs_vlnpe 03mf 와 같은 키)."""
-    segs, i0 = [], 0
-    for i in range(1, len(stairs_mask) + 1):
-        if i == len(stairs_mask) or stairs_mask[i] != stairs_mask[i0]:
-            segs.append({'kind': 'stairs' if stairs_mask[i0] else 'floor', 'i0': int(i0), 'i1': int(i - 1),
-                         'floor_z': float(floor_z[i0])})
-            i0 = i
-    return segs
-
-
-def judge(row, X, kind, holes, r_b, args):
-    why = []
-    if not row.get('found', True):
-        return ['U1 경로 없음']
-    if row['ref_on_frac'] < 1.0:
-        why.append('U2 navmesh 밖')
-    if row['ref_mesh_clear_lt_rb_frac'] > 0 or row['ref_mesh_clear_min_m'] < 0.02:
-        why.append('U3 r_b 미달')
-    if near_hole(X, holes, r_b) > 0:
-        why.append('U4 큰 mesh 구멍 옆')
-    if kind == 'flat' and (np.ptp(X[:, 2]) >= 0.5 or row['ref_length_m'] < args.flat_min_m):
-        why.append('U5 평지 아님/짧음')
-    return why
-
-
 def main():
     args = parse()
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    m03 = _load('m03', '03_refine_paths.py')
-    b01 = _load('b01', '01_build_navmesh.py')
-    spec = b01.SCENES['noeun_station']
+    spec = scenes.SCENES['noeun_station']
     d01 = HERE / 'logs' / '01_build_navmesh' / 'noeun_station'
     pf = nu.load_pathfinder(str(d01 / 'noeun_station.navmesh'))
     sc = npth.NavScene(pf)
@@ -133,7 +81,7 @@ def main():
         cand.append(('multifloor', row['from_storey'], row['to_storey'], row, z03[f'{i}_ref'].astype(np.float64),
                      z03[f'{i}_ref_st'].astype(bool), '03'))
 
-    pts = b01.sample_storey_points(pf, sc.levels, sc.lv2st, per_bucket=400, seed=args.seed + 1)
+    pts = scenes.sample_storey_points(pf, sc.levels, sc.lv2st, per_bucket=400, seed=args.seed + 1)
 
     def gen(st_a, st_b, kind, tries=4000):
         keys = [k for k in pts if k[0] in (st_a, st_b)]
@@ -148,7 +96,7 @@ def main():
             P = sc.find_path(a, b)
             if P is None:
                 continue
-            row, r = m03.one(sc, P, md, r_b, cfg)
+            row, r = one(sc, P, md, r_b, cfg)
             return row, r['traj'].astype(np.float64), np.asarray(r['stairs'], bool)
         return None
 

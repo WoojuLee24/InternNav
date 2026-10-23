@@ -32,7 +32,6 @@
 """
 
 import argparse
-import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -48,6 +47,7 @@ for p in (str(HERE), str(GS), str(GS / 'apply_real'), str(HERE.parent / 'instruc
 import nav3d_report as R  # noqa: E402
 import nav3d_utils as nu  # noqa: E402
 from floor_mesh import mesh_floor_z  # noqa: E402
+from render_poses import episode_poses  # noqa: E402
 
 D = 'data/InternData-N1-v0.5-mini'
 
@@ -67,13 +67,6 @@ def parse():
     ap.add_argument('--pair_r', type=float, default=0.3, help='짝 프레임 찾는 반경')
     ap.add_argument('--out_dir', default='scripts/dataset_converters/nav3d/logs/06v_vlnpe')
     return ap.parse_args()
-
-
-def load06():
-    sp = importlib.util.spec_from_file_location('m06', HERE / '06_render_noeun_vlnce.py')
-    m = importlib.util.module_from_spec(sp)
-    sp.loader.exec_module(m)
-    return m
 
 
 def yaw_of(P):
@@ -114,7 +107,6 @@ def prepare(args):
     import trimesh
     import dataset_utils as du
     from release_io import load_cfg, match_raw, release_episodes
-    m06 = load06()
     rc = load_cfg(HERE.parent / 'instruction_labeling' / 'configs' / 'render.yaml')
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -193,7 +185,7 @@ def prepare(args):
             paths[base] = (traj0, 'navmesh')
             paths[f'{base}_mesh'] = (np.c_[traj0[:, :2], fm['z']], 'mesh')
         for mode, (traj, floor) in paths.items():
-            disc, zb, P = m06.episode_poses(traj, profs[floor], FW, args.waypoint_spacing_m)
+            disc, zb, P = episode_poses(traj, profs[floor], FW, args.waypoint_spacing_m)
             k = pairs(P, r['G'], args.pair_r)
             v = k >= 0
             Gm = r['G'][k[v]]

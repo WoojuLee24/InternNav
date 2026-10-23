@@ -17,7 +17,7 @@
 | A4 회전 중 이동 | 우리 회전 step p90 ≤ 릴리스 p90 + 0.05 m | 제자리 회전이어야 한다 (vln_ce 는 카메라가 몸 앞이라 0.095 m 가 정상) |
 
 사용 (habitat 컨테이너, 저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/06o_action_semantics_check.py
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/06o_action_semantics_check.py
 """
 
 import argparse

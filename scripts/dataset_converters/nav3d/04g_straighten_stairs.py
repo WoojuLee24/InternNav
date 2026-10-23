@@ -17,7 +17,6 @@
 """
 
 import argparse
-import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -26,6 +25,8 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+from mesh_probe import side_dists  # noqa: E402
+from walk_inputs import r2r_initial, resample, start_yaw  # noqa: E402
 D04 = 'scripts/dataset_converters/nav3d/logs/04_export_paths/noeun_station'
 D06K = 'scripts/dataset_converters/nav3d/logs/06k_rbq_walk'
 
@@ -47,13 +48,6 @@ def parse():
     return ap.parse_args()
 
 
-def _load(name, file):
-    sp = importlib.util.spec_from_file_location(name, HERE / file)
-    m = importlib.util.module_from_spec(sp)
-    sp.loader.exec_module(m)
-    return m
-
-
 def straight(T, ja, jb):
     m = max(2, int(np.ceil(np.linalg.norm(T[jb, :2] - T[ja, :2]) / 0.1)))
     xy = T[ja, :2] + (T[jb, :2] - T[ja, :2]) * (np.arange(m + 1)[:, None] / m)
@@ -61,16 +55,16 @@ def straight(T, ja, jb):
     return np.c_[xy, T[np.argmin(d, axis=1) + ja, 2]], float(d.min(1).max())
 
 
-def side_clear(mesh, seg, m4c):
+def side_clear(mesh, seg):
     """직선 조각의 좌우 여유 (다리 높이 0.15 / 0.4 m). 앞뒤 광선은 계단 디딤판에 닿으므로 쓰지 않는다."""
-    Lw, Rw, _ = m4c.side_dists(mesh, seg, seg[:, 2], [0.15, 0.4], 3.0)
+    Lw, Rw, _ = side_dists(mesh, seg, seg[:, 2], [0.15, 0.4], 3.0)
     return np.minimum(Lw, Rw)
 
 
-def fit_pieces(T, L, ja, jb, mesh, m4c, args):
+def fit_pieces(T, L, ja, jb, mesh, args):
     """ja~jb 를 직선 조각으로 (RDP 처럼 원래 경로에서 가장 먼 점에서 나눔). 조각마다 여유·벗어남 검사. 못 하면 None."""
     seg, off = straight(T, ja, jb)
-    if off <= args.max_offset_m and side_clear(mesh, seg, m4c).min() >= args.min_clear_m:
+    if off <= args.max_offset_m and side_clear(mesh, seg).min() >= args.min_clear_m:
         return [seg]
     if L[jb] - L[ja] < 2 * args.min_piece_m:
         return None
@@ -82,16 +76,14 @@ def fit_pieces(T, L, ja, jb, mesh, m4c, args):
     if hi <= lo:
         return None
     jm = lo + int(np.argmax(dist[lo - ja:hi - ja + 1]))
-    left = fit_pieces(T, L, ja, jm, mesh, m4c, args)
-    right = fit_pieces(T, L, jm, jb, mesh, m4c, args)
+    left = fit_pieces(T, L, ja, jm, mesh, args)
+    right = fit_pieces(T, L, jm, jb, mesh, args)
     return None if left is None or right is None else left + right
 
 
 def main():
     import trimesh
     args = parse()
-    m4c = _load('m04c', '04c_straighten_narrow.py')
-    m4d = _load('m04d', '04d_replace_episodes.py')
     mesh = trimesh.load(args.mesh, force='mesh')
     d = json.loads(Path(args.paths_json).read_text())
     ids = None if args.episode_ids == 'all' else {int(x) for x in args.episode_ids.split(',')}
@@ -109,12 +101,12 @@ def main():
             if ja < k:
                 rec.append({'i0': i0, 'i1': i1, 'applied': False, 'why': '앞 계단 구간과 겹침'})
                 continue
-            parts = fit_pieces(T, L, ja, jb, mesh, m4c, args)
+            parts = fit_pieces(T, L, ja, jb, mesh, args)
             if parts is None:
                 rec.append({'i0': i0, 'i1': i1, 'applied': False, 'why': f'{args.min_piece_m} m 보다 짧게 나눠도 여유 부족'})
                 continue
             seg = np.concatenate([q if n == 0 else q[1:] for n, q in enumerate(parts)])
-            c = side_clear(mesh, seg, m4c)
+            c = side_clear(mesh, seg)
             pieces.append((ja, jb, seg))
             k = jb + 1
             rec.append({'i0': i0, 'i1': i1, 'ja': ja, 'jb': jb, 'applied': True, 'pieces': len(parts), 'clear_min': float(c.min())})
@@ -155,14 +147,14 @@ def main():
     p_out = Path(args.paths_json).with_name(Path(args.paths_json).stem.rsplit('_v', 1)[0] + f'_{args.out_tag}.json')
     p_out.write_text(json.dumps(d))
     E = json.loads(Path(args.eps_json).read_text())
-    init = m4d.r2r_initial(args.r2r_raw)
+    init = r2r_initial(args.r2r_raw)
     by = {str(e['episode_id']): e for e in d['episodes']}
     sub = []
     for i, x in enumerate(E['episodes']):
         k = x['key'].split(':')[1]
         if int(k) in changed:
             T = np.asarray(by[k]['trajectory'], np.float64)
-            E['episodes'][i] = dict(x, waypoints=m4d.resample(T).tolist(), start_yaw=m4d.start_yaw(by[k], T, args.start_seed, init))
+            E['episodes'][i] = dict(x, waypoints=resample(T).tolist(), start_yaw=start_yaw(by[k], T, args.start_seed, init))
             sub.append(E['episodes'][i])
     e_out = Path(args.eps_json).with_name(f'eps_noeun_{args.out_tag}.json')
     e_out.write_text(json.dumps(E))

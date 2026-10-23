@@ -15,7 +15,7 @@
 | 대조군 | 릴리스 한 씬이 같은 검사를 통과 (검사 자체가 맞는지) |
 
 사용 (habitat 컨테이너, 저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/08_loader_check.py
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/08_loader_check.py
 """
 
 import argparse
@@ -27,7 +27,7 @@ from pathlib import Path
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(REPO))
 D = 'data/InternData-N1-v0.5-mini'
 

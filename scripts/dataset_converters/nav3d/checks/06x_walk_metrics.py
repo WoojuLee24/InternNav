@@ -10,7 +10,7 @@
 설정 고르기: ① 성공 수가 가장 많은 것 ② 같으면 계단 heading p90 이 가장 작은 것. 단 path_dev 최대 ≤ 0.5 m · start_dev 최대 ≤ 0.5 m 를 지켜야 한다.
 
 사용 (habitat 컨테이너, 저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/06x_walk_metrics.py --walk_json a.json b.json ...
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/06x_walk_metrics.py --walk_json a.json b.json ...
 """
 
 import argparse

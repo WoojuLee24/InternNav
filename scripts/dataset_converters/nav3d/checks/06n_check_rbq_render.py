@@ -23,7 +23,7 @@
 출력: summary json · 눈으로 보는 프레임 묶음 png (포맷마다).
 
 사용 (habitat 컨테이너, 저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/06n_check_rbq_render.py
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/06n_check_rbq_render.py
 """
 
 import argparse
@@ -35,7 +35,9 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]   # nav3d/ (이 파일은 nav3d/checks/ 에 있다)
+sys.path.insert(0, str(HERE))
+from render_poses import frames_to_poses, quat_wxyz_to_R, trunk_to_cam_cv  # noqa: E402
 D = 'data/InternData-N1-v0.5-mini'
 
 
@@ -136,7 +138,6 @@ def main():
     import pandas as pd
     from PIL import Image
     args = parse()
-    m6m = _load('m06m', HERE / '06m_render_rbq.py')
     W = [r for r in json.loads(Path(args.walk_json).read_text())['results'] if r['success']]
     if args.max_episodes:
         W = W[:args.max_episodes]
@@ -144,7 +145,7 @@ def main():
     mesh = trimesh.load(args.mesh, force='mesh')
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    M = m6m.trunk_to_cam_cv()
+    M = trunk_to_cam_cv()
     R = {}
 
     # M4 · M3 (포맷 무관 — walk 자세와 mesh 로)
@@ -156,7 +157,7 @@ def main():
         dev.append(float(path_dev(xy, T[:, :2]).max()))
         endd.append(float(np.linalg.norm(xy[-1] - T[-1, :2])))
         if e['kind'] == 'flat':
-            C = m6m.frames_to_poses(r['frames'])[:, :3, 3]
+            C = frames_to_poses(r['frames'])[:, :3, 3]
             loc, idx, _ = mesh.ray.intersects_location(C, np.tile([0, 0, -1.0], (len(C), 1)), multiple_hits=False)
             h = np.full(len(C), np.nan)
             h[idx] = C[idx, 2] - loc[:, 2]
@@ -177,7 +178,7 @@ def main():
             fr = r['frames']
             n = len(fr)
             df = pd.read_parquet(root / 'data' / 'chunk-000' / f'episode_{ei:06d}.parquet')
-            Cw = m6m.frames_to_poses(fr)
+            Cw = frames_to_poses(fr)
             a_ce = np.array([f['action'] for f in fr])
             if fmt == 'vlnce':
                 vd = root / 'videos' / 'chunk-000'
@@ -216,7 +217,7 @@ def main():
                 cq = np.stack(df['observation.camera_orientation'].to_numpy())
                 for i in range(n):
                     w, x, y, z = cq[i]
-                    Rq = m6m.quat_wxyz_to_R([w, x, y, z])
+                    Rq = quat_wxyz_to_R([w, x, y, z])
                     # 06p c2w_to_vlnpe_quat 규약이 OpenCV 와 다를 수 있다 → 광축(카메라 앞) 방향만 비교: OpenCV z 축 vs 저장 quat 의 x 축
                     rot_err = max(rot_err, axis_angle_deg(Rq[:, 0], Cw[i, :3, 2]))
                 a_pe = np.r_[a_ce[1:], 0]

@@ -10,7 +10,7 @@
 출력: ep 마다 {key, n_turn, n_bad, bad: [{p, floor_bad, clear}]} json · 실패 ep 그림.
 
 사용 (habitat 컨테이너, 저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/04e_turn_check.py --eps_json <06k 입력> --walk_json <06k 결과>
+    /usr/bin/python scripts/dataset_converters/nav3d/checks/04e_turn_check.py --eps_json <06k 입력> --walk_json <06k 결과>
 """
 
 import argparse
@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parents[1]   # nav3d/ (이 파일은 nav3d/checks/ 에 있다)
 sys.path.insert(0, str(HERE))
 from turn_space import turn_points, turn_space_ok  # noqa: E402
 
