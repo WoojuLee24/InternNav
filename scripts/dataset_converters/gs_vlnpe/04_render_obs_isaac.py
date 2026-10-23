@@ -435,6 +435,9 @@ def build_argparser() -> argparse.ArgumentParser:
                              'cma/rdp의 max_step=200 절단에 90%%가 걸려 뒷부분이 조용히 잘린다 '
                              '(실측 — 노은역 기존 20ep 중 15ep가 이미 200을 넘는다). '
                              'GT와 같은 밀도로 맞추려면 0.14를 준다.')
+    parser.add_argument('--multifloor_mode', default='off', choices=['off', 'stairs'],
+                        help="off(기본)=종전 동작(카메라 z = 에피소드 floor_z + h_b 고정). stairs=에피소드에 "
+                             "`trajectory_z`(03mf 층 이동)가 있으면 점마다 카메라 z = 바닥 z + h_b (multifloor_render.py)")
     parser.add_argument('--rtx_ambient', type=float, default=0.0,
                         help='RTX 전역 간접광 세기(/rtx/sceneDb/ambientLightIntensity). 0=기존 동작. '
                              '**vln_pe 톤 정합의 핵심 노브** — raw isaacsim.SimulationApp으로 부팅하면 '
@@ -587,8 +590,14 @@ def depth_m_to_raw16(depth_m: np.ndarray, valid_mask: np.ndarray) -> np.ndarray:
 
 
 def generate_episode(camera_and_sim, k: np.ndarray, ep_data: dict, ep_dir: Path,
-                     frame_step_m: float = FRAME_STEP_M) -> dict:
+                     frame_step_m: float = FRAME_STEP_M, multifloor_mode: str = 'off') -> dict:
     """(`04_render_obs.py`의 `generate_episode`와 완전히 같은 로직 — 렌더러 호출부만 다르다.)"""
+    # --multifloor_mode stairs: 점마다 바닥 z(`trajectory_z`, 03mf)가 있는 층 이동 에피소드만 위임한다.
+    # 기본 off 이거나 평지 에피소드면 아래 기존 코드 그대로.
+    if multifloor_mode == 'stairs' and 'trajectory_z' in ep_data:
+        import multifloor_render
+        return multifloor_render.generate_episode_mf(sys.modules[__name__], camera_and_sim, k, ep_data, ep_dir,
+                                                     frame_step_m)
     xy = resample_by_arclength(np.asarray(ep_data['trajectory'], dtype=np.float64), step_m=frame_step_m)
     action_poses = synthesize_action_poses(xy, ep_data['floor_z'], ep_data['h_b'], ep_data['pitch_deg'])
     poses_c2w = np.stack([action_to_c2w(a, 'cam2world_gl') for a in action_poses])
@@ -658,7 +667,8 @@ def run_generate(args) -> dict:
     results = []
     for i, ep_data in enumerate(episodes_data):
         ep_dir = obs_dir / f'episode_{i:06d}'
-        res = generate_episode(camera_and_sim, k, ep_data, ep_dir, frame_step_m=args.frame_step_m)
+        res = generate_episode(camera_and_sim, k, ep_data, ep_dir, frame_step_m=args.frame_step_m,
+                               multifloor_mode=args.multifloor_mode)
         anchor_dist = (compute_mesh_distance(res['anchor_points_world'], mesh)
                       if len(res['anchor_points_world']) else np.array([np.nan]))
         res['anchor_median_m'] = float(np.median(anchor_dist))

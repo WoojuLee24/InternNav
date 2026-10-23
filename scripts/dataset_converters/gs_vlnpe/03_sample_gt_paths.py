@@ -85,6 +85,7 @@ from esdf_utils import (
     ROBOT_RADIUS_M,
     WAYPOINT_SPACING_M,
     astar,
+    astar_edge_mask,
     cell_to_world,
     astar_cost_gap,
     chamfer_distance,
@@ -206,6 +207,9 @@ def build_argparser() -> argparse.ArgumentParser:
                         help='--post_refine 최대 반복')
     parser.add_argument('--post_refine_margin', type=float, default=0.0,
                         help='--post_refine 이 목표로 할 여유를 r_b 위에 더 준다')
+    parser.add_argument('--astar_edge_check', action='store_true',
+                        help='A* 이동 선분이 0.05 m 격자의 장애물(얇은 벽)을 가로지르면 막는다 '
+                             '(기본 off = 종전 동작). esdf_utils.astar_edge_mask 참고')
     parser.add_argument('--thin_safe', action='store_true',
                         help='솎기로 벽을 가로지르게 된 구간은 원본 waypoint를 되살린다 '
                              '(기본 off = 종전 동작). 임계값은 --plan_r_b')
@@ -269,7 +273,11 @@ def plan_episode(occupancy, origin, floor_z, h_b, start_xy, goal_xy, args) -> di
         result['status'] = 'start_or_goal_not_navigable'
         return result
 
-    path_ij = astar(nav_coarse, ij[0], ij[1])
+    # --astar_edge_check: 다운샘플이 지운 얇은 벽을 A* 가 한 칸 이동으로 건너뛰지 못하게 한다.
+    # 기본 off = 종전 동작(edge_ok=None 은 astar 에서 완전한 no-op).
+    edge_ok = (astar_edge_mask(esdf, args.downsample_factor, nav_coarse.shape)
+               if args.astar_edge_check else None)
+    path_ij = astar(nav_coarse, ij[0], ij[1], edge_ok=edge_ok)
     if path_ij is None:
         result['status'] = 'astar_failed'
         return result
@@ -784,11 +792,14 @@ def main_random(args) -> int:
                    'refine_mode': args.refine_mode, 'downsample_mode': args.downsample_mode,
                    'smooth_step': args.smooth_step, 'floor_z': floor_z,
                    'h_nav_ratio': args.h_nav_ratio,
-                   'waypoint_spacing_m': args.waypoint_spacing_m},
+                   'waypoint_spacing_m': args.waypoint_spacing_m,
+                   **({'astar_edge_check': True} if args.astar_edge_check else {})},
         'stats': stats, 'passed': stats['passed'],
         'episodes': [{
             'episode_id': e['episode'], 'mode': args.mode, 'smooth': args.smooth,
-            'h_b': e['planned']['h_b'], 'pitch_deg': e['pitch_deg'], 'floor_z': floor_z,
+            # 에피소드가 실제로 계획된 바닥(다른 층이면 자기 바닥) — 렌더러(04·05)가 카메라 z 를 여기서 만든다.
+            # 씬 대표 바닥은 params.floor_z 에 있다.
+            'h_b': e['planned']['h_b'], 'pitch_deg': e['pitch_deg'], 'floor_z': e['planned']['floor_z'],
             'start': e['planned']['start'], 'goal': e['planned']['goal'],
             'waypoints_astar': e['planned']['waypoints_astar'].tolist(),
             'waypoints_refined': e['planned']['waypoints_refined'].tolist(),
@@ -983,11 +994,14 @@ def main() -> int:
                    'refine_mode': args.refine_mode, 'downsample_mode': args.downsample_mode,
                    'smooth_step': args.smooth_step, 'floor_z': floor_z,
                    'h_nav_ratio': args.h_nav_ratio,
-                   'waypoint_spacing_m': args.waypoint_spacing_m},
+                   'waypoint_spacing_m': args.waypoint_spacing_m,
+                   **({'astar_edge_check': True} if args.astar_edge_check else {})},
         'stats': stats, 'passed': stats['passed'],
         'episodes': [{
             'episode_id': e['episode'], 'mode': args.mode, 'smooth': args.smooth,
-            'h_b': e['planned']['h_b'], 'pitch_deg': e['pitch_deg'], 'floor_z': floor_z,
+            # 에피소드가 실제로 계획된 바닥(다른 층이면 자기 바닥) — 렌더러(04·05)가 카메라 z 를 여기서 만든다.
+            # 씬 대표 바닥은 params.floor_z 에 있다.
+            'h_b': e['planned']['h_b'], 'pitch_deg': e['pitch_deg'], 'floor_z': e['planned']['floor_z'],
             'start': e['planned']['start'], 'goal': e['planned']['goal'],
             'waypoints_astar': e['planned']['waypoints_astar'].tolist(),
             'waypoints_refined': e['planned']['waypoints_refined'].tolist(),

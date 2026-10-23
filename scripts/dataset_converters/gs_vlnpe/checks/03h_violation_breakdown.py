@@ -39,6 +39,8 @@ def main():
     hard = rb_bad = 0
     wp_bad = wp_plan_bad = 0
     src_wp = src_spline = 0
+    src_wp_seg = 0     # 'spline 만 나쁨' 중 waypoint **선분**은 이미 r_b 미달인 것
+    hard_wp_seg = 0    # 관통 중 waypoint 선분이 이미 벽을 지난 것
     bite = []          # spline 이 깎아먹은 여유 (refine 후 - spline 후)
     traj_min, wp_min = [], []
     fired = reached = 0
@@ -57,6 +59,8 @@ def main():
             traj_min.append(tm)
             if tm <= 0:
                 hard += 1
+                if (cr.get('segments_min_m') or 0.0) <= 1e-9 and 'segments_min_m' in cr:
+                    hard_wp_seg += 1
             if tm < args.r_b - 1e-9:
                 rb_bad += 1
             if wm is not None:
@@ -71,6 +75,8 @@ def main():
                         src_wp += 1
                     else:
                         src_spline += 1
+                        if cr.get('segments_min_m', np.inf) < args.r_b - 1e-9:
+                            src_wp_seg += 1
             pr = e.get('post_refine') or {}
             if pr.get('n_bad_start'):
                 fired += 1
@@ -90,6 +96,10 @@ def main():
     print(f'\n  r_b 미달 {rb_bad}건의 출처:')
     print(f'    waypoint 부터 나쁨   : {src_wp:>4}   <- 계획 문제. 삽입으로 못 고침')
     print(f'    spline 만 나쁨       : {src_spline:>4}   <- post_refine 이 고칠 수 있는 것')
+    # 위 분류는 waypoint **점**만 본다. 점은 멀쩡해도 점 사이 선분이 벽을 지나면(A* 가 얇은 벽을
+    # 건너뜀) spline 탓이 아니다 — 그 몫을 따로 보인다(2026-10-13 추가).
+    print(f'      └ 그중 waypoint 선분부터 나쁨 : {src_wp_seg:>4}   <- 계획 문제 (--astar_edge_check)')
+    print(f'    관통 {hard}건 중 waypoint 선분이 이미 벽 관통 : {hard_wp_seg}')
     if len(bite):
         print(f'\n  spline 이 깎아먹은 양: 중앙 {np.median(bite):.3f} m'
               f' · p90 {np.percentile(bite, 90):.3f} · 최대 {bite.max():.3f}')
