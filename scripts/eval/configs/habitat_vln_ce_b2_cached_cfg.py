@@ -29,6 +29,7 @@ eval_cfg = EvalCfg(
         env_type='habitat',
         env_settings={
             'config_path': '/workspace/ChronoNav/scripts/vln_eval/vln_r2r_mini50.yaml',
+            'max_episodes': 50,
         },
     ),
     eval_type='habitat_vln',
