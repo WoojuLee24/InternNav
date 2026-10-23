@@ -195,7 +195,8 @@ def main():
                 print(f"  {scene} ep{ep} {mode}: {r_['frames']} f, end {r_['end_m']:.2f} off {r_['off_max_m']:.2f} miss {r_['miss_max_m']:.2f} "
                       f"col {r_['collisions']} dz {dz_st}", flush=True)
             if trajs:
-                idx = cfg['paths']['out_root'] / f'nav3d_{mode}' / '_index'
+                # 색인은 split 폴더 **밖**에 둔다 — 학습 로더(get_annotations_from_lerobot_data)는 split 폴더의 모든 하위 폴더를 씬으로 읽어 _index 에서 죽는다 (08 실측)
+                idx = cfg['paths']['out_root'].parent / '_index' / f'nav3d_{mode}'
                 idx.mkdir(parents=True, exist_ok=True)
                 with open(idx / f'{scene}.jsonl', 'w') as f:
                     RS.export_scene(cfg, f'nav3d_{mode}', scene, trajs, cache, schema, f)

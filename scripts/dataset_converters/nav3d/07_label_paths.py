@@ -65,11 +65,24 @@ def parse():
     ap.add_argument('--noeun_log', default='scripts/dataset_converters/nav3d/logs/06_render_noeun', help='06 frames_meta.json')
     ap.add_argument('--noeun_paths', default='scripts/dataset_converters/nav3d/logs/04_export_paths/noeun_station/noeun_station_paths.json')
     ap.add_argument('--simplify_m', type=float, default=0.3, help='RDP 허용 오차 (생성 경로 -> waypoint)')
+    ap.add_argument('--vertices', default='rdp', choices=['rdp', 'rdp_merge'],
+                    help='rdp = 꺾인 점 그대로 (기본, 이전 동작) / rdp_merge = merge_m 안의 같은 방향 회전을 하나로 (모퉁이 하나 = "turn left" 한 번; route_vertices.py)')
+    ap.add_argument('--merge_m', type=float, default=1.5, help='rdp_merge 거리 (07r: 1.5 m 가 sg 큰 회전 일치 57 %, wp 43 %)')
     ap.add_argument('--limit', type=int, default=0, help='source 당 앞에서 N 개 (0 = 전부)')
     ap.add_argument('--pick', default='spread', help="noeun 에서 --limit 일 때: 'spread' (층 이동·평지 고르게) | 'head'")
     ap.add_argument('--workers', type=int, default=2, help='서버가 요청을 하나씩 처리하므로 2 면 충분 (이미지 인코딩만 겹침)')
     ap.add_argument('--out_root', default=f'{D}/instruction_labels_nav3d')
     return ap.parse_args()
+
+
+def make_vertices(P: np.ndarray, args) -> np.ndarray:
+    if args.vertices == 'rdp':
+        return rdp(P, args.simplify_m)
+    elif args.vertices == 'rdp_merge':
+        from route_vertices import merge_turns
+        return merge_turns(rdp(P, args.simplify_m), args.merge_m)
+    else:
+        assert False, f'unreachable vertices={args.vertices!r}'
 
 
 def rdp(P: np.ndarray, eps: float) -> np.ndarray:
@@ -110,7 +123,7 @@ def items_gt_nav3d(args, source: str) -> list:
             root, idx = rc['paths']['release_root'], {ep: ep for ep in eps}
         elif source in ('nav3d_wp', 'nav3d_sg'):
             root = REPO / args.nav3d_root / source
-            idx = {r['episode_id']: r['episode_index'] for r in map(json.loads, open(root / '_index' / f'{scene}.jsonl'))}
+            idx = {r['episode_id']: r['episode_index'] for r in map(json.loads, open(root.parent.parent / '_index' / source / f'{scene}.jsonl'))}
             Z = np.load(Path(args.nav03_dir) / f'{scene}_traj.npz')
         else:
             assert False, f'unreachable source={source!r}'
@@ -121,7 +134,7 @@ def items_gt_nav3d(args, source: str) -> list:
                 key = f'{ep}_{source.split("_")[1]}_ref'
                 if key not in Z or ep not in idx:
                     continue
-                Wh = nu.ours_to_hab(rdp(Z[key].astype(np.float64), args.simplify_m))
+                Wh = nu.ours_to_hab(make_vertices(Z[key].astype(np.float64), args))
                 e = dict(e, reference_path=Wh.tolist(), start_position=Wh[0].tolist(), goals=[{'position': Wh[-1].tolist(), 'radius': 3.0}])
             out.append({'ep': e, 'scene': scene, 'root': root, 'episode_index': idx[ep], 'split': 'train', 'sib_idx': 0,
                         'src': {'source': source, 'release_episode_index': ep}})
@@ -135,7 +148,7 @@ def items_noeun(args) -> list:
     for m in meta['episodes']:
         p = paths[m['src_episode_id']]
         traj = np.asarray(p['trajectory'], dtype=np.float64)
-        Wh = nu.ours_to_hab(rdp(traj, args.simplify_m))
+        Wh = nu.ours_to_hab(make_vertices(traj, args))
         cam0 = np.asarray(m['cam_c2w_cv'][0])[:3, 3]                       # pose.<rig> 의 원점 = 시작 프레임 카메라 xy
         start = nu.ours_to_hab(np.array([cam0[0], cam0[1], m['body_z'][0]]))
         e = {'episode_id': int(m['episode']), 'trajectory_id': int(m['episode']), 'scene_id': 'noeun_station/noeun_station_collision.usdz',
@@ -165,7 +178,7 @@ def run_source(args, source: str):
         sets.append(f'frames.rig={args.noeun_rig}')
     cfg = LC.load(args.method, sets)
     cfg['seed'] = args.seed
-    name = cfg['name'] + (f'_seed{args.seed}' if args.seed else '')
+    name = cfg['name'] + (f'_seed{args.seed}' if args.seed else '') + (f'_merge{args.merge_m:g}' if args.vertices == 'rdp_merge' else '')
     ghash = LC.gen_hash(cfg, CODE_VERSION)
     its = items_noeun(args) if source == 'noeun' else items_gt_nav3d(args, source)
     if args.limit and not (source == 'noeun' and args.pick == 'spread'):
@@ -209,7 +222,8 @@ def run_source(args, source: str):
     dst = out_dir / f'{source}_{name}.json.gz'
     with gzip.open(dst, 'wt') as f:
         json.dump({'episodes': eps, '_generation_meta': {'name': name, 'gen_hash': ghash, 'source': source, 'sets': sets,
-                                                         'seed': args.seed, 'simplify_m': args.simplify_m, 'n': len(eps)}}, f)
+                                                         'seed': args.seed, 'simplify_m': args.simplify_m, 'vertices': args.vertices,
+                                                         'merge_m': args.merge_m if args.vertices == 'rdp_merge' else None, 'n': len(eps)}}, f)
     print(f'[07 {source}] -> {dst} ({time.time() - t0:.0f}s, 오류 {n_err})', flush=True)
 
 

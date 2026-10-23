@@ -54,6 +54,12 @@ def parse():
     ap.add_argument('--rtx_ambient', type=float, default=10.0)
     ap.add_argument('--film_iso', type=float, default=70.0)
     ap.add_argument('--log_dir', default='scripts/dataset_converters/nav3d/logs/06p_render_noeun_vlnpe')
+    ap.add_argument('--mesh_root', default=None, help='MP3D 씬일 때: data/scene_data/mp3d_pe (텍스처 심링크까지 준비하는 load_scene_model 로 연다; --usd_path 무시)')
+    ap.add_argument('--scene', default=None, help='--mesh_root 와 함께: MP3D 씬 이름')
+    ap.add_argument('--start_heading', default='path', choices=['path', 'r2r_train'], help='06 과 같음')
+    ap.add_argument('--start_seed', type=int, default=0)
+    ap.add_argument('--r2r_raw', default='data/InternData-N1-v0.5-mini/vln_ce/raw_data/r2r/train/train.json.gz')
+    ap.add_argument('--render_far_m', type=float, default=None, help='None = 렌더러 기본 10 m. MP3D mesh 는 그 너머가 검게 나온다 (GS 는 영향 없음)')
     return ap.parse_args()
 
 
@@ -98,7 +104,9 @@ def main() -> int:
     out_scene_dir = Path(args.out_root) / args.out_scene
     assert not (out_scene_dir / 'meta' / 'episodes.jsonl').exists(), f'{out_scene_dir} 에 이미 meta 가 있다 (append 라 섞인다) — 지우고 다시'
     r4 = _load('r4_06p', GS / 'apply_real' / '04_render_obs_isaac.py')
-    cas = r4.build_renderer(W, H, du.VLNPE_K, Path(args.usd_path), args.light, None, args.rtx_ambient, args.film_iso)
+    usd = r4.load_scene_model(args.mesh_root, args.scene) if args.mesh_root else Path(args.usd_path)
+    far = {} if args.render_far_m is None else {'render_far_m': args.render_far_m}
+    cas = r4.build_renderer(W, H, du.VLNPE_K, usd, args.light, None, args.rtx_ambient, args.film_iso, **far)
     log = Path(args.log_dir)
     log.mkdir(parents=True, exist_ok=True)
     print(f'[06p] {len(eps)} ep · {W}x{H} fx {du.VLNPE_K[0, 0]} · 높이 {prof.mount_height_m} · pitch {prof.pitch_down_deg} · 전방 {args.forward_m} · {args.paths_json}', flush=True)
@@ -106,7 +114,8 @@ def main() -> int:
     placeholder = [{'text': 'placeholder instruction (to be labeled).', 'tokens': [0] * 200}] * 3
     for ei, ep in enumerate(eps):
         traj = np.asarray(ep['trajectory'], dtype=np.float64)
-        disc, zb, P = m06.episode_poses(traj, prof, args.forward_m, args.waypoint_spacing_m)
+        y0 = m06.start_yaw_for(ep, traj, args.start_heading, args.start_seed, args.r2r_raw)
+        disc, zb, P = m06.episode_poses(traj, prof, args.forward_m, args.waypoint_spacing_m, initial_yaw=y0)
         rgb, depth_m = r4.render_along(cas, P)
         a_pe = ce_to_pe_actions(disc['action'])
         L = np.r_[0, np.cumsum(np.linalg.norm(np.diff(disc['xy'], axis=0), axis=1))]
@@ -121,7 +130,7 @@ def main() -> int:
                         'rgb': np.asarray(rgb[i], np.uint8), 'depth': ex.depth_m_to_vlnpe(depth_m[i])})
         T = vw.save_episode_vlnpe(args.out_root, args.out_scene, ei, buf, placeholder, schema=schema, stats_fn=stats_fn)
         total += T
-        meta.append({'episode': ei, 'src_episode_id': ep['episode_id'], 'kind': ep['kind'], 'frames': T})
+        meta.append({'episode': ei, 'src_episode_id': ep['episode_id'], 'kind': ep['kind'], 'frames': T, 'start_yaw': y0})
         print(f'[06p] ep {ei:>3} {ep["kind"]:10s} {T:>4} f ({total} f, {time.time() - t0:.0f}s)', flush=True)
     vw.finalize_info_json_vlnpe(args.out_root, {args.out_scene: {'episode_count': len(eps), 'frame_count': total}}, robot_type='rbq10_d455')
     (out_scene_dir / 'meta' / 'render_provenance.json').write_text(json.dumps({

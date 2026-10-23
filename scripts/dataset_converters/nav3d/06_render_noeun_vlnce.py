@@ -53,6 +53,10 @@ def parse():
     ap.add_argument('--rtx_ambient', type=float, default=10.0)
     ap.add_argument('--film_iso', type=float, default=70.0)
     ap.add_argument('--log_dir', default='scripts/dataset_converters/nav3d/logs/06_render_noeun')
+    ap.add_argument('--start_heading', default='path', choices=['path', 'r2r_train'],
+                    help='path = 첫 구간 방향으로 출발 (이전 동작) / r2r_train = R2R train 시작 각 분포에서 뽑아 제자리 회전부터 (episode 의 start_yaw 가 있으면 그것)')
+    ap.add_argument('--start_seed', type=int, default=0)
+    ap.add_argument('--r2r_raw', default='data/InternData-N1-v0.5-mini/vln_ce/raw_data/r2r/train/train.json.gz')
     return ap.parse_args()
 
 
@@ -80,17 +84,51 @@ def body_floor_z(xy: np.ndarray, traj: np.ndarray) -> np.ndarray:
     return out
 
 
-def episode_poses(traj: np.ndarray, prof, forward_m: float, waypoint_spacing_m: float) -> tuple:
-    """04 경로(점마다 바닥 z) -> (이산화 결과, 몸 바닥 z, 카메라 c2w OpenCV (N,4,4)). 06 렌더와 06v 검증이 같이 쓴다."""
+def episode_poses(traj: np.ndarray, prof, forward_m: float, waypoint_spacing_m: float, initial_yaw: float = None) -> tuple:
+    """04 경로(점마다 바닥 z) -> (이산화 결과, 몸 바닥 z, 카메라 c2w OpenCV (N,4,4)). 06 렌더와 06v 검증이 같이 쓴다.
+    initial_yaw = 시작 heading (nav3d yaw, rad). None 이면 첫 구간 방향 (제자리 회전 없이 출발 — 이전 동작)."""
     import vlnce_discretize as vd
     from geometry_utils import action_to_c2w
-    disc = vd.discretize(traj[:, :2], waypoint_spacing_m=waypoint_spacing_m)
+    disc = vd.discretize(traj[:, :2], initial_yaw=initial_yaw, waypoint_spacing_m=waypoint_spacing_m)
     zb = body_floor_z(disc['xy'], traj)
     cam_xy = disc['xy'] + forward_m * np.c_[np.cos(disc['yaw']), np.sin(disc['yaw'])]
     c2w = vd.poses_from_yaw(cam_xy, disc['yaw'], 0.0, prof.mount_height_m, prof.pitch_down_deg)
     c2w[:, 2, 3] += zb                                    # 몸 바닥 z 를 프레임마다
     poses_cv = np.stack([action_to_c2w(a, 'cam2world_gl') for a in c2w])
     return disc, zb, poses_cv
+
+
+_R2R_INIT = None
+
+
+def start_yaw_for(ep: dict, traj: np.ndarray, mode: str, seed: int, raw_json: str):
+    """에피소드 시작 heading. ep['start_yaw'] (GT, 예: MP3D) 가 있으면 그것.
+    mode=path -> None (첫 구간 방향, 이전 동작) / r2r_train -> R2R train 의 (시작 방향 − 첫 구간) 각 분포에서 뽑는다
+    (실측 2026-10-18: 거의 균등, 중앙 80°; vln_pe 84 % 가 제자리 회전으로 시작)."""
+    global _R2R_INIT
+    if ep.get('start_yaw') is not None:
+        return float(ep['start_yaw'])
+    if mode == 'path':
+        return None
+    elif mode == 'r2r_train':
+        if _R2R_INIT is None:
+            import gzip
+            import math
+            E = json.load(gzip.open(raw_json))['episodes']
+            out = []
+            for e in E:   # route_words.route_geometry 의 initial 과 같은 정의 (나침반, + = 첫 구간이 시작 방향의 오른쪽)
+                p, q = e['reference_path'][0], e['reference_path'][1]
+                seg = math.degrees(math.atan2(q[0] - p[0], -(q[2] - p[2])))
+                st = -math.degrees(2 * math.atan2(e['start_rotation'][1], e['start_rotation'][3]))
+                out.append((seg - st + 180) % 360 - 180)
+            _R2R_INIT = np.asarray(out)
+        d = traj[min(len(traj) - 1, 5), :2] - traj[0, :2]
+        import hashlib
+        rng = np.random.default_rng(int(hashlib.sha1(f"{seed}:{ep['episode_id']}".encode()).hexdigest()[:8], 16))
+        init = float(rng.choice(_R2R_INIT))
+        return float(np.arctan2(d[1], d[0]) + np.radians(init))   # nav3d yaw(반시계 +) = 첫 구간 + initial
+    else:
+        assert False, f'unreachable start_heading={mode!r}'
 
 
 def main() -> int:
@@ -123,7 +161,8 @@ def main() -> int:
     t0, total, store, meta = time.time(), 0, {}, []
     for ei, ep in enumerate(eps):
         traj = np.asarray(ep['trajectory'], dtype=np.float64)
-        disc, zb, poses_cv = episode_poses(traj, prof, args.forward_m, args.waypoint_spacing_m)
+        y0 = start_yaw_for(ep, traj, args.start_heading, args.start_seed, args.r2r_raw)
+        disc, zb, poses_cv = episode_poses(traj, prof, args.forward_m, args.waypoint_spacing_m, initial_yaw=y0)
         n = len(disc['action'])
         rgb, depth_m = r4.render_along(cas, poses_cv)
         for i in range(n):
@@ -133,7 +172,7 @@ def main() -> int:
         store[f'pose_{ei}'] = vd.to_start_relative(poses_cv, floor_z=float(zb[0])).astype(np.float32)
         store[f'action_{ei}'] = disc['action'].astype(np.int32)
         total += n
-        meta.append({'episode': ei, 'src_episode_id': ep['episode_id'], 'kind': ep['kind'], 'frames': n,
+        meta.append({'episode': ei, 'src_episode_id': ep['episode_id'], 'kind': ep['kind'], 'frames': n, 'start_yaw': y0,
                      'n_forward': int(disc['n_forward']), 'n_turn': int(disc['n_turn']), 'end_gap_m': float(disc['end_gap_m']),
                      'body_xy': disc['xy'].round(4).tolist(), 'body_z': zb.round(4).tolist(), 'yaw': disc['yaw'].round(5).tolist(),
                      'cam_c2w_cv': poses_cv.round(5).tolist()})
