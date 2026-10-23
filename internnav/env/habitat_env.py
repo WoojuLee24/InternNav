@@ -39,6 +39,7 @@ class HabitatEnv(base.Env):
 
         self.is_running = True
         self.output_path = env_config.env_settings.get('output_path', './output')
+        self.max_episodes = env_config.env_settings.get('max_episodes', None)
 
         # generate episodes
         self.episodes = self.generate_episodes()
@@ -79,6 +80,8 @@ class HabitatEnv(base.Env):
                 if (scene_id, episode_id) in done_res:
                     continue
                 all_episodes.append(episode)
+                if self.max_episodes is not None and len(all_episodes) >= self.max_episodes:
+                    return all_episodes
 
         return all_episodes
 
