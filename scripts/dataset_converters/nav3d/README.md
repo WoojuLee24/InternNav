@@ -5,8 +5,9 @@ nav3d 는 씬 mesh 에서 **navmesh**(로봇이 걸을 수 있는 면을 3D 다�
 층과 계단을 한 지도에 담고, 그 위에서 경로를 계획한다. 노은역(B2·B1·지상)이 1차 목표다.
 
 - **2D occupancy + 계단 연결 방식과는 분리해서 진행한다**(다른 세션). gs_vlnpe 파일은 고치지 않는다.
-- 최종 산출은 gs_vlnpe 와 같은 paths json 형식으로 내서 렌더(04)·내보내기(05)를 같이 쓴다(예정).
-- 실행: `internnav-habitat-navmesh` 컨테이너(habitat-sim 0.3.3), 저장소 루트, `/usr/bin/python`.
+- 컨테이너 (모두 저장소 루트에서): habitat 단계 = `dnwn24/internnav:torch2.9.0-cuda13.0-habitat-jazzy-5090` 의 `/usr/bin/python`
+  (habitat-sim 0.3.3 — torch2.9.1 이미지에는 없다), isaac 단계 = `dnwn24/internnav:torch2.9.0-cuda13.0-issacsim5.1.0-ros2-jazzy-5090` 의
+  `/workspace/isaaclab/_isaac_sim/python.sh`.
 - **2D 방식과 비교** (같은 에피소드 · 같은 자, vln_ce): 둘 다 통과 평지 nav3d 99.3 % vs 2D 82.9 %, 층 이동 99.8 % vs 54.2 %(2D plan) — 맨 아래 절.
 
 ## 용어
@@ -26,27 +27,106 @@ nav3d 는 씬 mesh 에서 **navmesh**(로봇이 걸을 수 있는 면을 3D 다�
 우리 = Z-up. trimesh 로 Z-up mesh 를 glb 로 내보내 habitat 에 올리면 **habitat (x, y, z) = 우리 (x, z, −y)**.
 미리 Y-up 으로 돌려 넣으면 오히려 틀린다. `01` 의 V1 이 매번 검증한다(틀린 규약이면 6 m 어긋남).
 
-## 단계
+## 실행 — `run_pipeline.py`
 
-| 단계 | 스크립트 | 무엇 | 상태 |
+대상(vlnce · vlnpe · noeun)마다 단계를 순서대로 돌린다. 단계는 아래 번호 스크립트를 **입력·출력 경로를 다 적어서** 부를 뿐이라,
+스크립트를 따로 돌려도 똑같다 (`--dry_run` 이 그 명령을 그대로 보여 준다).
+
+```
+python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --list
+python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --dry_run
+python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --from floor_to_mesh --to straighten_stairs --overwrite
+```
+
+| 인자 | 뜻 | 왜 이렇게 |
+|---|---|---|
+| `vlnce` · `vlnpe` · `noeun` | 대상 | 아래 세 표 |
+| `--list` · `--dry_run` | 단계 목록 / 명령만 출력 | 돌리기 전에 확인 |
+| `--only a,b` · `--from a` · `--to b` | 돌릴 단계 고르기 | 한 단계만, 또는 구간만 |
+| `--overwrite` | 출력이 이미 있어도 돌린다 | 기본은 멈춤 — 지금 logs/·data/ 결과를 실수로 덮지 않게 |
+| `--scenes` · `--jobs` | 씬마다 도는 단계(02 · 03)의 씬 · 동시 수 | 기본 = vln_ce 릴리스 61 씬 전부 · 4 (이전 기록과 같음) |
+| `--label_method` · `--label_model` | 07 라벨 방법 · VLM | 기본 `b1` · `qwen3vl8b-local` (이 PC 의 로컬 서버, `07_vlm_server.py`) |
+
+컨테이너가 다른 단계(habitat ↔ isaac)에 닿으면 멈추고, 다른 컨테이너에서 이어 돌릴 `--from <단계>` 명령을 출력한다.
+
+## 폴더
+
+| 위치 | 무엇 |
+|---|---|
+| `NN_*.py` (최상위 번호) | 데이터를 만드는 단계. 출력이 다음 단계 입력인 검사(00 · 02 · 06h · 06v)도 여기 |
+| `checks/` | 검증·실험 스크립트 (출력을 다른 단계가 읽지 않는다). 06n · 08 은 파이프라인 마지막 검사로 부른다 |
+| 번호 없는 `.py` | 공용 모듈. `nav3d_utils` (좌표·navmesh·층·`NavSurface`·`MeshDistance`) · `nav3d_path` (다듬기) · `nav3d_render` · `nav3d_report` · `floor_mesh` · `depth_fill` · `route_vertices` · `turn_space` · `h1_tunable_controller` |
+| ″ (2026-10-23 옮김) | 번호 스크립트끼리 importlib 로 꺼내 쓰던 함수 — `nav3d_scenes` (01) · `path_quality` (03 · 04) · `mesh_probe` (04c · 04d) · `walk_inputs` (04d) · `render_poses` (06 · 06p · 06m). 원래 파일도 같은 이름을 그대로 노출한다 |
+
+## 단계 (대상별)
+
+용어: **wp** = R2R 경유점을 따라 계획한 경로 · **sg** = 시작·끝만 주고 계획한 경로 (노은역 방식) ·
+**U1~U5** = 04 사용 가능 판정 (경로 있음 · navmesh 위 · 벽 여유 · 큰 구멍 옆 아님 · 평지는 한 층) · **U6** = 출발점 둘레 바닥 평평 (04d) ·
+**걷기** = 06k RBQ 사족보행 물리 시뮬레이션 (전진 중 방향 보정 1.5 · 회전 문턱 30° · 높이 스캔 필터 −0.2).
+
+### vlnce — MP3D 61 씬 → vln_ce (habitat)
+| # | 단계 | 스크립트 | 출력 |
 |---|---|---|---|
-| **00** | `00_mesh_gs_check.py` | 씬 자산 검사: 충돌 mesh ↔ 3DGS 정합, 바닥 구멍(mesh · GS) | ✅ 노은역 (2026-10-14) |
-| **01** | `01_build_navmesh.py` (+ 키 비교 `01h`) | mesh → navmesh, 층·계단 찾기, 층간 경로 검증 (GT 없는 씬도) | ✅ 노은역 (2026-10-13) |
-| **02** | `02_vlnce_gt_compare.py` | vln_ce GT 와 직접 비교: 좌표·지도·계획 (계단 에피소드 포함) | ✅ 61씬 10,684 ep (2026-10-13) |
-| **03** | `03_refine_paths.py` (+ `nav3d_path.py`, 검증 `03s` · `03c` · `03r` · `03ab`) | `find_path` 경로 다듬기: 바닥은 벽에서 밀어내고 곡선으로, 계단은 폭 가운데로 곧게, z 는 navmesh 표면 | ✅ 노은역 100 + vln_ce 2,206 경로 (2026-10-14) |
-| 비교 | `03c_compare_2d.py` | 2D occupancy(gs_vlnpe) 와 같은 에피소드 · 같은 자로 비교 (아래 절) | ✅ 2026-10-14 |
-| **04** | `04_export_paths.py` | 노은역 경로 고르기(층 이동 + 평지) · 사용 가능 판정 U1~U5 · paths json (점마다 바닥 z) | ✅ 노은역 200 (2026-10-16) |
-| **05a** | `05a_vlnce_gt_render_check.py` | vln_ce GT 를 habitat 으로 다시 렌더해 릴리스와 대조 (렌더러 검증) | ✅ 4 씬 685 ep (2026-10-15) |
-| **05b** | `05b_vlnce_render_paths.py` | nav3d wp·sg 경로 → habitat follower → 릴리스 포맷 (`vln_ce_nav3d`) | ✅ 56 경로 (2026-10-15) |
-| 05c | `05c_vlnce_compare_viewer.py` | GT / 생성 이미지 비교 뷰어 (RGB·depth) | ✅ |
-| **06** | `06_render_noeun_vlnce.py` (+ 검사 `06b_check_noeun_render.py`) | 노은역 04 경로 → Isaac (GS RGB + mesh depth) → vln_ce 포맷 (`vln_ce_noeun_nav3d`) | ✅ 200 ep (R4 FAIL → 04b 로 다시 렌더 예정) |
-| 04b | `04b_paths_mesh_floor.py` (+ `floor_mesh.py`) | paths json 바닥 z 를 navmesh → 장면 mesh 바닥으로 | ✅ |
-| **06v** | `06v_vlnpe_check.py` · `06v_render_isaac.py` | 06 방식을 vln_pe GT(Isaac, H1)로 검증 | ✅ 7 씬 46 ep |
-| 06p | `06p_render_noeun_vlnpe.py` | 노은역 vln_pe 포맷 (256², hfov 90, vlnpe_writer) | 준비됨 |
-| **07** | `07_vlm_server.py` · `07_label_paths.py` · `07b_compare_labels.py` | instruction_labeling(b0) 연결: GT → 생성 → 비교 → 노은역 | 🔄 smoke |
+| 1 | `gt_compare` | `02_vlnce_gt_compare.py` (씬마다 + `--aggregate`) | `logs/02_vlnce_gt_compare/scenes/` (05b · 06q 가 층 이동 표시를 읽는다) |
+| 2 | `refine_paths` | `03_refine_paths.py --dataset vln_ce` (씬마다 + `--aggregate`) | `logs/03_refine_paths/scenes/<씬>_traj.npz` (wp · sg) |
+| 3 | `render_habitat` | `05b_vlnce_render_paths.py` | `data/.../vln_ce_nav3d/traj_data/r2r/nav3d_{wp,sg}` |
+| 4 | `label` | `07_label_paths.py --method b1` (VLM 서버 필요) | `data/.../instruction_labels_nav3d/` |
+| 5 | `loader_check` | `checks/08_loader_check.py` | `logs/08_loader_check/summary_vlnce_nav3d.json` |
 
-공용: `nav3d_utils.py` — 좌표 변환, navmesh 빌드·로드, 섬별 삼각형, 층·연결부, `NavSurface`(경로를 navmesh 표면에
-수직 투영 — 연속성 추적), `MeshDistance`(mesh 3D 거리). self-check: `/usr/bin/python scripts/dataset_converters/nav3d/nav3d_utils.py`
+### vlnpe — MP3D → vln_pe, 두 방식 (habitat + isaac)
+1 `gt_compare` · 2 `refine_paths` 는 vlnce 와 같다.
+
+| # | 단계 | 스크립트 | 출력 |
+|---|---|---|---|
+| | **(a) 경로 위에 카메라를 바로 놓기** | | |
+| 3 | `h1_pairs` | `06h_vlnpe_h1_paths.py` | `logs/06h_vlnpe_h1/summary.json` (06q 입력) |
+| 4 | `camera_values` | `06v_vlnpe_check.py --stage prepare` | `logs/06v_vlnpe/prepare.json` (카메라 높이·pitch, 06q 입력) |
+| 5 | `camera_prepare` | `06q_vlnpe_mp3d_check.py --stage prepare` | `logs/06q_vlnpe_mp3d/render_cmds.sh` |
+| 6 | `camera_render` (isaac) | `render_cmds.sh` (씬마다 `06p_render_noeun_vlnpe.py`) | `data/.../vln_pe_nav3d_sg` |
+| 7 | `camera_loader_check` | `checks/08_loader_check.py` | `logs/08_loader_check/summary_06q.json` |
+| 8 | `camera_check` | `06q_vlnpe_mp3d_check.py --stage check` | `logs/06q_vlnpe_mp3d/summary.json` |
+| | **(b) H1 이 물리로 걷기** | | |
+| 9 | `walk_prepare` | `06r_h1_walk_vlnpe.py --stage prepare` | `data/.../vln_pe_nav3d_raw` |
+| 10 | `walk_h1` (isaac) | `06r ... --stage walk --split nav3d_gt` · `nav3d_sg` | `data/.../vln_pe_nav3d_h1` |
+| 11 | `walk_compare` | `06r ... --stage compare` | `logs/06r_h1_walk/summary.json` |
+
+H1 몸 크기 navmesh (`03h1_build_navmesh.py` → `03 --navmesh_dir`) 는 아직 반지름을 정하지 않은 실험이라 파이프라인 밖이다 (기본 = 공식 navmesh, 이전과 같음).
+
+### noeun — 노은역 → vln_ce · vln_pe (v6)
+경로 파일은 `logs/04_export_paths/noeun_station/noeun_station_paths*.json`, 걷기 입력·결과는 `logs/06k_rbq_walk/{eps,walk}_noeun_*.json`.
+
+| # | 단계 | 스크립트 | 출력 |
+|---|---|---|---|
+| 1 | `mesh_gs_check` | `00_mesh_gs_check.py` | `logs/00_mesh_gs/noeun_station/holes.csv` (U4 입력) |
+| 2 | `build_navmesh` | `01_build_navmesh.py` | `logs/01_build_navmesh/noeun_station/noeun_station.navmesh` |
+| 3 | `refine_paths` | `03_refine_paths.py --scene noeun_station` | 층 사이 경로 100 |
+| 4 | `export_paths` | `04_export_paths.py` | `paths.json` (층 이동 100 + 평지 100, U1~U5) |
+| 5 | `floor_to_mesh` | `04b_paths_mesh_floor.py` | `paths_meshfloor.json` (바닥 z = 장면 mesh) |
+| 6 | `straighten_narrow` | `04c_straighten_narrow.py` | `paths_meshfloor_straight.json` (개찰구 안 곧게) |
+| 7 | `make_walk_inputs` | `06k_make_walk_inputs.py` | `eps_noeun_all_v2.json` (0.5 m 경유점 + 출발 yaw) |
+| 8 | `walk_first` (isaac) | `06k_parallel.py` | `walk_noeun_v3.json` → 넘어진 ep 고르기 |
+| 9 | `replace_candidates` | `04d_replace_episodes.py gen` | `paths_cand.json` (넘어진 ep 마다 후보 3, U1~U6) |
+| 10 | `candidates_fix_paths` | `04b` → `04c` | `paths_cand_meshfloor_straight.json` |
+| 11 | `candidates_walk_inputs` | `04d_replace_episodes.py eps` | `eps_noeun_cand.json` |
+| 12 | `walk_candidates` (isaac) | `06k_parallel.py` | `walk_noeun_cand.json` |
+| 13 | `replace_merge` | `04d_replace_episodes.py merge` | `*_v4.json` (paths · eps · walk) |
+| 14 | `shift_unsafe_starts` | `04f_fix_start.py` | `*_v5.json` (U6 실패 출발점을 앞으로) |
+| 15 | `straighten_stairs` | `04g_straighten_stairs.py --episode_ids 86` | `*_v6.json` (계단 구간 곧게) |
+| 16 | `walk` (isaac) | `06k_parallel.py ... --record trigger` | `walk_noeun_v6.json` |
+| 17 | `render` (isaac) | `06m_render_rbq.py` (vlnce · vlnpe) | `data/.../vln_{ce,pe}_noeun_nav3d_rbq_v6` |
+| 18 | `check_render` | `checks/06n_check_rbq_render.py` | `logs/06n_check_rbq_render_v6/summary.json` |
+| 19 | `loader_check` | `checks/08_loader_check.py` | `logs/08_loader_check/summary_rbq_v6.json` |
+
+- **재현 확인 (2026-10-23)**: habitat 단계 5~7 · 9~11 · 13~15 를 `run_pipeline.py` 로 다시 돌린 결과가 지금 logs 의 파일과 같다
+  (걷기 결과 `walk_noeun_v3` · `walk_noeun_cand` 는 기존 것을 입력으로).
+- 걷기는 물리 시뮬레이션이라 다시 돌리면 결과가 조금 다를 수 있다 (06r 실측: 같은 설정에 성공 20 → 21). 그러면 04d 가 바꿀 ep 도 달라진다.
+  `--episode_ids 86` 은 v5 걷기를 보고 사람이 고른 값이다.
+- 지금 v6 데이터는 실제로는 v5 걷기 + 다시 걸은 23 ep 를 합치고 (`walk_noeun_v6.json` 의 `merge`), 바뀐 23 ep 만 `06m2_rerender_subset.py` 로
+  다시 렌더한 것이다. `run_pipeline.py` 는 같은 입력·같은 설정으로 200 ep 를 처음부터 걷고 렌더한다. 일부만 다시 할 때는 `06m2` 를 따로.
+- **아직 안 되는 것**: 노은역 RBQ 데이터 라벨 — `07 --sources noeun` 은 06 렌더의 `frames_meta.json`(카메라 자세·몸 높이·yaw)을 읽는데,
+  06m 은 `render_meta.json` 에 그 값을 남기지 않는다. vlnce · vlnpe 의 `logs/05_vlnce_gt_render/episodes.json` 은 만든 스크립트가 없다.
+
+self-check: `/usr/bin/python scripts/dataset_converters/nav3d/nav3d_utils.py`
 
 ---
 
@@ -202,7 +282,7 @@ GS 는 usdz 안 `*.nurec`(gzip + msgpack, fp16) 를 직접 읽는다 — Isaac �
 ```bash
 /usr/bin/python scripts/dataset_converters/nav3d/01_build_navmesh.py --scene noeun_station --agent_height 0.9 --out_dir scripts/dataset_converters/nav3d/logs/01_height/h0.9
 /usr/bin/python scripts/dataset_converters/nav3d/01_build_navmesh.py --scene noeun_station --agent_height 1.8 --out_dir scripts/dataset_converters/nav3d/logs/01_height/h1.8
-/usr/bin/python scripts/dataset_converters/nav3d/01h_height_compare.py
+/usr/bin/python scripts/dataset_converters/nav3d/checks/01h_height_compare.py
 ```
 
 | | 0.9 m | 1.8 m |
@@ -390,10 +470,10 @@ mesh 3D 거리 = 경로 점(바닥 + 0.5 m, 바닥 + 키 − 0.05 m)에서 원�
 03 raw 경로를 두 라벨(수정 전 `unleveled` · 수정 후 `sloped`)로 다시 재서 비교한다. 경로 계획은 새로 하지 않는다.
 
 ```bash
-/usr/bin/python scripts/dataset_converters/nav3d/03s_stairs_label_check.py --scene noeun_station
-ls data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r | xargs -P 4 -I{} /usr/bin/python scripts/dataset_converters/nav3d/03s_stairs_label_check.py --scene {}
-/usr/bin/python scripts/dataset_converters/nav3d/03s_stairs_label_check.py --aggregate
-/usr/bin/python scripts/dataset_converters/nav3d/03s_stairs_label_check.py --ply VFuaQ6m2Qom noeun_station
+/usr/bin/python scripts/dataset_converters/nav3d/checks/03s_stairs_label_check.py --scene noeun_station
+ls data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r | xargs -P 4 -I{} /usr/bin/python scripts/dataset_converters/nav3d/checks/03s_stairs_label_check.py --scene {}
+/usr/bin/python scripts/dataset_converters/nav3d/checks/03s_stairs_label_check.py --aggregate
+/usr/bin/python scripts/dataset_converters/nav3d/checks/03s_stairs_label_check.py --ply VFuaQ6m2Qom noeun_station
 ```
 
 | 인자 | 뜻 | 왜 이 값인가 |
@@ -423,9 +503,9 @@ ls data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r | xargs -P 4 -I{} /usr/bin/
 경로를 habitat 안에서 vln_ce 125cm 리그(높이 1.25 m, hfov 79°, 0° · 30° 룩다운)로 찍어 눈으로 비교한다(데이터셋 렌더 아님).
 
 ```bash
-/usr/bin/python scripts/dataset_converters/nav3d/03r_render_paths.py --check_gt --scene 1LXtFkjw3qL --ep 0
-/usr/bin/python scripts/dataset_converters/nav3d/03r_render_paths.py --what stairs_label
-/usr/bin/python scripts/dataset_converters/nav3d/03r_render_paths.py --what compare_2d
+/usr/bin/python scripts/dataset_converters/nav3d/checks/03r_render_paths.py --check_gt --scene 1LXtFkjw3qL --ep 0
+/usr/bin/python scripts/dataset_converters/nav3d/checks/03r_render_paths.py --what stairs_label
+/usr/bin/python scripts/dataset_converters/nav3d/checks/03r_render_paths.py --what compare_2d
 ```
 
 | 인자 | 뜻 | 왜 |
@@ -472,8 +552,8 @@ split(기본) = 계단은 폭 가운데로 곧게, 바닥은 곡선 / none = 계
 
 ```bash
 for M in split none; do ls data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r | xargs -P 4 -I{} /usr/bin/python scripts/dataset_converters/nav3d/03_refine_paths.py --dataset vln_ce --scene {} --stairs_mode $M --out_dir scripts/dataset_converters/nav3d/logs/03_ab_stairs/$M; done
-/usr/bin/python scripts/dataset_converters/nav3d/03ab_stairs_compare.py
-/usr/bin/python scripts/dataset_converters/nav3d/03r_render_paths.py --what stairs_ab --n_examples 4
+/usr/bin/python scripts/dataset_converters/nav3d/checks/03ab_stairs_compare.py
+/usr/bin/python scripts/dataset_converters/nav3d/checks/03r_render_paths.py --what stairs_ab --n_examples 4
 ```
 
 | `--stairs_mode` | 뜻 | 왜 |
@@ -522,8 +602,8 @@ for M in split none; do ls data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r | x
 ### 실행
 
 ```bash
-ls data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r | xargs -P 4 -I{} /usr/bin/python scripts/dataset_converters/nav3d/03c_compare_2d.py --scene {}
-/usr/bin/python scripts/dataset_converters/nav3d/03c_compare_2d.py --aggregate
+ls data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r | xargs -P 4 -I{} /usr/bin/python scripts/dataset_converters/nav3d/checks/03c_compare_2d.py --scene {}
+/usr/bin/python scripts/dataset_converters/nav3d/checks/03c_compare_2d.py --aggregate
 ```
 
 ### 결과 — 사용 가능
@@ -586,7 +666,7 @@ ls data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r | xargs -P 4 -I{} /usr/bin/
 
 vln_ce 는 릴리스가 habitat 산출이라 habitat 으로 렌더한다 (사용자 지시). 렌더러 = `instruction_labeling/render` (RigSim: 640×480 · hfov 79° · 1.25 m · pitch 0/30°).
 
-- **05a GT 재렌더** — `/usr/bin/python scripts/dataset_converters/nav3d/05a_vlnce_gt_render_check.py` : 릴리스 action 을 그대로 재생.
+- **05a GT 재렌더** — `/usr/bin/python scripts/dataset_converters/nav3d/checks/05a_vlnce_gt_render_check.py` : 릴리스 action 을 그대로 재생.
   4 씬 685 ep: 자세 최대 0.08 mm, RGB SSIM 최소 0.9745 → 렌더러 = 릴리스. depth 는 릴리스가 no-hit 구멍을 사후 채워 참고만 (규칙 재현 못 함).
 - **05b 생성 경로** — `/usr/bin/python scripts/dataset_converters/nav3d/05b_vlnce_render_paths.py` : 03 wp·sg 경로 → 0.5 m 경유점 → GreedyGeodesicFollower → 릴리스 포맷 `vln_ce_nav3d/traj_data/r2r/nav3d_{wp,sg}/`.
   P1 완주 56/56 · P2 충실도 · P3 충돌 · P4 계단 |Δz| ≤ 0.067 m · P5 형식 모두 통과. `--depth_fill none` 기본 (채우기 전후 차이 작음, 사용자 결정).
