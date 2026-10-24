@@ -20,6 +20,7 @@ args:
     slight: omit               # say | omit (slight_deg 미만 회전은 말하지 않음)
     rooms: house-v2            # none | house-v1 (MP3D .house 방 순서를 경로 단어 뒤에 한 줄로; route.yaml rooms)
     motion: list               # list | none (none = 번호 목록 빼고 그림으로만; route.yaml motion)
+    facts: list                # list | memo-v1 (번호 명령문 대신 같은 사실을 서술 메모로; route.yaml facts, label/facts.py)
     stop_cue: none             # none | A-grounded-v1 (정지 지점 근처 보이는 annotation 물체; route.yaml stop_cue)
     stop_select: none          # none | rule-v1 | vlm-v1 | rotate-v1 (A·P·R 후보 캐시에서 정지 단서 고르기; route.yaml stop_select)
     turn_deg: 30
@@ -42,7 +43,9 @@ args:
     fewshot_header: v1
     sibling: none              # none | profiles-v1 | profiles-v2 (v2 = 방식별 시작 회전·첫머리 규칙; 형제마다 다른 서술 방식 줄: step / landmark / brief; style.yaml sibling)
     fewshot_match: none        # none | gtstyle-v1 (fewshot 예시를 형제 서술 방식과 같은 GT 문체 묶음에서; style.fewshot > 0)
-    pathrule: none             # none | v1 (경로 사실로 형제별 첫머리·서술 방식·길이; style.yaml pathrule. style.sibling 과 함께 쓰지 않음)
+    pathrule: none             # none | v1 | v2 (v2 = destination 첫머리 제외; 경로 사실로 형제별 첫머리·서술 방식·길이; style.yaml pathrule. style.sibling 과 함께 쓰지 않음)
+    writer: none               # none | gepa-v1 (gepa_labeling 이 고친 style_instruction·facts_header; style.yaml writer. style.knobs·route.facts 와 함께)
+    knobs: none                # none | v1 (형제마다 다른 손잡이: 끝맺음·설명 방식·길이; style.yaml knobs, label/knobs.py. route.facts 와 함께)
   model: gemma31b-bf16         # model/<name>.yaml
   gen:                         # 샘플링·재시도·품질검사
     temperature: 0.35

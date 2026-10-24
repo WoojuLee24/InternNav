@@ -91,6 +91,9 @@ def path_rule(cfg: dict, ep: dict, sib_idx: int, g: dict) -> dict:
 
 def episode_style(cfg: dict, ep: dict, sib_idx: int = 0, path: dict = None) -> dict:
     s = cfg['style']
+    if s.get('knobs'):  # style.knobs: 형제마다 다른 손잡이 조합 (label/knobs.py)
+        from knobs import knob_style
+        return knob_style(cfg, ep, sib_idx)
     rng = random.Random(f'{cfg["seed"]}:{ep["episode_id"]}:style')
     if s['length_mode'] == 'gtdist':
         length = s['length'].format(n=rng.choice(_train_pool()[0]))

@@ -83,6 +83,21 @@ pathrule:                    # style.pathrule: 경로 사실로 형제별 첫머
       max_rooms: 2
       max_turns: 2
       length: "1-2 short sentences, 12-22 words total"
+  v2:                        # v1 에서 destination 첫머리를 뺌 (v1 정보량 검사: destination 첫머리 문장 -8.9 %p, 나머지 첫머리는 손실 없음)
+    straight_max_deg: 30
+    no_forward_deg: 90       # 시작 회전이 이 각도 이상이면 "walk/go/head straight|forward|ahead" 로 시작 금지 (사후 검사)
+    descriptions:            # 서술 방식 (형제마다 번갈아). 문구는 sibling profiles-v1 과 같다
+      step: "Write it as step-by-step directions: describe each turn and the stretch between turns, in order"
+      landmark: "Describe the route mainly by the landmarks you walk past, through or toward (furniture, rooms, doorways); mention a turn only where it is needed to find the way"
+    openers:                 # line = 규칙 줄, check = 생성 문장이 이 첫머리로 시작했는지 (정규식, {room} 은 방 이름)
+      turn: {line: "Begin with the turn you make at the start", check: "^\\W*(turn|make a|spin|bear|veer|go (left|right))\\b"}
+      straight: {line: "Begin by going straight ahead from where you stand", check: "^\\W*(walk|go|head|move|proceed|continue)\\s+(straight|forward|ahead)\\b"}
+      room_exit: {line: "Begin with leaving the {room} you start in", check: "^\\W*((turn|make a|spin|bear|veer)[^.,]{0,25}?(,|\\band\\b)\\s*)?(exit|leave|walk out|step out|head out|go out|get out)\\b"}   # 앞에 짧은 회전 구절 허용 ("Turn around and leave the ...")
+      landmark: {line: "Begin with a landmark you walk past, through or toward first, one you can see in the direction you start walking (not with a turn)", check: "^(?!\\W*(turn|make a|spin|bear|veer)\\b)\\W*(\\w+\\s+){0,2}?(past|through|toward|towards|across|along|between|beside|by|alongside)\\b"}
+    short:                   # 단순한 경로(방 max_rooms 개 이하, 경로 단어 회전 max_turns 개 이하)에서만 형제 하나를 짧게
+      max_rooms: 2
+      max_turns: 2
+      length: "1-2 short sentences, 12-22 words total"
 fewshot_match:               # style.fewshot_match: fewshot 예시를 형제 서술 방식과 같은 GT train 문체 묶음에서 뽑는다 (style.fewshot > 0 일 때)
   none: null                 # 형제 -> 방식 배정은 style.sibling 과 같은 규칙 (같이 쓰면 같은 방식). GT 분류 (train 10,819: brief 33 / landmark 35 / step 21 / 나머지 11 %)
   gtstyle-v1:
@@ -93,3 +108,104 @@ fewshot_match:               # style.fewshot_match: fewshot 예시를 형제 서
     landmark_re: "\\b(past|pass|passing|along|through|toward|towards|between|beside|around)\\b"   # brief 아니고 회전 <= 1 이고 이 표현 -> landmark
 fewshot_header:
   v1: "\n\nSTYLE EXAMPLES (human-written instructions for OTHER paths — match their style, not their content):\n"
+knobs:                       # style.knobs=<key>: 형제마다 다른 "손잡이" 조합 (사람이 고르는 말투 축: 끝맺음·설명 방식·길이; gepa_labeling 0단계).
+  none: null                 # 조합 비율 = train GT 10,819 문장 (gepa_labeling style_types 규칙, 2026-10-24). 형제 3개에 서로 다른 조합, (seed, trajectory_id) 로 고정 (label/knobs.py)
+  v1:                        # length·stop 규칙 줄을 instruction 한 줄로 바꾼다. instruction 은 gepa_labeling 이 고치는 글의 시작점
+    instruction: "Write it in this style: {granularity}. Length: {length}. Ending: {ending}."
+    ending:
+      stop: 'end with the verb "stop" (e.g. "... and stop by the sink")'
+      wait: 'end with the verb "wait" instead of "stop" (e.g. "... and wait by the sink")'
+      none: 'do not use "stop", "wait" or "stand"; simply end by naming the place you reach (e.g. "... and walk into the office")'
+    granularity:
+      turn: "give the way mainly as turn and walk directions (turn left/right, turn around, walk straight), with landmarks only as side notes"
+      mixed: "combine turn directions with the things and rooms you pass in roughly equal measure"
+      landmark: "describe the way mainly by the things and rooms you pass, go through or go into; mention a turn only where it is needed"
+    length:
+      short: "one short sentence of about 8-15 words"
+      medium: "1-3 sentences, about 16-35 words in total"
+      long: "3-5 sentences, about 36-60 words in total"
+    quality:                 # 길이별 품질검사 단어 범위 (b1 은 12~70), ending none 이면 정지 단어 필수 조건을 끄고 stop/wait 를 금지
+      words: {short: [5, 22], medium: [12, 48], long: [25, 90]}
+      none_forbid: '\b(stop|wait)\b'
+    rates:                   # [ending, granularity, length, 비율]
+      - [stop, landmark, medium, 0.2194]
+      - [wait, landmark, medium, 0.1350]
+      - [stop, mixed, medium, 0.0735]
+      - [stop, landmark, long, 0.0668]
+      - [stop, turn, medium, 0.0631]
+      - [wait, mixed, medium, 0.0617]
+      - [wait, turn, medium, 0.0472]
+      - [none, landmark, medium, 0.0467]
+      - [none, landmark, long, 0.0316]
+      - [wait, landmark, long, 0.0272]
+      - [stop, landmark, short, 0.0241]
+      - [wait, mixed, short, 0.0240]
+      - [wait, landmark, short, 0.0226]
+      - [stop, mixed, short, 0.0226]
+      - [none, mixed, medium, 0.0224]
+      - [stop, mixed, long, 0.0160]
+      - [stop, turn, long, 0.0148]
+      - [stop, turn, short, 0.0126]
+      - [wait, turn, short, 0.0115]
+      - [none, turn, medium, 0.0111]
+      - [none, landmark, short, 0.0095]
+      - [none, mixed, short, 0.0086]
+      - [wait, mixed, long, 0.0084]
+      - [wait, turn, long, 0.0063]
+      - [none, turn, short, 0.0059]
+      - [none, mixed, long, 0.0049]
+      - [none, turn, long, 0.0025]
+  v2:                        # v1 + 설명 방식이 turn 이면 detail 줄("Reference specific visible landmarks")을 뺀다 (v1 dev: turn 요청에도 지나는 것 표현 3.1 개, turn 위주 1/46)
+    drop_detail_for: [turn]
+    instruction: "Write it in this style: {granularity}. Length: {length}. Ending: {ending}."
+    ending:
+      stop: 'end with the verb "stop" (e.g. "... and stop by the sink")'
+      wait: 'end with the verb "wait" instead of "stop" (e.g. "... and wait by the sink")'
+      none: 'do not use "stop", "wait" or "stand"; simply end by naming the place you reach (e.g. "... and walk into the office")'
+    granularity:
+      turn: "give the way mainly as turn and walk directions (turn left/right, turn around, walk straight), with landmarks only as side notes"
+      mixed: "combine turn directions with the things and rooms you pass in roughly equal measure"
+      landmark: "describe the way mainly by the things and rooms you pass, go through or go into; mention a turn only where it is needed"
+    length:
+      short: "one short sentence of about 8-15 words"
+      medium: "1-3 sentences, about 16-35 words in total"
+      long: "3-5 sentences, about 36-60 words in total"
+    quality:                 # 길이별 품질검사 단어 범위 (b1 은 12~70), ending none 이면 정지 단어 필수 조건을 끄고 stop/wait 를 금지
+      words: {short: [5, 22], medium: [12, 48], long: [25, 90]}
+      none_forbid: '\b(stop|wait)\b'
+    rates:                   # [ending, granularity, length, 비율]
+      - [stop, landmark, medium, 0.2194]
+      - [wait, landmark, medium, 0.1350]
+      - [stop, mixed, medium, 0.0735]
+      - [stop, landmark, long, 0.0668]
+      - [stop, turn, medium, 0.0631]
+      - [wait, mixed, medium, 0.0617]
+      - [wait, turn, medium, 0.0472]
+      - [none, landmark, medium, 0.0467]
+      - [none, landmark, long, 0.0316]
+      - [wait, landmark, long, 0.0272]
+      - [stop, landmark, short, 0.0241]
+      - [wait, mixed, short, 0.0240]
+      - [wait, landmark, short, 0.0226]
+      - [stop, mixed, short, 0.0226]
+      - [none, mixed, medium, 0.0224]
+      - [stop, mixed, long, 0.0160]
+      - [stop, turn, long, 0.0148]
+      - [stop, turn, short, 0.0126]
+      - [wait, turn, short, 0.0115]
+      - [none, turn, medium, 0.0111]
+      - [none, landmark, short, 0.0095]
+      - [none, mixed, short, 0.0086]
+      - [wait, mixed, long, 0.0084]
+      - [wait, turn, long, 0.0063]
+      - [none, turn, short, 0.0059]
+      - [none, mixed, long, 0.0049]
+      - [none, turn, long, 0.0025]
+writer:                      # style.writer=<key>: gepa_labeling 이 고친 글로 style.knobs.instruction·route.facts.header 를 바꾼다 (사람이 읽고 고칠 수 있게 그대로 둔다)
+  none: null
+  gepa-v1:                   # logs/gepa_labeling/gepa/v1/best.json (2026-10-24, 고르기용 train scene 경로 100: 0.604 -> 0.654)
+    style_instruction: "Strictly follow the path facts. Write the instruction in this style: {granularity}. If 'turn', focus on directional changes and avoid naming objects. If 'landmark', focus on visible objects. If 'mixed', use both. Length must be {length}. Ending must be {ending}. To ensure diversity from other versions, vary your sentence structure, choose different landmarks, and start with a unique opening word. Do not repeat phrases or patterns used in sibling instructions."
+    facts_header: "PATH FACTS (Use these as a strict ground-truth for accuracy, but do not mimic their structure, phrasing, or sequence. Translate these technical details into natural, human-like directions that vary in expression and flow):"
+  gepa-v2-joint:             # logs/gepa_labeling/gepa/v2-joint/best.json (2026-10-24, route.facts=memo-v1 + style.knobs=v2 + delivery=joint3-v1 에서 출발; 고르기용 경로 100: 0.760 -> 0.821)
+    style_instruction: "Strictly adhere to the path facts; never contradict them. Use this style: {granularity}.\n- 'landmark': Use ONLY visual objects/descriptors.\n- 'turn': Use ONLY directional cues (left, right, straight).\n- 'mixed': Combine both visual objects and directional cues.\nLength must be {length}. End the instruction exactly with the action: {ending}.\n\nIf generating multiple versions, maximize diversity to simulate different authors: \n1. Use entirely different opening words for each.\n2. Select different visual landmarks from the images.\n3. Vary the sentence structure (e.g., switch between imperative commands and descriptive flow).\nAvoid repetitive phrasing across the three versions."
+    facts_header: "PATH FACTS (Strict constraints: You must follow the room sequence and directions exactly to avoid factual errors. However, do not mirror the list's structure or phrasing; use your own natural language and visual landmarks from the photos to describe the route as a human would)."

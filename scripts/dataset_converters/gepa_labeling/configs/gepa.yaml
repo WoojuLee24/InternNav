@@ -1,0 +1,124 @@
+# gepa_labeling 2~3단계: 채점기 + GEPA 설정 (prompt_opt/*.py)
+method: b1
+sets: [route.facts=memo-v1, style.knobs=v1]   # 대조군 3 과 같은 설정에서 출발 (seed 글 = route.yaml facts.memo-v1.header, style.yaml knobs.v1.instruction)
+
+score:                         # 경로 하나(형제 3문장) 의 점수 = 사실 × (w_knob·손잡이 + w_div·다양성)
+  w_knob: 0.5
+  w_div: 0.5
+  use_gemma_facts: false       # gemma 사실 검사는 끔: val_unseen dev 에서 사람(GT) 문장의 49 % 를 틀렸다고 함 (지나는 계단을 '계단 없음' 등, 거짓 경보). 규칙만 쓴다
+  around_min_deg: 100          # "turn around" 가 맞는 회전 크기
+  side_max_deg: 170            # "turn left/right" 가 맞는 회전 크기 상한
+  min_info:                    # 회전(말할 만한 것) 또는 방이 이만큼 이상인 경로는 단서(회전 명령·방·지나는 것 표현) 가 1개 이상 있어야
+    turns: 2
+    rooms: 2
+
+rules:
+  turn_cmd: '\b(?:turn|make a|take a|hang a|go|veer|bear|spin|pivot|head)\s+(?:a\s+)?(?:sharp\s+|slight\s+|hard\s+|quick\s+|immediate\s+)?(left|right|around)\b|\b(u-turn|turn back|the way you came)\b'
+  # 계단: "up/down the stairs", "upstairs/downstairs", "climb/descend the stairs" 만 (walk up to the stairs = 계단으로 다가감, 오르기 아님)
+  stairs_up: '\bup (?:the |a |two |three |\w+ )?(?:flight of )?(?:stairs|staircase|steps|stairway)\b|\bupstairs\b|\bclimb (?:up )?(?:the )?(?:stairs|staircase|steps)\b'
+  stairs_down: '\bdown (?:the |a |two |three |\w+ )?(?:flight of )?(?:stairs|staircase|steps|stairway)\b|\bdownstairs\b|\bdescend (?:the )?(?:stairs|staircase|steps)\b'
+  # 마지막 문장의 방: "stop/wait/stand/end in(side) the <방>" 또는 "into the <방>" 처럼 그 방 안에서 멈춘다고 말할 때만 본다 (방 이름이 목표 물체 옆 표현일 수 있어서)
+  room_stop: '\b(?:stop|wait|stand|end up|remain|stay)\s+(?:just\s+)?(?:in|inside)\s+(?:the\s+)?([a-z ]+?)(?:\.|,|$| and| near| by| next)|\binto\s+(?:the\s+)?([a-z ]+?)\s+and\s+(?:stop|wait)\b'
+  cue: '\b(turn|left|right|around|past|through|into|across|along|toward|towards|between|enter|exit|leave|stairs|hallway|room|door|doorway)\b'
+  rooms:                       # MP3D 방 이름 -> 문장에서 같은 방으로 보는 단어 (마지막 문장의 방 검사용)
+    bathroom: [bathroom, restroom, toilet, washroom, powder room]
+    bedroom: [bedroom, bed room, guest room, master suite]
+    closet: [closet, wardrobe, walk-in]
+    dining room: [dining room, dining area, dining]
+    entryway: [entryway, entry, foyer, entrance, front door, vestibule, mudroom]
+    family room: [family room, den, lounge, living room, sitting room, tv room]
+    garage: [garage]
+    hallway: [hallway, hall, corridor, landing, passage]
+    library: [library, study]
+    laundry room: [laundry, utility room]
+    kitchen: [kitchen, pantry]
+    living room: [living room, lounge, sitting room, family room, den]
+    meeting room: [meeting room, conference room, office]
+    lounge: [lounge, living room, sitting room, den]
+    office: [office, study, workspace]
+    porch: [porch, terrace, deck, patio, veranda, balcony]
+    game room: [game room, rec room, recreation room, billiard, pool table room, playroom]
+    toilet: [toilet, bathroom, restroom, powder room]
+    utility room: [utility room, laundry, storage]
+    tv room: [tv room, media room, family room, theater, den]
+    gym: [gym, exercise room, workout room]
+    outdoor area: [outside, outdoor, patio, yard, garden, deck, porch]
+    balcony: [balcony, terrace, deck]
+    other room: []
+    spa: [spa, sauna, hot tub]
+    bar: [bar]
+    classroom: [classroom]
+    dining booth: [booth, dining]
+    lobby: [lobby, reception, foyer]
+
+gemma_facts:                   # 사실 검사 (글만). 어긋나는 구절만 찾는다 — 생략은 문제가 아니다
+  model: gemma-4-31B-it
+  base_url: http://localhost:8100/v1
+  api_key: token-abc123
+  workers: 64
+  max_tokens: 200
+  temperature: 0.0
+  prompt: |
+    You check a navigation instruction against the true facts of the path it describes.
+    Leaving facts out is FINE (people skip details). Only report statements that CONTRADICT the facts,
+    for example a turn in the wrong direction, turns in the wrong order, going up stairs when the path goes down,
+    or stopping in a different room than where the path ends. Positions like "the table on your left" are not turns.
+
+    TRUE FACTS:
+    {facts}
+
+    INSTRUCTION: "{text}"
+
+    Answer with ONLY JSON: {{"contradictions": [{{"phrase": "<words from the instruction>", "why": "<short reason>"}}]}}
+    Use an empty list if nothing contradicts the facts.
+
+gepa:                          # 3단계
+  data:                        # val_seen 은 렌더 이미지가 없다 → train scene 을 나눠 고르기(val) 용 scene 을 따로 둔다. val_unseen 은 쓰지 않는다
+    seed: 0
+    val_scenes: 8              # train 61 scene 중 이만큼을 고르기용으로 (나머지는 고치기용)
+    n_train_paths: 100
+    n_val_paths: 100
+  max_metric_calls: 1500       # 경로(형제 3문장 생성·채점) 단위
+  reflection_minibatch_size: 3 # 사례당 사진 모음 1장 → 3장 (gemma 한 요청 16장 한도 안)
+  candidate_selection_strategy: pareto
+  seed: 0
+  workers: 48                  # 문장 생성 동시 요청
+  reflection:
+    max_tokens: 2000
+    temperature: 0.7
+  limits:                      # 후보 글 검사 (어기면 그 후보 점수 0, 이유를 피드백으로)
+    style_instruction_max_words: 120
+    facts_header_max_words: 80
+  reflection_templates:        # GEPA 기본 틀에 이 과제의 제약을 더한 것. <curr_param>, <side_info> 는 GEPA 가 채운다
+    style_instruction: |
+      I use the following STYLE INSTRUCTION inside a prompt that asks a vision-language model to write ONE navigation instruction
+      for a path inside a house (it also sees photos along the path and a list of path facts). For each path I ask for three
+      instructions, each with a different requested style. The placeholders {granularity}, {length} and {ending} are filled with
+      the requested style for that sentence.
+      ```
+      <curr_param>
+      ```
+      Here are examples: the photos along each path (one contact sheet), the facts of the path, the three requested styles,
+      the three instructions the model wrote, and feedback (wrong facts, style misses, and how similar the three were):
+      ```
+      <side_info>
+      ```
+      Write an improved STYLE INSTRUCTION so that the model (1) never states anything that contradicts the path facts,
+      (2) follows the requested granularity, length and ending, and (3) writes the three instructions so that they differ the way
+      three different people would (different first words, different landmarks chosen, different sentence structure).
+      Rules: keep the placeholders {granularity}, {length} and {ending} exactly once each and use no other curly braces;
+      keep it general (do not mention specific rooms or objects from the examples); at most 120 words.
+      Provide the new STYLE INSTRUCTION within ``` blocks.
+    facts_header: |
+      I use the following FACTS HEADER as the first line of a block of path facts (start direction, turns and stairs in order,
+      rooms) inside a prompt that asks a vision-language model to write ONE navigation instruction for a path inside a house.
+      ```
+      <curr_param>
+      ```
+      Here are examples with the photos (one contact sheet per path), the facts, the instructions the model wrote, and feedback:
+      ```
+      <side_info>
+      ```
+      Write an improved FACTS HEADER that makes the model use the facts correctly (never contradict them) but NOT copy their
+      order or wording, so that different instructions for the same path differ like those written by different people.
+      Rules: no curly braces; keep it general; at most 80 words. Provide the new FACTS HEADER within ``` blocks.

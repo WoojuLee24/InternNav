@@ -1,0 +1,25 @@
+# delivery 그룹 값: joint3-v1 — 같은 경로의 형제 문장(보통 3개)을 한 번의 요청으로 "서로 다른 사람" 이 쓴 것처럼 함께 쓴다 (label/joint.py).
+#   따로 만들면 같은 사진·같은 사실에서 같은 첫머리가 나온다 (dev: 형제 첫 3단어 같음 46~57 %, 사람 6 %). 함께 쓰면 서로를 보고 다르게 쓸 수 있다.
+#   route.facts·style.knobs 와 함께만 쓴다 (사람마다 손잡이 한 줄). 사진·사실 메모·GT 예시는 형제 0 의 것 (형제는 같은 경로).
+name: joint3-v1
+type: joint
+intro: "The {n_images} images above were taken along one path, in order.\n\n"
+context: ""
+max_tokens: 700
+template: |
+  You are a navigation instruction writer for vision-language robot navigation.
+
+  {scene_intro}{n} different people each write ONE navigation instruction for this same path. Write all {n}.
+
+  {route}
+
+  REQUIREMENTS FOR EVERY INSTRUCTION:
+  {rules}
+
+  EACH PERSON'S STYLE:
+  {persons}
+
+  The {n} people notice different things: each instruction should start differently, rely on different landmarks,
+  and phrase the moves in its own way — but none may contradict the path facts.{extra}
+
+  Answer with ONLY a JSON list of {n} strings, in order (person 1 first).
