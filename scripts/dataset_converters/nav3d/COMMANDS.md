@@ -90,6 +90,8 @@ python3 -c "import gzip,json;print('\n'.join(sorted({e['scene_id'].split('/')[-2
 ```
 출력: `data/InternData-N1-v0.5-mini/vln_ce_nav3d_val_unseen/traj_data/{r2r/nav3d_{wp,sg},_index,_traj_cache}` (train 과 폴더를 나눈다).
 
+**51 렌더를 여러 개 띄울 때: GPU 한 장에 프로세스 하나만** (`--scenes <묶음> --gpu k`). H200 pod 에서 한 GPU 에 둘을 띄우면 RGB 텍스처가 검게 깨지고(깊이는 정상 — 게이트 P1–P5 로는 안 잡힌다) 15~20분마다 둘이 같이 abort/segfault 한다 (2026-10-24 실측: 깨진 경로 7~40 %, 혼자 돌리면 ~1 % = 실외 mesh 구멍). 그래도 죽으면 `--resume` 으로 다시 띄워 이어 간다.
+
 ## 4. noeun (노은역 → vln_ce · vln_pe v6)
 ```
 python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --list
