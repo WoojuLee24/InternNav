@@ -201,6 +201,54 @@ knobs:                       # style.knobs=<key>: 형제마다 다른 "손잡이
       - [none, turn, short, 0.0059]
       - [none, mixed, long, 0.0049]
       - [none, turn, long, 0.0025]
+  v3:                        # v2 + 품질검사의 "물건 언급 필수"(require_landmark) 를 끈다 (2026-10-24 결정): turn 위주 문장이 걸려 다시 만들면 물건이 들어간 문장으로 바뀐다.
+                             # 사람 문장도 5 % 가 이 검사에 걸림. 경로 정보가 없는 문장은 gepa 채점기의 최소 정보 검사가 막는다
+    drop_detail_for: [turn]
+    instruction: "Write it in this style: {granularity}. Length: {length}. Ending: {ending}."
+    ending:
+      stop: 'end with the verb "stop" (e.g. "... and stop by the sink")'
+      wait: 'end with the verb "wait" instead of "stop" (e.g. "... and wait by the sink")'
+      none: 'do not use "stop", "wait" or "stand"; simply end by naming the place you reach (e.g. "... and walk into the office")'
+    granularity:
+      turn: "give the way mainly as turn and walk directions (turn left/right, turn around, walk straight), with landmarks only as side notes"
+      mixed: "combine turn directions with the things and rooms you pass in roughly equal measure"
+      landmark: "describe the way mainly by the things and rooms you pass, go through or go into; mention a turn only where it is needed"
+    length:
+      short: "one short sentence of about 8-15 words"
+      medium: "1-3 sentences, about 16-35 words in total"
+      long: "3-5 sentences, about 36-60 words in total"
+    quality:                 # 길이별 품질검사 단어 범위 (b1 은 12~70), ending none 이면 정지 단어 필수 조건을 끄고 stop/wait 를 금지
+      words: {short: [5, 22], medium: [12, 48], long: [25, 90]}
+      none_forbid: '\b(stop|wait)\b'
+      require_landmark: false
+    rates:                   # [ending, granularity, length, 비율]
+      - [stop, landmark, medium, 0.2194]
+      - [wait, landmark, medium, 0.1350]
+      - [stop, mixed, medium, 0.0735]
+      - [stop, landmark, long, 0.0668]
+      - [stop, turn, medium, 0.0631]
+      - [wait, mixed, medium, 0.0617]
+      - [wait, turn, medium, 0.0472]
+      - [none, landmark, medium, 0.0467]
+      - [none, landmark, long, 0.0316]
+      - [wait, landmark, long, 0.0272]
+      - [stop, landmark, short, 0.0241]
+      - [wait, mixed, short, 0.0240]
+      - [wait, landmark, short, 0.0226]
+      - [stop, mixed, short, 0.0226]
+      - [none, mixed, medium, 0.0224]
+      - [stop, mixed, long, 0.0160]
+      - [stop, turn, long, 0.0148]
+      - [stop, turn, short, 0.0126]
+      - [wait, turn, short, 0.0115]
+      - [none, turn, medium, 0.0111]
+      - [none, landmark, short, 0.0095]
+      - [none, mixed, short, 0.0086]
+      - [wait, mixed, long, 0.0084]
+      - [wait, turn, long, 0.0063]
+      - [none, turn, short, 0.0059]
+      - [none, mixed, long, 0.0049]
+      - [none, turn, long, 0.0025]
 writer:                      # style.writer=<key>: gepa_labeling 이 고친 글로 style.knobs.instruction·route.facts.header 를 바꾼다 (사람이 읽고 고칠 수 있게 그대로 둔다)
   none: null
   gepa-v1:                   # logs/gepa_labeling/gepa/v1/best.json (2026-10-24, 고르기용 train scene 경로 100: 0.604 -> 0.654)

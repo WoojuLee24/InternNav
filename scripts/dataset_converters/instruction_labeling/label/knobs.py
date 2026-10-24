@@ -39,6 +39,8 @@ def knob_style(cfg: dict, ep: dict, sib_idx: int) -> dict:
         rules.append(s['structure'])
     q = dict(base['quality'])
     q['min_words'], q['max_words'] = K['quality']['words'][kn['length']]
+    if 'require_landmark' in K['quality']:  # v3: 물건 언급 필수 끄기 (손잡이 설정에서만)
+        q['require_landmark'] = K['quality']['require_landmark']
     if kn['ending'] == 'none':
         q['require_stop_condition'] = False
         q['forbid'] = list(q.get('forbid', [])) + [K['quality']['none_forbid']]
