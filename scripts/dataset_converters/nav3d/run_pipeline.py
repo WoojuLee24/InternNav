@@ -40,7 +40,7 @@ L = f'{N}/logs'
 D = 'data/InternData-N1-v0.5-mini'
 PATHS = f'{L}/noeun/paths'      # 노은역 paths json (04 → 보정 → v6)
 WALK = f'{L}/noeun/walk'        # 노은역 걷기 입력(eps_*)·결과(walk_*)
-DATA_ROOTS = {'mini': 'data/InternData-N1-v0.5-mini', 'full': 'data/InternData-N1'}   # lib/data_roots.py 와 같은 값
+DATA_ROOTS = {'mini': 'data/InternData-N1-v0.5-mini', 'full': 'data/InternData-N1'}   # utils/data_roots.py 와 같은 값
 LABEL_MODELS = 'scripts/dataset_converters/instruction_labeling/configs/model'
 STAGES = {1: '준비', 2: '경로 만들기', 3: '경로 보정', 4: '걷기', 5: '렌더', 6: '라벨', 7: '검사'}
 # 노은역 RBQ 걷기 설정 (walk_noeun_v3 · v5trig json 의 args 에 남은 값): 전진 중 방향 보정 1.5 · 제자리 회전 문턱 30° · 높이 스캔 필터 −0.2

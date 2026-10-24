@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parents[1]   # nav3d/
-sys.path.insert(0, str(HERE / 'lib'))
+sys.path.insert(0, str(HERE / 'utils'))
 GS = HERE.parent / 'gs_vlnpe'
 ISAAC_PY = '/workspace/isaaclab/_isaac_sim/python.sh'
 

@@ -36,7 +36,7 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parents[1]   # nav3d/
-sys.path.insert(0, str(HERE / 'lib'))
+sys.path.insert(0, str(HERE / 'utils'))
 sys.path.insert(0, str(HERE))
 from render_poses import frames_to_poses, quat_wxyz_to_R, trunk_to_cam_cv  # noqa: E402
 D = 'data/InternData-N1-v0.5-mini'

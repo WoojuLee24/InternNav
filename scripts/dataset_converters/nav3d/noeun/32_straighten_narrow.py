@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parents[1]   # nav3d/
-sys.path.insert(0, str(HERE / 'lib'))
+sys.path.insert(0, str(HERE / 'utils'))
 sys.path.insert(0, str(HERE))
 from floor_mesh import stairs_mask_from_segments  # noqa: E402
 from mesh_probe import side_dists  # noqa: E402,F401

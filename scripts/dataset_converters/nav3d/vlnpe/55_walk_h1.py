@@ -38,7 +38,7 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parents[1]   # nav3d/
-sys.path.insert(0, str(HERE / 'lib'))
+sys.path.insert(0, str(HERE / 'utils'))
 REPO = HERE.parents[2]
 for p in (str(REPO), str(REPO / 'third_party' / 'diffusion-policy'), str(HERE), str(HERE.parent / 'gs_vlnpe'),
           str(HERE.parent / 'instruction_labeling' / 'render')):

@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parents[1]   # nav3d/
-sys.path.insert(0, str(HERE / 'lib'))
+sys.path.insert(0, str(HERE / 'utils'))
 sys.path.insert(0, str(HERE))
 from walk_inputs import r2r_initial, resample, start_yaw  # noqa: E402
 

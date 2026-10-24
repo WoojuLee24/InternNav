@@ -21,7 +21,7 @@
 | `common/` | 공용 단계 | 여러 데이터셋이 같이 쓰는 단계의 실제 코드 (데이터셋 폴더에는 **연결 파일**이 있다) |
 | `*_worker.py` · `common/vlm_server.py` | 보조 | 다른 스크립트가 띄운다. 직접 돌리지 않는다 |
 | `*/tools/` | 도구 | 파이프라인 밖. 필요할 때만 |
-| `lib/` | 모듈 | import 만 한다 |
+| `utils/` | 모듈 | import 만 한다 |
 | `checks/` | 검사 | 결과 확인용 (`vlnce_*` · `vlnpe_*` · `noeun_*` · 그 밖은 공용) |
 
 **번호 앞자리 = 단계** (세 데이터셋 공통): 1 준비 · 2 경로 만들기 · 3 경로 보정 · 4 걷기 · 5 렌더(데이터 저장) · 6 라벨 · 7 검사.
@@ -107,7 +107,7 @@ python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --stage 3,4 --ove
 
 도구: `noeun/tools/rerender_rbq_subset.py` (바뀐 ep 만 다시 렌더) · `noeun/tools/render_vlnce_camera.py` (예전 방식: 경로 위에 카메라를 바로 놓기).
 
-## 공용 모듈 (`lib/`)
+## 공용 모듈 (`utils/`)
 | 모듈 | 하는 일 | 쓰는 곳 |
 |---|---|---|
 | `nav3d_utils` | 좌표 변환 · navmesh 빌드·로드 · 층·연결부 · `NavSurface` · `MeshDistance` | 전부 |
@@ -120,7 +120,7 @@ python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --stage 3,4 --ove
 | `nav3d_scenes` · `mesh_probe` · `walk_inputs` · `turn_space` | 노은역 씬 표 · mesh 광선 측정 · 걷기 입력 · 회전 자리 | noeun |
 | `h1_tunable_controller` · `depth_fill` | H1 걷기 제어 · depth 구멍 채우기 | vlnpe 55 · vlnce 검사 |
 
-self-check: `/usr/bin/python scripts/dataset_converters/nav3d/lib/nav3d_utils.py`
+self-check: `/usr/bin/python scripts/dataset_converters/nav3d/utils/nav3d_utils.py`
 
 ## 옛 이름 → 새 이름 (2026-10-24)
 HISTORY.md · `.claude/memory` 의 옛 리포트는 옛 이름을 쓴다.
@@ -138,7 +138,7 @@ HISTORY.md · `.claude/memory` 의 옛 리포트는 옛 이름을 쓴다.
 | 04d_replace_episodes | noeun/43_replace_fallen | | 06m2_rerender_subset | noeun/tools/rerender_rbq_subset |
 | 04f_fix_start | noeun/44_shift_starts | | 06_render_noeun_vlnce | noeun/tools/render_vlnce_camera |
 | 04g_straighten_stairs | noeun/45_straighten_stairs | | 07_label_paths · 07_vlm_server | common/label_paths · vlm_server |
-| 05b_vlnce_render_paths | vlnce/51_render | | 공용 모듈 (nav3d_utils 등) | lib/ |
+| 05b_vlnce_render_paths | vlnce/51_render | | 공용 모듈 (nav3d_utils 등) | utils/ |
 
 검사: 01h → noeun_navmesh_height_compare · 03ab → refine_stairs_mode_compare · 03c → refine_vs_2d_compare · 03r → refine_render_views ·
 03s → refine_stairs_label_check · 04e → noeun_turn_space_check · 05a → vlnce_gt_rerender_check · 05c → vlnce_compare_viewer ·

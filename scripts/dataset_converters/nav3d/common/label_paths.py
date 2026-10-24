@@ -36,7 +36,7 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parents[1]   # nav3d/
-sys.path.insert(0, str(HERE / 'lib'))
+sys.path.insert(0, str(HERE / 'utils'))
 LABEL = HERE.parent / 'instruction_labeling' / 'label'
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(LABEL))
@@ -71,7 +71,7 @@ def parse():
     ap.add_argument('--simplify_m', type=float, default=0.3, help='RDP 허용 오차 (생성 경로 -> waypoint)')
     ap.add_argument('--vertices', default='rdp', choices=['rdp', 'rdp_merge'],
                     help='rdp = 꺾인 점 그대로 (기본, 이전 동작) / rdp_merge = merge_m 안의 같은 방향 회전을 하나로 (모퉁이 하나 = "turn left" 한 번; route_vertices.py)')
-    ap.add_argument('--merge_m', type=float, default=1.5, help='rdp_merge 거리 (07r: 1.5 m 가 sg 큰 회전 일치 57 %, wp 43 %)')
+    ap.add_argument('--merge_m', type=float, default=1.5, help='rdp_merge 거리 (07r: 1.5 m 가 sg 큰 회전 일치 57 %%, wp 43 %%)')
     ap.add_argument('--limit', type=int, default=0, help='source 당 앞에서 N 개 (0 = 전부)')
     ap.add_argument('--pick', default='spread', help="noeun 에서 --limit 일 때: 'spread' (층 이동·평지 고르게) | 'head'")
     ap.add_argument('--workers', type=int, default=2, help='서버가 요청을 하나씩 처리하므로 2 면 충분 (이미지 인코딩만 겹침)')

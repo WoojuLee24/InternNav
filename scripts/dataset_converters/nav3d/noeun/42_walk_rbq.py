@@ -19,7 +19,7 @@ from collections import defaultdict
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parents[1]   # nav3d/
-sys.path.insert(0, str(HERE / 'lib'))
+sys.path.insert(0, str(HERE / 'utils'))
 ISAAC_PY = '/workspace/isaaclab/_isaac_sim/python.sh'
 
 

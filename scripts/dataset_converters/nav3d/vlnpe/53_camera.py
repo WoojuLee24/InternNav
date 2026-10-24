@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parents[1]   # nav3d/
-sys.path.insert(0, str(HERE / 'lib'))
+sys.path.insert(0, str(HERE / 'utils'))
 for p in (str(HERE), str(HERE.parent / 'gs_vlnpe'), str(HERE.parent / 'instruction_labeling' / 'render')):
     if p not in sys.path:
         sys.path.insert(0, p)
