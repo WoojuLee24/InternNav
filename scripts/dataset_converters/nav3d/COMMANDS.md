@@ -110,4 +110,7 @@ python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnpe --list
 - `--overwrite` 는 실행기의 "출력 있음" 멈춤만 건너뛴다. 렌더 스크립트(vlnce 51 · vlnpe 54 · noeun 51)는 출력 폴더가 있으면 스스로 멈추므로, 다시 렌더하려면 그 폴더를 먼저 옮기거나 지운다.
 - 노은역 usdz 기본 경로 `data/GS_USDZ/Subway/noeun_station_collision.usdz` 가 이 PC 의 data 마운트에 없다. 같은 파일이 `/ws/assets/GS_USDZ/` 에 있다.
 - vlnpe H1 걷기는 `data/sample_episodes/` 에 lmdb 캐시를 쓴다 (쓰기 가능해야 한다).
-- full 은 이 PC 에 없어 `--dry_run` 경로까지만 확인했다. full 의 씬 구성(mini 와 같은 61 씬인지)은 아직 모른다. 21 은 `scripts/dataset_converters/gs_vlnpe/logs/scene_meta/<씬>.json` 의 mesh 경로를 쓰므로, full 에 mini 에 없는 씬이 있으면 그 씬은 먼저 scene_meta 가 필요하다.
+- full 은 이 PC 에 없어 `--dry_run` 경로까지만 확인했다. full 의 씬 구성(mini 와 같은 61 씬인지)은 아직 모른다.
+- 실행기는 mini · full 모두 데이터 루트 기준 경로를 넘긴다 (`<루트>/scene_data/mp3d_ce/mp3d` · 21 의 mesh `<루트>/scene_data/mp3d_n1`).
+  그래서 `data/scene_data` 링크와 gs_vlnpe `scene_meta`(pxr 필요) 가 없는 서버(H200 pod)에서도 돈다 — 이 PC 에서 둘 다 빼고 확인, 결과 같음.
+  스크립트를 따로 돌릴 때는 `--scene_root` · 21 `--mesh_root` 를 직접 준다 (기본값 `data/scene_data/...` 는 이 PC 에만 있다).

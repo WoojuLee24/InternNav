@@ -65,17 +65,18 @@ class Step:
 
 def data_args(args) -> dict:
     """--data 에 따른 데이터 루트 · logs 위치 · 스크립트에 넘길 경로 인자.
-    mini 는 스크립트 기본값 그대로 (경로 인자를 넘기지 않는다 — 검증된 이전 동작), full 은 전부 명시하고 logs 도 logs/full/ 로 나눈다."""
+    mini · full 모두 데이터 루트 기준 경로를 명시한다 — 스크립트 기본값 `data/scene_data/...` 는 이 PC 에만 있는 링크이고,
+    21 의 mesh 는 gs_vlnpe scene_meta 대신 `<루트>/scene_data/mp3d_n1` 에서 찾는다 (scene_meta 를 만드는 gs_vlnpe 01 은 pxr 이 필요).
+    full 은 logs 도 logs/full/ 로 나눈다."""
     root = DATA_ROOTS[args.data]
     LD = L if args.data == 'mini' else f'{L}/full'
-    full = args.data == 'full'
+    paths = ['--data_root', f'{root}/vln_ce/traj_data/r2r', '--raw_root', f'{root}/vln_ce/raw_data/r2r',
+             '--scene_root', f'{root}/scene_data/mp3d_ce/mp3d']
     return {
         'root': root, 'LD': LD,
-        'gt': ['--data_root', f'{root}/vln_ce/traj_data/r2r', '--raw_root', f'{root}/vln_ce/raw_data/r2r',
-               '--scene_root', f'{root}/scene_data/mp3d_ce/mp3d', '--out_dir', f'{LD}/common/compare_vlnce_gt'] if full else [],
-        'refine': ['--data_root', f'{root}/vln_ce/traj_data/r2r', '--raw_root', f'{root}/vln_ce/raw_data/r2r',
-                   '--scene_root', f'{root}/scene_data/mp3d_ce/mp3d', '--out_dir', f'{LD}/common/refine_paths'] if full else [],
-        'nav': ['--nav02_dir', f'{LD}/common/compare_vlnce_gt/scenes', '--nav03_dir', f'{LD}/common/refine_paths/scenes'] if full else [],
+        'gt': paths + ['--out_dir', f'{LD}/common/compare_vlnce_gt'],
+        'refine': paths + ['--mesh_root', f'{root}/scene_data/mp3d_n1', '--out_dir', f'{LD}/common/refine_paths'],
+        'nav': ['--nav02_dir', f'{LD}/common/compare_vlnce_gt/scenes', '--nav03_dir', f'{LD}/common/refine_paths/scenes'] if args.data == 'full' else [],
     }
 
 
