@@ -52,6 +52,7 @@ python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --stage 3,4 --ove
 | `--episodes_json` | `{씬: [릴리스 ep]}` 로 일부만 | vlnce 기본 = 전부. vlnpe 는 아직 `logs/common/episodes.json` 이 필요하다 |
 | `--stairs_episode_ids` | noeun straighten_stairs 가 펼 ep | 기본 86 (v5 걷기를 보고 사람이 고른 값) |
 | `--label_method` · `--label_model` | 라벨 방법 · VLM | 기본 b1 · qwen3vl8b-local |
+| `--vlm_server auto \| external` | 라벨 단계 VLM 서버 | auto = 안 떠 있으면 띄우고 끝나면 내림 (이미 떠 있던 서버는 그대로) |
 
 컨테이너 (모두 저장소 루트에서): **habitat** = `dnwn24/internnav:torch2.9.0-cuda13.0-habitat-jazzy-5090` 의 `/usr/bin/python`
 (habitat-sim 0.3.3 — torch2.9.1 이미지에는 없다), **isaac** = `dnwn24/internnav:torch2.9.0-cuda13.0-issacsim5.1.0-ros2-jazzy-5090` 의
@@ -69,7 +70,7 @@ python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --stage 3,4 --ove
 | 11 | `vlnce/11_compare_gt.py` → `common/compare_vlnce_gt.py` | 릴리스 GT 를 같은 지도·도구로 다시 계획 | `logs/common/compare_vlnce_gt/scenes/` (51 이 층 이동 표시를 읽는다) |
 | 21 | `vlnce/21_refine_paths.py` → `common/refine_paths.py` | 공식 navmesh 위 wp · sg 경로 다듬기 (실행기는 `--max_flat 0` = 전부) | `logs/common/refine_paths/scenes/<씬>_traj.npz` |
 | 51 | `vlnce/51_render.py` | GreedyGeodesicFollower → habitat 렌더 → 릴리스 포맷 (`--instructions all`) | `data/.../vln_ce_nav3d/traj_data/r2r/nav3d_{wp,sg}` · 색인 `.../traj_data/_index/` |
-| 61 | `vlnce/61_label.py` → `common/label_paths.py` | b1 라벨 (VLM 서버 `common/vlm_server.py` 필요) | `data/.../instruction_labels_nav3d/` |
+| 61 | `vlnce/61_label.py` → `common/label_paths.py` | b1 라벨 (VLM 서버 `common/vlm_server.py` — 실행기는 안 떠 있으면 띄우고 끝나면 내린다) | `data/.../instruction_labels_nav3d/` |
 | 71 | `vlnce/71_loader_check.py` → `checks/loader_check.py` | 학습 로더로 읽기 | `logs/checks/loader_check/summary_vlnce_nav3d.json` |
 
 ### vlnpe — MP3D → vln_pe (habitat + isaac)

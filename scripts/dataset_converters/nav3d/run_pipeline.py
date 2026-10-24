@@ -24,10 +24,14 @@
 """
 
 import argparse
+import contextlib
 import functools
+import os
 import re
+import signal
 import subprocess
 import sys
+import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -41,6 +45,7 @@ D = 'data/InternData-N1-v0.5-mini'
 PATHS = f'{L}/noeun/paths'      # 노은역 paths json (04 → 보정 → v6)
 WALK = f'{L}/noeun/walk'        # 노은역 걷기 입력(eps_*)·결과(walk_*)
 DATA_ROOTS = {'mini': 'data/InternData-N1-v0.5-mini', 'full': 'data/InternData-N1'}   # utils/data_roots.py 와 같은 값
+LOCAL_VLM_MODEL = 'qwen3vl8b-local'      # common/vlm_server.py 가 띄우는 모델 (configs/model/qwen3vl8b-local.yaml)
 LABEL_MODELS = 'scripts/dataset_converters/instruction_labeling/configs/model'
 STAGES = {1: '준비', 2: '경로 만들기', 3: '경로 보정', 4: '걷기', 5: '렌더', 6: '라벨', 7: '검사'}
 # 노은역 RBQ 걷기 설정 (walk_noeun_v3 · v5trig json 의 args 에 남은 값): 전진 중 방향 보정 1.5 · 제자리 회전 문턱 30° · 높이 스캔 필터 −0.2
@@ -236,6 +241,10 @@ def parse():
     ap.add_argument('--walk_workers', type=int, default=5, help='noeun RBQ 걷기 동시 프로세스 (24 코어에 5)')
     ap.add_argument('--label_method', default='b1', help='instruction_labeling configs/methods/<이름>.yaml')
     ap.add_argument('--label_model', default='qwen3vl8b-local', help='configs/model/<이름>.yaml (기본 = 이 PC 의 로컬 서버)')
+    ap.add_argument('--vlm_server', default='auto', choices=['auto', 'external'],
+                    help='auto = 라벨 단계에서 VLM 서버가 안 떠 있으면 띄우고 끝나면 내린다 (qwen3vl8b-local 만) / external = 직접 띄운 서버만 쓴다')
+    ap.add_argument('--vlm_pythonpath', default='/ws/src/InternNav/.venv_label/site', help='VLM 서버용 transformers 4.57 설치 경로')
+    ap.add_argument('--vlm_wait_s', type=int, default=900, help='서버 준비를 기다릴 최대 시간 (모델 로드 ≈ 4 분)')
     return ap.parse_args()
 
 
@@ -306,6 +315,57 @@ def label_server_error(model: str):
                 f'  PYTHONPATH=/ws/src/InternNav/.venv_label/site {HAB} {N}/common/vlm_server.py')
 
 
+def vlm_server_cmd(args) -> list:
+    m = re.search(r':(\d+)', label_base_url(args.label_model) or '')
+    return [HAB, f'{N}/common/vlm_server.py', '--port', m.group(1) if m else '8200']
+
+
+def label_base_url(model: str):
+    cfg = Path(LABEL_MODELS) / f'{model}.yaml'
+    m = re.search(r'^base_url:\s*(\S+)', cfg.read_text(), re.M) if cfg.exists() else None
+    return m.group(1) if m else None
+
+
+@contextlib.contextmanager
+def vlm_server(args):
+    """라벨 단계 동안 VLM 서버. 이미 떠 있으면 그대로 쓰고 내리지 않는다 (다른 곳에서 쓰는 서버일 수 있다).
+    안 떠 있고 model 이 이 PC 로컬 서버(LOCAL_VLM_MODEL)면 띄우고, 준비될 때까지 기다리고, 끝나면(실패해도) 내린다.
+    yield 값 = 문제 설명 (없으면 None)."""
+    err = label_server_error(args.label_model)
+    if err is None or args.vlm_server == 'external' or args.label_model != LOCAL_VLM_MODEL:
+        yield err
+        return
+    log = Path(f'{L}/run_pipeline/{args.target}/vlm_server.log')
+    log.parent.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join(x for x in (args.vlm_pythonpath, os.environ.get('PYTHONPATH', '')) if x))
+    cmd = vlm_server_cmd(args)
+    print(f'  VLM 서버가 안 떠 있어 띄운다 (끝나면 내린다): PYTHONPATH={args.vlm_pythonpath} {" ".join(cmd)} · 로그 {log}', flush=True)
+    with open(log, 'w') as f:
+        proc = subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, env=env, start_new_session=True)
+    try:
+        t0, ready = time.time(), False
+        while time.time() - t0 < args.vlm_wait_s and proc.poll() is None:
+            if label_server_error(args.label_model) is None:
+                ready = True
+                break
+            time.sleep(10)
+        if ready:
+            print(f'  VLM 서버 준비 ({time.time() - t0:.0f} s)', flush=True)
+            yield None
+        else:
+            why = f'종료됨 (exit {proc.returncode})' if proc.poll() is not None else f'{args.vlm_wait_s} s 안에 응답 없음'
+            yield f'VLM 서버를 띄웠지만 {why} — 로그 {log}'
+    finally:
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+        print('  VLM 서버 내림', flush=True)
+
+
 def run_one(cmd, log: Path = None) -> int:
     if log is None:
         return subprocess.run(cmd).returncode
@@ -358,6 +418,8 @@ def main():
                 print(f'  입력 {"있음" if Path(p).exists() else "없음"}: {p}')
             if s.outputs:
                 print(f'  출력 (이미 있으면 --overwrite 필요): {", ".join(s.outputs)}')
+            if s.name == 'label' and args.label_model == LOCAL_VLM_MODEL and args.vlm_server == 'auto':
+                print(f'  (VLM 서버가 안 떠 있으면 먼저 띄우고 끝나면 내림) PYTHONPATH={args.vlm_pythonpath} {" ".join(vlm_server_cmd(args))}')
             continue
         if not env_ok(s.env):
             sys.exit(f'[{s.name}] 는 {s.env} 컨테이너에서 돈다 (지금 컨테이너에 없음). 거기서 이어서:\n'
@@ -369,9 +431,11 @@ def main():
         if exist and not args.overwrite:
             sys.exit(f'[{s.name}] 출력이 이미 있다 ({len(exist)} 개, 예: {exist[:3]}). 덮어쓰려면 --overwrite')
         if s.name == 'label':
-            err = label_server_error(args.label_model)
-            if err:
-                sys.exit(f'[{s.name}] {err}')
+            with vlm_server(args) as err:
+                if err:
+                    sys.exit(f'[{s.name}] {err}')
+                run_step(s, args)
+            continue
         run_step(s, args)
     print(f'\n[{args.target}] {"명령만 출력 (실행 안 함)" if args.dry_run else "끝"}: {", ".join(s.name for s in todo)}')
 
