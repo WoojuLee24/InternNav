@@ -2,6 +2,7 @@
 
     /home/irteam/venvs/gepa/bin/python scripts/dataset_converters/gepa_labeling/prompt_opt/run_gepa.py --run v1
     /home/irteam/venvs/gepa/bin/python scripts/dataset_converters/gepa_labeling/prompt_opt/run_gepa.py --run smoke --smoke
+    /home/irteam/venvs/gepa/bin/python scripts/dataset_converters/gepa_labeling/prompt_opt/run_gepa.py --run v2 --fact-checker sonnet
     /home/irteam/venvs/gepa/bin/python scripts/dataset_converters/gepa_labeling/prompt_opt/run_gepa.py --run v2-joint --set route.facts=memo-v1 --set style.knobs=v2 --set delivery=joint3-v1
 출력: logs/gepa_labeling/gepa/<run>/ — seed.json, best.json (사람이 읽는 최종 글), candidates.json (후보·검증 점수), GEPA 상태, 사례 사진 모음
 데이터: train 의 scene 을 나눠 고치기(train) / 고르기(val) 경로를 뽑는다. val_seen 은 렌더 이미지가 없고, val_unseen 은 쓰지 않는다.
@@ -43,6 +44,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--run', required=True)
     ap.add_argument('--smoke', action='store_true', help='경로 5/5, 예산 20 으로 한 번 (동작 확인용)')
+    ap.add_argument('--fact-checker', default=None, help='사실 검사기 (configs/gepa.yaml fact_checkers 의 이름; 기본 score.fact_checker). 예: rule, gemma, sonnet')
     ap.add_argument('--set', action='append', default=None, help='instruction_labeling 설정 (기본: configs/gepa.yaml sets). 예: --set delivery=joint3-v1')
     a = ap.parse_args()
     from gepa import optimize
@@ -54,13 +56,14 @@ def main():
     run_dir = REPO / 'logs/gepa_labeling/gepa' / a.run
     run_dir.mkdir(parents=True, exist_ok=True)
     seed = {'style_instruction': cfg['style']['knobs']['instruction'], 'facts_header': cfg['route']['facts']['header']}
-    (run_dir / 'seed.json').write_text(json.dumps(dict(seed, _sets=sets, _name=cfg['name']), ensure_ascii=False, indent=1))
+    fc = a.fact_checker or CFG['score'].get('fact_checker', 'rule')
+    (run_dir / 'seed.json').write_text(json.dumps(dict(seed, _sets=sets, _name=cfg['name'], _fact_checker=fc), ensure_ascii=False, indent=1))
     tr, va, val_scenes = split_paths(G['data'], a.smoke)
     (run_dir / 'data.json').write_text(json.dumps({'train': [p['traj'] for p in tr], 'val': [p['traj'] for p in va], 'val_scenes': val_scenes}))
     print(f'train paths {len(tr)}, val paths {len(va)} (val scenes {val_scenes})', flush=True)
     res = optimize(
         seed_candidate=seed, trainset=tr, valset=va,
-        adapter=NavLabelAdapter(cfg, client, run_dir),
+        adapter=NavLabelAdapter(cfg, client, run_dir, fact_checker=fc),
         reflection_lm=reflection_lm(client, cfg['vllm']['model']),
         reflection_prompt_template=G['reflection_templates'],
         candidate_selection_strategy=G['candidate_selection_strategy'],

@@ -1,6 +1,8 @@
 """2단계 채점기: 경로 하나(형제 3문장) 의 점수와 "이유 글".
 
-  사실 (문장별 0/1)  : 틀린 말만 감점, 생략은 감점하지 않는다. 규칙(회전 방향·순서, 계단, 마지막 문장의 방, 최소 정보) + gemma(바꿔 말한 표현)
+  사실 (문장별 0/1)  : 틀린 말만 감점, 생략은 감점하지 않는다. score.fact_checker 로 고른다:
+                       rule  = 규칙(회전 방향·순서, 계단, 마지막 문장의 방, 최소 정보) + use_gemma_facts 면 gemma
+                       모델  = fact_judge.py (경로 사실과 문장을 모델이 비교, verify 면 지적을 다시 따짐) + 규칙의 최소 정보
   손잡이 (0~1)       : 생성 문장을 0단계 규칙(style_types/extract.py rule_features) 으로 다시 재서 끝맺음·설명 방식·길이 중 맞은 비율
   다양성 (0~1)       : 1 − 평균(형제 첫 3단어 같은 쌍 비율, 형제 내용어 Jaccard)
   점수 = 사실 평균 × (w_knob·손잡이 평균 + w_div·다양성)
@@ -144,24 +146,75 @@ def diversity(texts: list) -> tuple:
     return 1 - (f3 + jac) / 2, f3, jac
 
 
-def score_paths(paths: list, rc: dict, use_gemma: bool = None) -> list:
+def score_paths(paths: list, rc: dict, use_gemma: bool = None, checker: str = None) -> list:
     """paths = [{'eps': [ep, ...], 'texts': [...], 'knobs': [{ending, granularity, length} | None, ...]}]
-    -> [{'score', 'fact', 'knob', 'div', 'per': [{text, issues, knob_req, knob_got}], 'feedback'}]"""
+    -> [{'score', 'fact', 'knob', 'div', 'per': [{text, issues, knob_req, knob_got}], 'feedback'}]
+    checker = configs/gepa.yaml fact_checkers 의 이름 (기본 score.fact_checker; 그 항목이 없으면 'rule' = 규칙 + use_gemma_facts)."""
     S = CFG['score']
-    use_gemma = S['use_gemma_facts'] if use_gemma is None else use_gemma
-    flat = []
+    name = checker or S.get('fact_checker', 'rule')
     for p in paths:
         f = path_facts(p['eps'][0], rc)
         p['_facts'], p['_ft'] = f, facts_text(f)
-        for t in p['texts']:
-            flat.append((t, p['_ft']))
+    if CFG.get('fact_checkers', {}).get(name, {'type': 'rule'})['type'] == 'rule':
+        issues = _rule_issues(paths, use_gemma)
+    elif CFG['fact_checkers'][name]['type'] == 'model':
+        issues = _model_issues(paths, rc, CFG['fact_checkers'][name])
+    else:
+        assert False, f"unreachable fact_checkers.{name}.type={CFG['fact_checkers'][name]['type']!r}"
+    return _assemble(paths, issues, rc)
+
+
+def _rule_issues(paths: list, use_gemma: bool = None) -> list:
+    """규칙 (+ use_gemma_facts 면 gemma 한 번 검사) -> 경로마다 [문장마다 [이유, ...]]."""
+    S = CFG['score']
+    use_gemma = S['use_gemma_facts'] if use_gemma is None else use_gemma
+    flat = [(t, p['_ft']) for p in paths for t in p['texts']]
     gem = gemma_fact_issues(flat) if use_gemma else [[] for _ in flat]
     out, k = [], 0
     for p in paths:
-        per = []
-        for ep, t, kn in zip(p['eps'], p['texts'], p['knobs']):
-            iss = (rule_fact_issues(t, p['_facts']) if t else ['empty']) + [f'(checker) {x}' for x in gem[k]]
+        row = []
+        for t in p['texts']:
+            row.append((rule_fact_issues(t, p['_facts']) if t else ['empty']) + [f'(checker) {x}' for x in gem[k]])
             k += 1
+        out.append(row)
+    return out
+
+
+def _model_issues(paths: list, rc: dict, jc: dict) -> list:
+    """모델 검사 (fact_judge.py: 1단계 오류 찾기 + verify 면 2단계 다시 따지기) + 규칙의 최소 정보 검사 (목적지만 말함).
+    모델 답을 끝내 못 받은 문장은 모델 쪽 감점 없음 (최소 정보 검사는 그대로)."""
+    from fact_judge import judge, route_events
+    jc = dict(jc, cwd=str(REPO / jc.get('cwd', 'logs/gepa_labeling')))
+    items, ev = [], {}
+    for pi, p in enumerate(paths):
+        ev[pi] = route_events(p['eps'][0], rc, jc['facts'])
+        for si, t in enumerate(p['texts']):
+            if t:
+                items.append({'id': f'{pi}_{si}', 'ep': pi, 'text': t})
+    calls = judge(items, ev, jc)
+    miss = sum('errors' not in x for x in items)
+    if miss or not all(c['ok'] for c in calls):
+        print(f'[fact_checker] 답을 못 받은 문장 {miss}/{len(items)}, 실패한 호출 {sum(not c["ok"] for c in calls)}/{len(calls)}', flush=True)
+    got = {x['id']: x.get('errors', []) for x in items}
+    out = []
+    for pi, p in enumerate(paths):
+        row = []
+        for si, t in enumerate(p['texts']):
+            if not t:
+                row.append(['empty'])
+                continue
+            mi = [i for i in rule_fact_issues(t, p['_facts']) if i.startswith('only names')]  # 최소 정보: 모델은 생략을 감점하지 않으므로 규칙으로
+            row.append([f'"{e.get("phrase", "")}": {e.get("why", "")}' for e in got[f'{pi}_{si}']] + mi)
+        out.append(row)
+    return out
+
+
+def _assemble(paths: list, issues: list, rc: dict) -> list:
+    S = CFG['score']
+    out = []
+    for p, row in zip(paths, issues):
+        per = []
+        for ep, t, kn, iss in zip(p['eps'], p['texts'], p['knobs'], row):
             got = knob_of(t, ep, rc) if t else None
             km = None if kn is None or got is None else sum(got[a] == kn[a] for a in ('ending', 'granularity', 'length')) / 3
             per.append({'text': t, 'issues': iss, 'knob_req': kn, 'knob_got': got, 'knob': km})

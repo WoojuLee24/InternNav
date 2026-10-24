@@ -1,6 +1,7 @@
 """채점기 검증 (val_unseen dev): 사람(GT) 문장·b1·대조군에 채점기를 돌리고, 일부러 틀리게 고친 문장(left↔right)을 잡는지 본다.
 
     /home/irteam/venvs/gepa/bin/python scripts/dataset_converters/gepa_labeling/prompt_opt/check_scorer.py --labels b1 b1_facts-memo-v1 b1_facts-memo-v1_knobs-v1
+    ... --fact-checker rule   (사실 검사기 고르기; 기본 configs/gepa.yaml score.fact_checker)
 출력: 표 (사실 오류율 규칙/gemma, 손잡이 지킴, 형제 첫 3단어 같음·내용어 겹침) + logs/gepa_labeling/check_scorer/<label>.jsonl (문장별 이유)
 """
 import argparse
@@ -13,7 +14,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from scorer import REPO, knob_of, score_paths  # noqa: E402
+from scorer import CFG, REPO, knob_of, score_paths  # noqa: E402
 
 sys.path.insert(0, str(REPO / 'scripts/dataset_converters/instruction_labeling/label'))
 import annotate as A  # noqa: E402
@@ -40,7 +41,8 @@ def swap_lr(t):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--labels', nargs='+', default=['b1'])
-    ap.add_argument('--gemma', action='store_true', help='gemma 사실 검사도 (기본: configs/gepa.yaml score.use_gemma_facts)')
+    ap.add_argument('--gemma', action='store_true', help='fact_checker=rule 일 때 옛 gemma 사실 검사도 (기본: configs/gepa.yaml score.use_gemma_facts)')
+    ap.add_argument('--fact-checker', default=None, help='사실 검사기 (configs/gepa.yaml fact_checkers 의 이름; 기본 score.fact_checker). 예: rule, gemma, sonnet')
     a = ap.parse_args()
     rc = il_config.load('b1', [])['route']
     its = A.select_subset(items('val_unseen'), 'dev')
@@ -55,12 +57,14 @@ def main():
     sets['b1 left<->right 뒤집음'] = ({k: swap_lr(v) for k, v in b1t.items()}, {})
     out = REPO / 'logs/gepa_labeling/check_scorer'
     out.mkdir(parents=True, exist_ok=True)
+    fc = a.fact_checker or CFG['score'].get('fact_checker', 'rule')
+    print(f'사실 검사기: {fc}' + ('' if fc == 'rule' else ' (아래 "사실 오류(규칙)" 칸 = 모델 지적 + 규칙의 최소 정보 검사)'))
     print(f'{"세트":28s} | 사실 오류(규칙) | 사실 오류(gemma만) | 사실 오류(합) | 손잡이 지킴 | 형제 첫3 같음 | 형제 내용어 겹침 | 점수 | 사람과 분포 차이 끝맺음/설명/길이')
     AX = {'ending': ['stop', 'wait', 'none'], 'granularity': ['turn', 'mixed', 'landmark'], 'length': ['short', 'medium', 'long']}
     ref = None
     for name, (texts, knobs) in sets.items():
         paths = [{'eps': eps, 'texts': [texts[e['episode_id']] for e in eps], 'knobs': [knobs.get(e['episode_id']) for e in eps]} for eps in by.values()]
-        res = score_paths(paths, rc, use_gemma=True if a.gemma else None)
+        res = score_paths(paths, rc, use_gemma=True if a.gemma else None, checker=a.fact_checker)
         per = [x for r in res for x in r['per']]
         rule = sum(any(not i.startswith('(checker)') for i in x['issues']) for x in per) / len(per)
         gem_only = sum(all(i.startswith('(checker)') for i in x['issues']) and bool(x['issues']) for x in per) / len(per)
@@ -74,7 +78,7 @@ def main():
         ref = ref or dist  # 첫 세트 = 사람(GT)
         print(' / '.join(f'{50 * sum(abs(x - y) for x, y in zip(dist[a], ref[a])):.0f}' for a in AX),
               '  (' + '; '.join(f'{a[:4]} ' + '/'.join(f'{100 * x:.0f}' for x in dist[a]) for a in AX) + ')')
-        with open(out / f'{name.split()[0].replace("/", "_")}{"_swap" if "뒤집음" in name else ""}.jsonl', 'w') as f:
+        with open(out / f'{name.split()[0].replace("/", "_")}{"_swap" if "뒤집음" in name else ""}{"" if fc == "rule" else "_" + fc}.jsonl', 'w') as f:
             for x in per:
                 f.write(json.dumps({k: x[k] for k in ('text', 'issues', 'knob_req', 'knob_got')}, ensure_ascii=False) + '\n')
 

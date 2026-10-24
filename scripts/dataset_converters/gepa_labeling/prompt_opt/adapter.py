@@ -71,8 +71,9 @@ class NavLabelAdapter:
 
     propose_new_texts = None  # GEPA 기본 제안기(instruction_proposal) 를 쓴다
 
-    def __init__(self, cfg: dict, client, run_dir: Path):
+    def __init__(self, cfg: dict, client, run_dir: Path, fact_checker: str = None):
         self.cfg, self.client, self.run_dir = cfg, client, run_dir
+        self.fact_checker = fact_checker  # None = configs/gepa.yaml score.fact_checker
         self.workers = CFG['gepa']['workers']
         self.rc = cfg['route']
 
@@ -103,7 +104,7 @@ class NavLabelAdapter:
             per_path[i].append((it, r))
         paths = [{'eps': [it['ep'] for it, _ in pp], 'texts': [r['text'] for _, r in pp],
                   'knobs': [r.get('inputs', {}).get('knobs') for _, r in pp]} for pp in per_path]
-        sc = score_paths(paths, self.rc)
+        sc = score_paths(paths, self.rc, checker=self.fact_checker)
         trajs = None
         if capture_traces:
             trajs = []
@@ -129,7 +130,7 @@ class NavLabelAdapter:
         with ThreadPoolExecutor(self.workers) as ex:
             res = list(ex.map(gen, batch))
         paths = [{'eps': [it['ep'] for it in d['items']], 'texts': r['texts'], 'knobs': r['knobs']} for d, r in zip(batch, res)]
-        sc = score_paths(paths, self.rc)
+        sc = score_paths(paths, self.rc, checker=self.fact_checker)
         trajs = None
         if capture_traces:
             trajs = []
