@@ -41,6 +41,7 @@ python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnce
 | `--jobs N` | 씬마다 도는 단계(11 · 21)의 동시 프로세스 수 | 4 |
 | `--episodes_json f` | `{씬: [릴리스 episode_index]}` 로 일부만 | vlnce: 빈값 = 전부. vlnpe: 아직 필요 (기본 `logs/common/episodes.json`) |
 | `--label_method` · `--label_model` | 라벨 방법 · VLM | b1 · qwen3vl8b-local |
+| `--vlm_server auto \| external` | 라벨 단계 VLM 서버를 실행기가 띄우고 내릴지 | auto (안 떠 있으면 띄우고 끝나면 내림, 이미 떠 있던 서버는 그대로) |
 | `--stairs_episode_ids` · `--walk_workers` | noeun 계단 직선화 ep · RBQ 걷기 동시 수 | 86 · 5 |
 
 ## 3. vlnce (MP3D → vln_ce)
@@ -53,10 +54,18 @@ python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnce --stage 1,2,5,7
 python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnce --stage 1,2,5,7 --scenes 17DRP5sb8fy,1LXtFkjw3qL --max_episodes 3
 # full (학습 서버, data/InternData-N1 이 있을 때). logs 는 logs/full/ 로 따로 쌓인다
 python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnce --data full --stage 1,2,5,7
-# 라벨 (6 단계): VLM 서버를 먼저 띄운다 (다른 터미널, habitat 컨테이너)
-PYTHONPATH=/ws/src/InternNav/.venv_label/site /usr/bin/python scripts/dataset_converters/nav3d/common/vlm_server.py
+# 처음부터 라벨까지 한 번에 (VLM 서버는 실행기가 띄우고 끝나면 내린다)
+python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnce
+# 라벨만
 python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnce --only label
 ```
+
+라벨(61) 단계의 VLM 서버 (`--vlm_server auto`, 기본):
+- 서버가 안 떠 있으면 실행기가 `common/vlm_server.py` 를 띄우고, 응답할 때까지 기다린 뒤(모델 로드 ≈ 4 분, 최대 `--vlm_wait_s` 900 초) 라벨링하고,
+  끝나면 — 실패해도 — 내린다. 로그: `logs/run_pipeline/vlnce/vlm_server.log`.
+- 이미 떠 있으면 그 서버를 쓰고 **내리지 않는다** (다른 곳에서 쓰는 서버일 수 있다).
+- 이 PC 로컬 서버 모델(`qwen3vl8b-local`)만 자동으로 띄운다. 다른 `--label_model` 이나 `--vlm_server external` 이면 떠 있는지만 확인한다.
+- 서버를 직접 띄우려면: `PYTHONPATH=/ws/src/InternNav/.venv_label/site /usr/bin/python scripts/dataset_converters/nav3d/common/vlm_server.py`
 
 | 출력 | mini | full |
 |---|---|---|

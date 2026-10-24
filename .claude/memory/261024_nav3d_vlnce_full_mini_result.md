@@ -21,6 +21,11 @@
 | T2 새 기본 | 실행기 `vlnce --stage 1,2,5,7 --scenes 17DRP5sb8fy,1LXtFkjw3qL --max_episodes 3` (167 s) | wp · sg 각 57 ep = 그 경로들의 릴리스 ep 목록과 정확히 같음 · 지시문 = 릴리스 · 같은 경로 3 ep 는 프레임·action·자세 같음 · P1~P5 PASS · 로더 PASS |
 | T3 라벨 | `--only label --max_episodes 6` | 생성됨. 같은 경로 3 지시문이 거의 같은 문장 (b1 `style.sibling: none`) — 사용자 결정: 그대로 (labeling 은 만드는 중) |
 
+## 라벨 단계 VLM 서버 자동 (`run_pipeline --vlm_server auto`, 기본)
+- 안 떠 있으면 실행기가 `common/vlm_server.py` 를 띄우고 응답을 기다린 뒤 라벨링, 끝나면(실패해도) 내린다. 이미 떠 있던 서버는 쓰고 안 내린다.
+- 확인: (A) 서버 없음 → 띄움 · 새 라벨 6 개 생성(오류 0) · 내림, (B) 미리 띄운 서버 → 그대로 두고 사용, (C) 라벨 단계 실패 → 그래도 내림.
+  끝난 뒤 프로세스 0 · 포트 8200 응답 없음 · GPU 사용 없음.
+
 ## 남은 것
 - 렌더된 데이터의 지시문은 릴리스 사람 지시문(GT 경로 설명) — 라벨을 데이터에 넣는 단계는 아직 없다 (labeling 진행 중).
 - full 은 이 PC 에 없어 `--dry_run` 경로까지만 확인. full 씬 구성 미확인 (21 은 gs_vlnpe scene_meta 를 쓴다).
