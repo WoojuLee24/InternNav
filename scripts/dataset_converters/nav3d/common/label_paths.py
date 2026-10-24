@@ -44,6 +44,7 @@ sys.path.insert(0, str(HERE.parent / 'instruction_labeling' / 'render'))
 import config as LC  # noqa: E402
 import e2e  # noqa: E402
 import nav3d_utils as nu  # noqa: E402
+from data_roots import apply_data_root  # noqa: E402
 from route_words import CODE_VERSION  # noqa: E402
 from sources import REPO, episode_track, strip_gt  # noqa: E402
 
@@ -57,7 +58,9 @@ def parse():
     ap.add_argument('--set', action='append', default=[], help='annotate.py 와 같음. model 은 --model 로')
     ap.add_argument('--model', default='qwen3vl8b-local', help='configs/model/<name>.yaml')
     ap.add_argument('--seed', type=int, default=0, help='cfg seed (0 = b0 기본). 다른 값이면 이름에 _seed<N>')
-    ap.add_argument('--episodes_json', default='scripts/dataset_converters/nav3d/logs/common/episodes.json', help='gt·nav3d 의 (scene, 릴리스 episode_index)')
+    ap.add_argument('--episodes_json', default='', help='gt·nav3d 의 {scene: [릴리스 episode_index]} 로 일부만. '
+                    '빈값 = nav3d 는 51 이 내보낸 에피소드 전부(_index), gt 는 릴리스 전부')
+    ap.add_argument('--data_root', default='', help='빈값 = render.yaml 경로 (mini). full: data/InternData-N1')
     ap.add_argument('--nav03_dir', default='scripts/dataset_converters/nav3d/logs/common/refine_paths/scenes')
     ap.add_argument('--nav3d_root', default=f'{D}/vln_ce_nav3d/traj_data/r2r')
     ap.add_argument('--noeun_root', default=f'{D}/vln_ce_noeun_nav3d/traj_data/r2r')
@@ -116,6 +119,10 @@ def quat_from_nav3d_yaw(theta: float) -> list:
 def items_gt_nav3d(args, source: str) -> list:
     from release_io import load_cfg, match_raw, release_episodes
     rc = load_cfg(HERE.parent / 'instruction_labeling' / 'configs' / 'render.yaml')
+    if args.data_root:
+        apply_data_root(rc, args.data_root)
+    if not args.episodes_json:
+        return items_all(args, source, rc)
     sel = json.loads(Path(args.episodes_json).read_text())
     out = []
     for scene, eps in sel.items():
@@ -140,6 +147,53 @@ def items_gt_nav3d(args, source: str) -> list:
             out.append({'ep': e, 'scene': scene, 'root': root, 'episode_index': idx[ep], 'split': 'train', 'sib_idx': 0,
                         'src': {'source': source, 'release_episode_index': ep}})
     return out
+
+
+def items_all(args, source: str, rc) -> list:
+    """목록 없이 전부: nav3d 는 51 이 내보낸 에피소드(_index 한 줄 = 지시문 하나), gt 는 릴리스 에피소드 전부.
+    sib_idx = 같은 trajectory 안에서 그 지시문의 순서 (0, 1, 2 — 릴리스 R2R 은 경로 하나에 지시문 보통 3 개)."""
+    from release_io import list_release_scenes, match_raw, release_episodes
+    out = []
+    if source == 'gt':
+        for scene in list_release_scenes(rc):
+            rows = []
+            for r in release_episodes(rc, scene):
+                raw = match_raw(rc, scene, r['task'])
+                if raw is not None:
+                    rows.append((r['episode_index'], raw))
+            rank = sibling_rank([(i, raw['trajectory_id']) for i, raw in rows])
+            for i, raw in rows:
+                out.append({'ep': strip_gt(raw), 'scene': scene, 'root': rc['paths']['release_root'], 'episode_index': i,
+                            'split': 'train', 'sib_idx': rank[i], 'src': {'source': source, 'release_episode_index': i}})
+        return out
+    elif source in ('nav3d_wp', 'nav3d_sg'):
+        root = REPO / args.nav3d_root / source
+        for idx_f in sorted((root.parent.parent / '_index' / source).glob('*.jsonl')):
+            scene = idx_f.stem
+            rows = [json.loads(line) for line in open(idx_f)]
+            rel = {e['episode_index']: e for e in release_episodes(rc, scene)}
+            Z = np.load(Path(args.nav03_dir) / f'{scene}_traj.npz')
+            rank = sibling_rank([(r['episode_id'], r['trajectory_id']) for r in rows])
+            for r in rows:
+                key = f'{r["trajectory_id"]}_{source.split("_")[1]}_ref'     # 21 은 trajectory 대표 ep 를 키로 쓴다
+                raw = match_raw(rc, scene, rel[r['episode_id']]['task'])
+                if key not in Z or raw is None:
+                    continue
+                Wh = nu.ours_to_hab(make_vertices(Z[key].astype(np.float64), args))
+                e = dict(strip_gt(raw), reference_path=Wh.tolist(), start_position=Wh[0].tolist(), goals=[{'position': Wh[-1].tolist(), 'radius': 3.0}])
+                out.append({'ep': e, 'scene': scene, 'root': root, 'episode_index': r['episode_index'], 'split': 'train',
+                            'sib_idx': rank[r['episode_id']], 'src': {'source': source, 'release_episode_index': r['episode_id']}})
+        return out
+    else:
+        assert False, f'unreachable source={source!r}'
+
+
+def sibling_rank(pairs) -> dict:
+    """[(릴리스 ep, trajectory_id)] -> {ep: 같은 trajectory 안 순서}."""
+    by_t = {}
+    for ep, t in sorted(pairs):
+        by_t.setdefault(t, []).append(ep)
+    return {ep: k for eps in by_t.values() for k, ep in enumerate(eps)}
 
 
 def items_noeun(args) -> list:

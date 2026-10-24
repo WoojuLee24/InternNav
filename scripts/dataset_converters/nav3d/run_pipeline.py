@@ -40,6 +40,7 @@ L = f'{N}/logs'
 D = 'data/InternData-N1-v0.5-mini'
 PATHS = f'{L}/noeun/paths'      # 노은역 paths json (04 → 보정 → v6)
 WALK = f'{L}/noeun/walk'        # 노은역 걷기 입력(eps_*)·결과(walk_*)
+DATA_ROOTS = {'mini': 'data/InternData-N1-v0.5-mini', 'full': 'data/InternData-N1'}   # lib/data_roots.py 와 같은 값
 LABEL_MODELS = 'scripts/dataset_converters/instruction_labeling/configs/model'
 STAGES = {1: '준비', 2: '경로 만들기', 3: '경로 보정', 4: '걷기', 5: '렌더', 6: '라벨', 7: '검사'}
 # 노은역 RBQ 걷기 설정 (walk_noeun_v3 · v5trig json 의 args 에 남은 값): 전진 중 방향 보정 1.5 · 제자리 회전 문턱 30° · 높이 스캔 필터 −0.2
@@ -57,36 +58,66 @@ class Step:
     outputs: list = field(default_factory=list)   # 이미 있으면 --overwrite 없이 멈춘다. '{scene}' 은 씬마다
 
 
-def mp3d_paths_steps(ds: str, jobs: int) -> list:
+def data_args(args) -> dict:
+    """--data 에 따른 데이터 루트 · logs 위치 · 스크립트에 넘길 경로 인자.
+    mini 는 스크립트 기본값 그대로 (경로 인자를 넘기지 않는다 — 검증된 이전 동작), full 은 전부 명시하고 logs 도 logs/full/ 로 나눈다."""
+    root = DATA_ROOTS[args.data]
+    LD = L if args.data == 'mini' else f'{L}/full'
+    full = args.data == 'full'
+    return {
+        'root': root, 'LD': LD,
+        'gt': ['--data_root', f'{root}/vln_ce/traj_data/r2r', '--raw_root', f'{root}/vln_ce/raw_data/r2r',
+               '--scene_root', f'{root}/scene_data/mp3d_ce/mp3d', '--out_dir', f'{LD}/common/compare_vlnce_gt'] if full else [],
+        'refine': ['--data_root', f'{root}/vln_ce/traj_data/r2r', '--raw_root', f'{root}/vln_ce/raw_data/r2r',
+                   '--scene_root', f'{root}/scene_data/mp3d_ce/mp3d', '--out_dir', f'{LD}/common/refine_paths'] if full else [],
+        'nav': ['--nav02_dir', f'{LD}/common/compare_vlnce_gt/scenes', '--nav03_dir', f'{LD}/common/refine_paths/scenes'] if full else [],
+    }
+
+
+def mp3d_paths_steps(ds: str, args) -> list:
     """vlnce · vlnpe 가 같이 쓰는 앞 단계 (공식 MP3D navmesh 위 경로). 연결 파일은 데이터셋 폴더에."""
+    da, jobs = data_args(args), args.jobs
+    n = args.max_episodes
     return [
         Step(1, 'compare_gt', 'habitat', f'릴리스 GT 를 같은 지도·도구로 다시 계획 (층 이동 표시를 뒤 단계가 읽는다, 씬마다 동시 {jobs})',
-             [[HAB, f'{N}/{ds}/11_compare_gt.py', '--scene', '{scene}', '--recompute'],
-              [HAB, f'{N}/{ds}/11_compare_gt.py', '--aggregate']],
-             outputs=[f'{L}/common/compare_vlnce_gt/scenes/{{scene}}.json']),
-        Step(2, 'refine_paths', 'habitat', f'navmesh find_path 경로 다듬기 (wp = GT 경유점, sg = 시작·끝만, 씬마다 동시 {jobs})',
-             [[HAB, f'{N}/{ds}/21_refine_paths.py', '--scene', '{scene}'],
-              [HAB, f'{N}/{ds}/21_refine_paths.py', '--aggregate']],
-             outputs=[f'{L}/common/refine_paths/scenes/{{scene}}_traj.npz']),
+             [[HAB, f'{N}/{ds}/11_compare_gt.py', '--scene', '{scene}', '--recompute', *da['gt']],
+              [HAB, f'{N}/{ds}/11_compare_gt.py', '--aggregate', *da['gt']]],
+             outputs=[f'{da["LD"]}/common/compare_vlnce_gt/scenes/{{scene}}.json']),
+        Step(2, 'refine_paths', 'habitat', f'navmesh find_path 경로 다듬기 (wp = GT 경유점, sg = 시작·끝만; 평지 경로 '
+             f'{"씬마다 " + str(n) + " 개까지" if n else "전부"} + 층 이동 전부, 씬마다 동시 {jobs})',
+             [[HAB, f'{N}/{ds}/21_refine_paths.py', '--scene', '{scene}', '--max_flat', str(n), *da['refine']],
+              [HAB, f'{N}/{ds}/21_refine_paths.py', '--aggregate', *da['refine']]],
+             outputs=[f'{da["LD"]}/common/refine_paths/scenes/{{scene}}_traj.npz']),
     ]
 
 
 def pipelines(args) -> dict:
     n = args.max_episodes
     lim = lambda flag: [flag, str(n)] if n else []  # noqa: E731 — 일부 에피소드만 (검증용)
-    ep = ['--episodes_json', args.episodes_json]
-    vlnce = mp3d_paths_steps('vlnce', args.jobs) + [
-        Step(5, 'render', 'habitat', 'wp·sg 경로 → GreedyGeodesicFollower → habitat 렌더 → 릴리스 포맷',
-             [[HAB, f'{N}/vlnce/51_render.py', *ep]],
-             inputs=[args.episodes_json], outputs=[f'{D}/vln_ce_nav3d/traj_data/r2r']),
+    ep = ['--episodes_json', args.episodes_json] if args.episodes_json else []      # 빈값 = 학습 데이터와 같은 에피소드 전부
+    sel_in = [args.episodes_json] if args.episodes_json else []
+    da = data_args(args)
+    root, LD = da['root'], da['LD']
+    nav3d_out = f'{root}/vln_ce_nav3d/traj_data/r2r'
+    full_render = ['--data_root', root, '--out_root', nav3d_out, '--out_dir', f'{LD}/vlnce/51_render', *da['nav']] if args.data == 'full' else []
+    full_label = ['--data_root', root, '--nav3d_root', nav3d_out, '--out_root', f'{root}/instruction_labels_nav3d',
+                  '--nav03_dir', f'{LD}/common/refine_paths/scenes'] if args.data == 'full' else []
+    scenes = ['--scenes', args.scenes] if args.scenes else []
+    vlnce = mp3d_paths_steps('vlnce', args) + [
+        Step(5, 'render', 'habitat', 'wp·sg 경로 → GreedyGeodesicFollower → habitat 렌더 → 릴리스 포맷 (지시문마다 에피소드)',
+             [[HAB, f'{N}/vlnce/51_render.py', '--instructions', 'all', *ep, *([] if ep else scenes), *full_render]],
+             inputs=sel_in, outputs=[nav3d_out]),
         Step(6, 'label', 'habitat', f'instruction 라벨 (method {args.label_method}, model {args.label_model}) — VLM 서버 필요',
-             [[HAB, f'{N}/vlnce/61_label.py', '--method', args.label_method, '--model', args.label_model, *ep, *lim('--limit')]],
-             inputs=[args.episodes_json]),
-        Step(7, 'loader_check', 'habitat', '학습 로더로 읽기 (릴리스 한 씬 대조)',
-             [[HAB, f'{N}/vlnce/71_loader_check.py']], outputs=[f'{L}/checks/loader_check/summary_vlnce_nav3d.json']),
+             [[HAB, f'{N}/vlnce/61_label.py', '--method', args.label_method, '--model', args.label_model, *ep, *lim('--limit'), *full_label]],
+             inputs=sel_in),
+        Step(7, 'loader_check', 'habitat', '학습 로더로 nav3d wp · sg 읽기 (릴리스 한 씬 대조)',
+             [[HAB, f'{N}/vlnce/71_loader_check.py',
+               '--vlnce', f'nav3d wp ({args.data})={nav3d_out}/nav3d_wp=125,0,30', '--vlnce', f'nav3d sg ({args.data})={nav3d_out}/nav3d_sg=125,0,30',
+               '--out', f'{LD}/checks/loader_check/summary_vlnce_nav3d.json']],
+             outputs=[f'{LD}/checks/loader_check/summary_vlnce_nav3d.json']),
     ]
     sub_scenes = ['--scenes', args.scenes, '--stairs_scenes', ''] if args.scenes else []
-    vlnpe = mp3d_paths_steps('vlnpe', args.jobs) + [
+    vlnpe = mp3d_paths_steps('vlnpe', args) + [
         Step(5, 'h1_pairs', 'habitat', '(A) vln_pe H1 궤적 ↔ vln_ce ep 짝 (21 경로가 있어야 한다)',
              [[HAB, f'{N}/vlnpe/51_h1_pairs.py']], outputs=[f'{L}/vlnpe/51_h1_pairs/summary.json']),
         Step(5, 'camera_values', 'habitat', '(A) vln_pe GT 에서 카메라 높이·앞 거리·pitch 재기',
@@ -185,6 +216,8 @@ def pipelines(args) -> dict:
 def parse():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('target', choices=['vlnce', 'vlnpe', 'noeun'])
+    ap.add_argument('--data', default='mini', choices=list(DATA_ROOTS),
+                    help='mini = data/InternData-N1-v0.5-mini (기본) · full = data/InternData-N1. 지금은 vlnce 만 (vlnpe 는 나중에, noeun 은 무관)')
     ap.add_argument('--list', action='store_true', help='단계 목록만')
     ap.add_argument('--dry_run', action='store_true', help='명령만 출력 (실행 안 함)')
     ap.add_argument('--stage', default='', help='이 단계 묶음만 (번호 앞자리, 쉼표). 1 준비 2 경로 3 보정 4 걷기 5 렌더 6 라벨 7 검사')
@@ -194,10 +227,11 @@ def parse():
     ap.add_argument('--overwrite', action='store_true', help='출력이 이미 있어도 돌린다')
     ap.add_argument('--scenes', default='', help='씬마다 도는 단계(compare_gt · refine_paths)의 씬 (쉼표). 비우면 vln_ce 릴리스 61 씬 전부')
     ap.add_argument('--jobs', type=int, default=4, help='씬마다 도는 단계의 동시 프로세스 수 (이전 기록과 같은 4)')
-    ap.add_argument('--episodes_json', default=f'{L}/common/episodes.json',
-                    help='vlnce · vlnpe 가 쓸 (씬, 릴리스 episode_index) 목록 — 만든 스크립트가 없다 (README)')
+    ap.add_argument('--episodes_json', default='',
+                    help='{씬: [릴리스 episode_index]} 로 일부만. 빈값 = 학습 데이터와 같은 에피소드 전부 (vlnce). '
+                         'vlnpe 는 아직 이 목록이 필요하다 (기본 logs/common/episodes.json — 나중에 바꾼다)')
     ap.add_argument('--max_episodes', type=int, default=0,
-                    help='일부만 (검증용). 0 = 전부. noeun: 경로 수·렌더 ep, vlnce: 라벨 수, vlnpe: H1 걷기 ep')
+                    help='테스트용 개수 제한. 0 = 전부. vlnce: 씬마다 평지 경로 수(층 이동은 전부) · 라벨 수, noeun: 경로 수 · 렌더 ep, vlnpe: H1 걷기 ep')
     ap.add_argument('--stairs_episode_ids', default='86', help='noeun straighten_stairs 가 펼 ep (v5 걷기를 보고 사람이 고른 값)')
     ap.add_argument('--walk_workers', type=int, default=5, help='noeun RBQ 걷기 동시 프로세스 (24 코어에 5)')
     ap.add_argument('--label_method', default='b1', help='instruction_labeling configs/methods/<이름>.yaml')
@@ -304,6 +338,10 @@ def scripts_of(step: Step) -> str:
 
 def main():
     args = parse()
+    if args.data != 'mini' and args.target != 'vlnce':
+        sys.exit(f'--data {args.data} 는 지금 vlnce 만 된다 (vlnpe 는 나중에, noeun 은 mini · full 과 무관)')
+    if args.target == 'vlnpe' and not args.episodes_json:
+        args.episodes_json = f'{L}/common/episodes.json'      # vlnpe 는 아직 목록이 필요하다 (나중에 vlnce 처럼 바꾼다)
     steps = pipelines(args)[args.target]
     if args.list:
         print(f'{args.target} 단계 ({len(steps)}):')
@@ -340,13 +378,13 @@ def main():
 
 def _resume_args(args, step_name: str) -> list:
     """다른 컨테이너에서 이어 돌릴 때의 인자 — 지금 준 인자에서 --from 만 바꾼다."""
-    out = [args.target, '--from', step_name]
+    out = [args.target, '--from', step_name] + (['--data', args.data] if args.data != 'mini' else [])
     for flag, val in (('--to', args.stop), ('--stage', args.stage), ('--scenes', args.scenes)):
         if val:
             out += [flag, val]
     for flag, val, default in (('--max_episodes', args.max_episodes, 0), ('--jobs', args.jobs, 4),
                                ('--walk_workers', args.walk_workers, 5), ('--stairs_episode_ids', args.stairs_episode_ids, '86'),
-                               ('--episodes_json', args.episodes_json, f'{L}/common/episodes.json')):
+                               ('--episodes_json', args.episodes_json, f'{L}/common/episodes.json' if args.target == 'vlnpe' else '')):
         if val != default:
             out += [flag, str(val)]
     return out + (['--overwrite'] if args.overwrite else [])
