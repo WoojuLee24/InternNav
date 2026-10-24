@@ -9,7 +9,7 @@ habitat 은 표면이 없는 방향의 depth 를 0 으로 둔다(mesh 구멍). v
 - 효과(같은 두 프레임): 1 m 넘게 틀린 픽셀 14.75 → 0.71 % / 9.77 → 0.12 %.
 
 입력·출력은 uint16 mm (0 = 무효) — 릴리스 png 와 같은 단위에서 채운다.
-self-check: `/usr/bin/python scripts/dataset_converters/nav3d/lib/depth_fill.py`
+self-check: `/usr/bin/python scripts/dataset_converters/nav3d/utils/depth_fill.py`
 """
 
 import numpy as np

@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parents[1]   # nav3d/
-sys.path.insert(0, str(HERE / 'lib'))
+sys.path.insert(0, str(HERE / 'utils'))
 LABEL = HERE.parent / 'instruction_labeling'
 for p in (str(HERE), str(LABEL / 'label'), str(LABEL / 'render')):
     if p not in sys.path:

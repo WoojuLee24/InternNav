@@ -37,7 +37,7 @@ import numpy as np
 import pyarrow.parquet as pq
 
 HERE = Path(__file__).resolve().parents[1]   # nav3d/
-sys.path.insert(0, str(HERE / 'lib'))
+sys.path.insert(0, str(HERE / 'utils'))
 GS = HERE.parent / 'gs_vlnpe'
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(GS))

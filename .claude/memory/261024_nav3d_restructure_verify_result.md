@@ -4,7 +4,7 @@
 정리 전 기록은 같은 폴더 `HISTORY.md` (옛 이름 그대로).
 
 ## 이전과 달라진 것
-- 폴더: `vlnce/ vlnpe/ noeun/` (단계) · `common/` (공용 단계 코드) · `lib/` (모듈) · `checks/` (검사) · `*/tools/` (파이프라인 밖) · `*_worker.py` (보조).
+- 폴더: `vlnce/ vlnpe/ noeun/` (단계) · `common/` (공용 단계 코드) · `utils/` (모듈) · `checks/` (검사) · `*/tools/` (파이프라인 밖) · `*_worker.py` (보조).
 - 데이터셋 폴더 파일 = `<단계><순서>_<하는 일>.py`. 번호 앞자리: 1 준비 · 2 경로 · 3 경로 보정 · 4 걷기 · 5 렌더 · 6 라벨 · 7 검사.
 - 연결 파일 (vlnce 11·21·61·71, vlnpe 11·21·71, noeun 21·71·72) = common/checks 스크립트 + 고정 인자 (`TARGET` · `ARGS`).
 - `run_pipeline.py`: `--stage` · `--max_episodes` · `--episodes_json` · `--stairs_episode_ids` · `--walk_workers` 추가.

@@ -12,7 +12,7 @@
 | 라벨 대상 | 목록의 ep, sibling 0 | 51 이 내보낸 에피소드 전부 (`_index`), sib_idx = 같은 경로 안 지시문 순서 0 · 1 · 2 |
 
 새 인자: 21 `--raw_root` · 51 `--instructions` `--data_root` `--scenes` (`--episodes_json` 기본 빈값) · 61 `--data_root` (`--episodes_json` 기본 빈값).
-새 파일 `lib/data_roots.py` (.gitignore 의 `lib/` 에 걸려 `git add -f` 로 추적).
+새 파일 `utils/data_roots.py`. 공용 모듈 폴더는 `lib/` 였다가 `utils/` 로 바꿨다 (.gitignore 의 `lib/` 규칙이 새 파일을 무시해서, 2026-10-24).
 
 ## 검증 (mini, 빈 logs 에서, 검증 사본)
 | | 확인 | 결과 |
