@@ -76,6 +76,9 @@ def parse():
     ap.add_argument('--out_dir', default=f'{LOG}')
     ap.add_argument('--gpu', type=int, default=0)
     ap.add_argument('--no_render', action='store_true', help='캐시만으로 판정·리포트 다시 (채우기·내보내기는 다시 한다)')
+    ap.add_argument('--resume', action='store_true',
+                    help='끝난 trajectory 캐시(meta.json 에 collisions 있음)는 다시 렌더하지 않는다. '
+                         'H200 pod 에서 habitat 렌더가 가끔 segfault(rc 139, 경로와 무관) 해서 다시 띄워 이어 갈 때')
     ap.add_argument('--depth_fill', default='none', choices=['none', 'min19'],
                     help='depth 구멍 채우기. none(기본) = habitat 원본 — 2026-10-15 사용자 결정: 채워도 릴리스와의 차이가 크게 줄지 않음(05a). '
                          'min19 = 3×3 최소 이웃 × 19 (depth_fill.py, 참고용)')
@@ -237,7 +240,9 @@ def main():
                 trajs[tid] = [e] + [dict(e, episode_id=i, instruction={'instruction_text': rw['instruction']['instruction_text']})
                                     for i, rw in siblings.get(ep, [])]
                 tdir = cache / str(tid)
-                if rs is not None:
+                # --resume: 충돌 수까지 쓴 캐시(= 끝난 trajectory)는 다시 렌더하지 않는다
+                done = args.resume and (tdir / 'meta.json').exists() and 'collisions' in json.loads((tdir / 'meta.json').read_text())
+                if rs is not None and not done:
                     meta = RS.render_trajectory(rs, e, cfg, tdir, qt)
                     # 충돌 수: 같은 action 을 다시 재생하며 habitat 의 collided 를 센다 (렌더 없음)
                     rs.set_start(e['start_position'], e['start_rotation'])

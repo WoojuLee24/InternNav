@@ -137,7 +137,9 @@ def run_vlnce(args, cfg):
             import gzip
             eps = json.load(gzip.open(f'{raw_root}/val_unseen/val_unseen.json.gz'))['episodes']
             for raw in sorted((e for e in eps if Path(e['scene_id']).stem == s), key=lambda e: e['episode_id']):
-                yield raw['trajectory_id'], raw, wp_path(raw)
+                G = wp_path(raw)
+                # 이산 Fréchet(같은 루트 판정)은 양쪽이 촘촘해야 맞다 — train GT 처럼 0.25 m(전진 한 걸음) 간격으로
+                yield raw['trajectory_id'], raw, None if G is None else npth._resample(G, 0.25)
             return
         rawidx = vlnce_gt.raw_index(raw_root)
         h_b = vlnce_gt.vlnce_rig.rig_height_m(args.rig)
