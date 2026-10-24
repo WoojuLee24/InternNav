@@ -77,6 +77,19 @@ python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnce --only label
 - 렌더된 데이터의 지시문은 아직 **릴리스 사람 지시문**(GT 경로를 설명한 것)이다. 생성 경로에 맞는 지시문은 instruction labeling(6 단계)으로 만들고 있다.
 - 예전 동작(목록에 있는 ep 만 · 경로마다 에피소드 하나): `51_render.py --episodes_json <목록> --instructions first`.
 
+### val_unseen (평가 split — 2x2 라벨 실험용, 실행기 밖에서 스크립트로)
+릴리스 렌더가 없어 원본 json(`raw_data/r2r/val_unseen`)만 쓴다: GT = reference_path 경유점을 find_path 로 이은 경로, 21 · 51 의 ep 키 = `trajectory_id`,
+내보낸 에피소드의 `episode_id` = 원본 episode_id (색인 `_index` 에 있다 — 라벨을 평가 에피소드에 붙일 때 쓴다). 11 단계는 없다.
+```
+D=data/InternData-N1-v0.5-mini; R=scripts/dataset_converters/nav3d; L=$R/logs/common/refine_paths_val_unseen
+A="--split val_unseen --raw_root $D/vln_ce/raw_data/r2r --scene_root $D/scene_data/mp3d_ce/mp3d --mesh_root $D/scene_data/mp3d_n1 --out_dir $L"
+python3 -c "import gzip,json;print('\n'.join(sorted({e['scene_id'].split('/')[-2] for e in json.load(gzip.open('$D/vln_ce/raw_data/r2r/val_unseen/val_unseen.json.gz'))['episodes']})))" \
+  | xargs -P 11 -I{} /usr/bin/python $R/vlnce/21_refine_paths.py --scene {} --max_flat 0 $A
+/usr/bin/python $R/vlnce/21_refine_paths.py --aggregate $A
+/usr/bin/python $R/vlnce/51_render.py --split val_unseen --nav03_dir $L/scenes --out_dir $R/logs/vlnce/51_render_val_unseen
+```
+출력: `data/InternData-N1-v0.5-mini/vln_ce_nav3d_val_unseen/traj_data/{r2r/nav3d_{wp,sg},_index,_traj_cache}` (train 과 폴더를 나눈다).
+
 ## 4. noeun (노은역 → vln_ce · vln_pe v6)
 ```
 python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --list

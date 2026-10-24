@@ -63,10 +63,14 @@ def parse():
     ap.add_argument('--instructions', default='all', choices=['all', 'first'],
                     help='all = 지시문마다 에피소드 (릴리스와 같은 단위) / first = trajectory 마다 하나 (이전 동작)')
     ap.add_argument('--data_root', default='', help='빈값 = render.yaml 경로 (mini). full: data/InternData-N1')
+    ap.add_argument('--split', default='train', choices=['train', 'val_unseen'],
+                    help='train = 릴리스 ep 기준 (이전 동작). val_unseen = 원본 json 기준 (21 --split val_unseen 결과, ep 키 = trajectory_id, '
+                         'episode_id = 원본 episode_id). --nav03_dir 를 그 21 결과로 준다')
     ap.add_argument('--nav03_dir', default='scripts/dataset_converters/nav3d/logs/common/refine_paths/scenes')
     ap.add_argument('--nav02_dir', default='scripts/dataset_converters/nav3d/logs/common/compare_vlnce_gt/scenes')
     ap.add_argument('--modes', default='wp,sg')
-    ap.add_argument('--out_root', default='data/InternData-N1-v0.5-mini/vln_ce_nav3d/traj_data/r2r', help='<split>/<scene>/ 로 쓴다')
+    ap.add_argument('--out_root', default='', help='<split>/<scene>/ 로 쓴다. 빈값 = <데이터 루트>/vln_ce_nav3d/traj_data/r2r '
+                    '(val_unseen 은 vln_ce_nav3d_val_unseen — train 과 _index · _traj_cache 도 나눈다)')
     ap.add_argument('--waypoint_m', type=float, default=0.5, help='follower 경유점 간격 (nav3d 경로를 이 간격으로 솎음)')
     ap.add_argument('--goal_radius', type=float, default=0.25, help='경유점 도달 반경 (release config 와 같게)')
     ap.add_argument('--out_dir', default=f'{LOG}')
@@ -83,9 +87,10 @@ def all_trajectories(cfg, args) -> dict:
     from release_io import list_release_scenes
     want = set(args.scenes.split(',')) if args.scenes else None
     sel = {}
-    for scene in list_release_scenes(cfg):
+    scenes = list_release_scenes(cfg) if args.split == 'train' else sorted(p.stem[:-5] for p in Path(args.nav03_dir).glob('*_traj.npz'))
+    for scene in scenes:
         z = Path(args.nav03_dir) / f'{scene}_traj.npz'
-        if (want and scene not in want) or not z.exists() or not (Path(args.nav02_dir) / f'{scene}.json').exists():
+        if (want and scene not in want) or not z.exists() or (args.split == 'train' and not (Path(args.nav02_dir) / f'{scene}.json').exists()):
             continue
         eps = sorted({int(m.group(1)) for k in np.load(z).files if (m := re.match(r'^(\d+)_(wp|sg)_ref$', k))})
         if eps:
@@ -106,6 +111,30 @@ def instruction_siblings(cfg, scene, rel, eps) -> dict:
         raw = match_raw(cfg, scene, rel[ep]['task'])
         out[ep] = [(i, rw) for i, rw in by_tid.get(raw['trajectory_id'], []) if i != ep] if raw is not None else []
     return out
+
+
+def scene_sources(cfg, args, scene, eps, Z):
+    """rep {ep: (episode_id, 대표 raw)} · siblings {ep: [(episode_id, raw)]} · mf {ep: {multifloor, gt_dz_m}}.
+    train: episode_id = 릴리스 episode_index, 층 이동 = 11. val_unseen: episode_id = 원본 episode_id, 층 이동 = 21 의 GT(경유점 경로)."""
+    from release_io import match_raw, release_episodes
+    if args.split == 'train':
+        mf = {e['ep']: e for e in json.load(open(Path(args.nav02_dir) / f'{scene}.json'))['episodes']}
+        rel = {e['episode_index']: e for e in release_episodes(cfg, scene)}
+        siblings = instruction_siblings(cfg, scene, rel, eps) if args.instructions == 'all' else {}
+        return {ep: (ep, match_raw(cfg, scene, rel[ep]['task'])) for ep in eps}, siblings, mf
+    import gzip
+    by_tid = {}
+    for e in json.load(gzip.open(cfg['paths']['raw_root'] / args.split / f'{args.split}.json.gz'))['episodes']:
+        if Path(e['scene_id']).stem == scene:
+            by_tid.setdefault(e['trajectory_id'], []).append(e)
+    rep, siblings, mf = {}, {}, {}
+    for ep in eps:
+        raws = sorted(by_tid[ep], key=lambda e: e['episode_id'])
+        rep[ep] = (raws[0]['episode_id'], raws[0])
+        siblings[ep] = [(rw['episode_id'], rw) for rw in raws[1:]] if args.instructions == 'all' else []
+        dz = float(Z[f'{ep}_gt'][-1, 2] - Z[f'{ep}_gt'][0, 2])
+        mf[ep] = {'multifloor': abs(dz) > 0.5, 'gt_dz_m': dz}   # 0.5 = refine_paths.MULTIFLOOR_DZ_M
+    return rep, siblings, mf
 
 
 def resample(P: np.ndarray, step: float) -> np.ndarray:
@@ -162,7 +191,7 @@ def apply_depth_fill(tdir: Path, rigs: list, mode: str) -> dict:
 
 def main():
     args = parse()
-    from release_io import load_cfg, match_raw, release_episodes, scene_glb
+    from release_io import load_cfg, scene_glb
     from habitat_rig_sim import RigSim, ACTION_NAMES
     import render_split as RS
 
@@ -170,6 +199,8 @@ def main():
     cfg = copy.deepcopy(cfg)
     if args.data_root:
         apply_data_root(cfg, args.data_root)
+    if not args.out_root:
+        args.out_root = f"{args.data_root or 'data/InternData-N1-v0.5-mini'}/vln_ce_nav3d{'' if args.split == 'train' else '_' + args.split}/traj_data/r2r"
     cfg['paths']['out_root'] = Path(args.out_root)
     cfg['paths']['cache_root'] = Path(args.out_root).parent / '_traj_cache'
     cfg['action_gen'] = {'method': 'greedy_wp', 'goal_radius': args.goal_radius, 'max_steps': 1000}
@@ -182,9 +213,7 @@ def main():
     rows = []
     for scene, eps in sel.items():
         Z = np.load(Path(args.nav03_dir) / f'{scene}_traj.npz')
-        mf = {e['ep']: e for e in json.load(open(Path(args.nav02_dir) / f'{scene}.json'))['episodes']}
-        rel = {e['episode_index']: e for e in release_episodes(cfg, scene)}
-        siblings = instruction_siblings(cfg, scene, rel, eps) if args.instructions == 'all' else {}
+        rep, siblings, mf = scene_sources(cfg, args, scene, eps, Z)
         rs = None if args.no_render else RigSim(cfg, scene_glb(cfg, scene), gpu=args.gpu)
         for mode in modes:
             cache = cfg['paths']['cache_root'] / f'nav3d_{mode}' / scene
@@ -195,13 +224,13 @@ def main():
                 if key not in Z:
                     rows.append({'scene': scene, 'ep': ep, 'mode': mode, 'status': 'no_path'})
                     continue
-                raw = match_raw(cfg, scene, rel[ep]['task'])
+                eid, raw = rep[ep]
                 P = Z[key].astype(np.float64)
                 st_mask = Z[f'{ep}_{mode}_ref_st'].astype(bool) if f'{ep}_{mode}_ref_st' in Z else np.zeros(len(P), bool)
                 W = resample(P, args.waypoint_m)
                 Wh = nu.ours_to_hab(W)
                 tid = int(ep)
-                e = {'episode_id': int(ep), 'trajectory_id': tid, 'scene_id': f'{scene}.glb',
+                e = {'episode_id': int(eid), 'trajectory_id': tid, 'scene_id': f'{scene}.glb',
                      'start_position': Wh[0].tolist(), 'start_rotation': raw['start_rotation'],
                      'reference_path': Wh.tolist(), 'goals': [{'position': Wh[-1].tolist()}],
                      'instruction': {'instruction_text': raw['instruction']['instruction_text']}}
@@ -338,7 +367,7 @@ def make_figures(out, args, cfg, ok, sel, modes):
     col = {'gt': 'k', 'wp': '#2b5fa8', 'sg': '#e67e22'}
     for scene, eps in sel.items():
         Z = np.load(Path(args.nav03_dir) / f'{scene}_traj.npz')
-        Zg = np.load(Path(args.nav02_dir) / f'{scene}_traj.npz')
+        Zg = np.load(Path(args.nav02_dir) / f'{scene}_traj.npz') if args.split == 'train' else Z   # val_unseen: 21 이 GT 를 같이 저장
         n = len(eps)
         fig, axs = plt.subplots(2, n, figsize=(4.2 * n, 8), squeeze=False)
         for c, ep in enumerate(eps):
@@ -372,7 +401,7 @@ def make_figures(out, args, cfg, ok, sel, modes):
         # 계단 에피소드 하나 + 평지 하나: GT 렌더 vs wp vs sg 프레임
         show = [e for e in eps if any(r['scene'] == scene and r['ep'] == e and r['multifloor'] for r in ok)][:1] + \
                [e for e in eps if any(r['scene'] == scene and r['ep'] == e and not r['multifloor'] for r in ok)][:1]
-        for ep in show:
+        for ep in show if args.split == 'train' else []:   # 릴리스 GT 렌더가 있는 train 만
             fig, axs = plt.subplots(1 + len(modes), 6, figsize=(18, 2.6 * (1 + len(modes))), squeeze=False)
             rel_dir = Path(cfg['paths']['release_root'])
             T = len(list((rel_dir / scene / 'videos' / 'chunk-000' / 'observation.images.rgb.125cm_30deg').glob(f'episode_{ep:06d}_*.jpg')))

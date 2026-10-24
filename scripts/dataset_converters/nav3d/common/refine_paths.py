@@ -60,6 +60,9 @@ def parse():
                     help='vln_ce 씬 obj mesh 루트 (<root>/<씬>/matterport_mesh/*/*.obj, geometry_utils.find_scene_mesh). '
                          'None = gs_vlnpe/logs/scene_meta/<씬>.json 의 mesh_path (이전 동작 — 그 파일을 만드는 gs_vlnpe 01 은 pxr 이 필요). '
                          '예: data/InternData-N1-v0.5-mini/scene_data/mp3d_n1 (이 PC 61 씬에서 scene_meta 와 같은 파일)')
+    ap.add_argument('--split', default='train', choices=['train', 'val_unseen'],
+                    help='vln_ce. train = 릴리스 parquet GT (이전 동작). val_unseen = 릴리스 렌더가 없어 원본 json 만 쓴다 — '
+                         'GT = reference_path 경유점을 find_path 로 이은 경로(= wp 다듬기 전), ep 키 = trajectory_id. --out_dir 를 split 마다 따로')
     ap.add_argument('--rig', default='125cm_30deg')
     ap.add_argument('--navmesh_dir', default=None,
                     help='vln_ce 씬 navmesh 를 이 폴더의 <scene>.navmesh 로 (예: vln_pe H1 반지름으로 다시 만든 것, build_navmesh_h1.py). '
@@ -121,20 +124,39 @@ def run_vlnce(args, cfg):
     else:
         mesh_path = json.load(open(GS / 'logs' / 'scene_meta' / f'{s}.json'))['mesh_path']
     md = nu.MeshDistance(nu.load_mesh_zup(mesh_path))
-    rawidx = vlnce_gt.raw_index(args.raw_root or vlnce_gt.DEFAULT_RAW_ROOT)
-    h_b = vlnce_gt.vlnce_rig.rig_height_m(args.rig)
-    n_ep = len(glob.glob(f'{args.data_root}/{s}/data/chunk-000/*.parquet'))
+    raw_root = args.raw_root or vlnce_gt.DEFAULT_RAW_ROOT
+
+    def wp_path(raw):
+        wps = [nu.hab_to_ours(np.asarray(p)) for p in raw['reference_path']]
+        legs = [sc.find_path(a, b) for a, b in zip(wps[:-1], wps[1:])]
+        return None if any(L is None for L in legs) else np.vstack([legs[0]] + [L[1:] for L in legs[1:]])
+
+    def episodes():
+        """(ep 키, raw, GT 바닥 경로 | None). train = 릴리스 ep · 릴리스 자세. val_unseen = trajectory_id · 경유점 find_path."""
+        if args.split == 'val_unseen':
+            import gzip
+            eps = json.load(gzip.open(f'{raw_root}/val_unseen/val_unseen.json.gz'))['episodes']
+            for raw in sorted((e for e in eps if Path(e['scene_id']).stem == s), key=lambda e: e['episode_id']):
+                yield raw['trajectory_id'], raw, wp_path(raw)
+            return
+        rawidx = vlnce_gt.raw_index(raw_root)
+        h_b = vlnce_gt.vlnce_rig.rig_height_m(args.rig)
+        for ep in range(len(glob.glob(f'{args.data_root}/{s}/data/chunk-000/*.parquet'))):
+            try:
+                g = vlnce_gt.load_gt_episode_vlnce(args.data_root, s, ep, args.rig)
+                raw = rawidx[(s, vlnce_gt.episode_instruction(args.data_root, s, ep))]
+            except KeyError:
+                continue
+            yield ep, raw, g['cam_xyz'] - [0.0, 0.0, h_b]
+
     seen, flat_n, rows, arrays = set(), 0, [], {}
-    for ep in range(n_ep):
-        try:
-            g = vlnce_gt.load_gt_episode_vlnce(args.data_root, s, ep, args.rig)
-            raw = rawidx[(s, vlnce_gt.episode_instruction(args.data_root, s, ep))]
-        except KeyError:
-            continue
+    for ep, raw, gt in episodes():
         if raw['trajectory_id'] in seen:
             continue
         seen.add(raw['trajectory_id'])
-        gt = g['cam_xyz'] - [0.0, 0.0, h_b]
+        if gt is None:   # val_unseen: 경유점끼리 경로가 없음 — wp · sg 둘 다 못 만든 것으로 센다
+            rows += [{'ep': ep, 'mode': m, 'multifloor': False, 'found': False} for m in ('wp', 'sg')]
+            continue
         mf = bool(abs(gt[-1, 2] - gt[0, 2]) > MULTIFLOOR_DZ_M)
         if not mf:
             if args.max_flat and flat_n >= args.max_flat:
@@ -142,12 +164,10 @@ def run_vlnce(args, cfg):
             flat_n += 1
         for mode in ('wp', 'sg'):
             if mode == 'wp':
-                wps = [nu.hab_to_ours(np.asarray(p)) for p in raw['reference_path']]
-                legs = [sc.find_path(a, b) for a, b in zip(wps[:-1], wps[1:])]
-                if any(L is None for L in legs):
+                P = wp_path(raw)
+                if P is None:
                     rows.append({'ep': ep, 'mode': mode, 'multifloor': mf, 'found': False})
                     continue
-                P = np.vstack([legs[0]] + [L[1:] for L in legs[1:]])
             else:
                 P = sc.find_path(gt[0], gt[-1])
                 if P is None:
