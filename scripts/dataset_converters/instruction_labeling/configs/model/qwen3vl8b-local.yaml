@@ -1,5 +1,5 @@
 # model 그룹 값: 로컬 1 GPU 용. Qwen3-VL-8B-Instruct 를 transformers 로 띄운 OpenAI 호환 서버
-# (scripts/dataset_converters/nav3d/07_vlm_server.py, :8200). Gemma-4-31B(vLLM) 가 없는 PC 에서 smoke 용으로 쓴다.
+# (scripts/dataset_converters/nav3d/common/vlm_server.py, :8200). Gemma-4-31B(vLLM) 가 없는 PC 에서 smoke 용으로 쓴다.
 # managed 블록 없음 -> --backend server 만 지원.
 name: qwen3vl8b-local
 model: qwen3-vl-8b-instruct
