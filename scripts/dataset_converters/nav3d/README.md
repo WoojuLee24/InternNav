@@ -30,24 +30,26 @@
 **연결 파일**: 계산 코드 없이 `common/` 또는 `checks/` 의 스크립트에 그 데이터셋의 고정 인자(`ARGS`)를 앞에 붙여 실행만 한다.
 예: `vlnce/21_refine_paths.py` = `common/refine_paths.py --dataset vln_ce`.
 
-## 실행
+## 실행 — 명령 전체는 [COMMANDS.md](COMMANDS.md), 리포트 위치는 [REPORTS.md](REPORTS.md)
 
 ```
-python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --list
-python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --dry_run
+python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnce --list
+python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnce --stage 1,2,5,7                       # mini 전체 (학습 데이터와 같게)
+python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnce --data full --stage 1,2,5,7           # full (학습 서버)
+python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnce --scenes 17DRP5sb8fy,1LXtFkjw3qL --max_episodes 3   # 테스트
 python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --stage 3,4 --overwrite
-python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnce --scenes 17DRP5sb8fy,1LXtFkjw3qL --max_episodes 2
 ```
 
 | 인자 | 뜻 | 왜 |
 |---|---|---|
 | `vlnce` · `vlnpe` · `noeun` | 데이터셋 | 아래 세 표 |
+| `--data mini \| full` | 공개 학습 데이터 종류 (루트만 다르고 구조는 같다) | 기본 mini. 지금은 vlnce 만. full 은 logs 를 `logs/full/` 로 나눈다 |
 | `--list` · `--dry_run` | 단계 목록 / 명령만 출력 | `--dry_run` 이 각 단계를 따로 돌릴 명령을 그대로 보여 준다 |
 | `--stage 3,4` · `--only a,b` · `--from a` · `--to b` | 돌릴 단계 | 단계 묶음 · 이름 · 구간 |
 | `--overwrite` | 출력이 있어도 돌림 | 기본은 멈춤 — 지금 logs/·data/ 결과를 실수로 덮지 않게 |
-| `--scenes` · `--jobs` | 씬마다 도는 단계(compare_gt · refine_paths)의 씬 · 동시 수 | 기본 = vln_ce 릴리스 61 씬 · 4 |
-| `--max_episodes` | 일부만 (검증용) | noeun: 경로 수·렌더 ep, vlnce: 라벨 수, vlnpe: H1 걷기 ep |
-| `--episodes_json` | vlnce · vlnpe 가 쓸 (씬, 릴리스 ep) 목록 | 기본 `logs/common/episodes.json` |
+| `--scenes` · `--max_episodes` | 테스트용 제한 (씬 · 개수) | 기본 = 전부 (vlnce: 씬마다 평지 경로 N 개 + 층 이동 전부 · 라벨 N 개) |
+| `--jobs` | 씬마다 도는 단계(compare_gt · refine_paths)의 동시 수 | 4 |
+| `--episodes_json` | `{씬: [릴리스 ep]}` 로 일부만 | vlnce 기본 = 전부. vlnpe 는 아직 `logs/common/episodes.json` 이 필요하다 |
 | `--stairs_episode_ids` | noeun straighten_stairs 가 펼 ep | 기본 86 (v5 걷기를 보고 사람이 고른 값) |
 | `--label_method` · `--label_model` | 라벨 방법 · VLM | 기본 b1 · qwen3vl8b-local |
 
@@ -58,11 +60,15 @@ python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnce --scenes 17DRP5sb
 ## 데이터셋별 단계
 
 ### vlnce — MP3D → vln_ce (habitat)
+기본은 **학습 데이터와 같게**: 릴리스 학습 데이터의 모든 경로(trajectory), **지시문마다 에피소드 하나** (R2R 은 경로 하나에 지시문 보통 3 개 —
+경로는 한 번 렌더하고 지시문마다 같은 프레임으로 내보낸다). wp · sg 는 따로 (`nav3d_wp` · `nav3d_sg`).
+렌더된 데이터의 지시문은 아직 릴리스 사람 지시문(GT 경로 설명)이다 — 생성 경로에 맞는 지시문은 instruction labeling(61)으로 만들고 있다.
+
 | 번호 | 스크립트 | 하는 일 | 출력 |
 |---|---|---|---|
 | 11 | `vlnce/11_compare_gt.py` → `common/compare_vlnce_gt.py` | 릴리스 GT 를 같은 지도·도구로 다시 계획 | `logs/common/compare_vlnce_gt/scenes/` (51 이 층 이동 표시를 읽는다) |
-| 21 | `vlnce/21_refine_paths.py` → `common/refine_paths.py` | 공식 navmesh 위 wp · sg 경로 다듬기 | `logs/common/refine_paths/scenes/<씬>_traj.npz` |
-| 51 | `vlnce/51_render.py` | GreedyGeodesicFollower → habitat 렌더 → 릴리스 포맷 | `data/.../vln_ce_nav3d/traj_data/r2r/nav3d_{wp,sg}` |
+| 21 | `vlnce/21_refine_paths.py` → `common/refine_paths.py` | 공식 navmesh 위 wp · sg 경로 다듬기 (실행기는 `--max_flat 0` = 전부) | `logs/common/refine_paths/scenes/<씬>_traj.npz` |
+| 51 | `vlnce/51_render.py` | GreedyGeodesicFollower → habitat 렌더 → 릴리스 포맷 (`--instructions all`) | `data/.../vln_ce_nav3d/traj_data/r2r/nav3d_{wp,sg}` · 색인 `.../traj_data/_index/` |
 | 61 | `vlnce/61_label.py` → `common/label_paths.py` | b1 라벨 (VLM 서버 `common/vlm_server.py` 필요) | `data/.../instruction_labels_nav3d/` |
 | 71 | `vlnce/71_loader_check.py` → `checks/loader_check.py` | 학습 로더로 읽기 | `logs/checks/loader_check/summary_vlnce_nav3d.json` |
 
@@ -163,5 +169,8 @@ logs: 폴더도 같은 규칙 — `logs/<데이터셋 또는 common · checks>/<
 ## 아직 안 되는 것
 - **노은역 RBQ v6 데이터 라벨**: `common/label_paths.py --sources noeun` 은 `noeun/tools/render_vlnce_camera.py` 의 `frames_meta.json`
   (카메라 자세 · 몸 높이 · yaw)을 읽는데, `noeun/51_render_rbq.py` 는 `render_meta.json` 에 그 값을 남기지 않는다.
-- `logs/common/episodes.json` (vlnce · vlnpe 의 씬 · ep 목록) 을 만든 스크립트가 없다.
+- vlnpe 는 아직 `logs/common/episodes.json` (4 씬 29 ep 시험 표본, 만든 스크립트 없음) 만 처리하고 sg 만 만든다 — 나중에 vlnce 처럼
+  학습 데이터와 같게 · mini/full · wp 추가.
+- full 은 이 PC 에 없어 `--dry_run` 경로까지만 확인했다 (씬 구성이 mini 와 같은지 모름).
+- instruction labeling(61)은 만드는 중이다. 렌더된 데이터의 지시문 자리에 라벨을 넣는 단계는 아직 없다.
 - 걷기(42 · 55)는 물리라 다시 돌리면 결과가 조금 다를 수 있다 → 43 이 바꿀 ep, 45 가 펼 ep 가 달라질 수 있다.

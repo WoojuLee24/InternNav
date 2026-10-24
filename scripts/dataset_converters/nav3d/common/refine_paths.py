@@ -54,6 +54,7 @@ def parse():
     ap.add_argument('--n_pairs', type=int, default=100, help='노은역 층간 경로 수')
     ap.add_argument('--max_flat', type=int, default=10, help='vln_ce 씬당 평지 에피소드(중복 제거 후) 수, 0 = 전부')
     ap.add_argument('--data_root', default='data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r')
+    ap.add_argument('--raw_root', default=None, help='원본 R2R json.gz 폴더. None = vlnce_gt.DEFAULT_RAW_ROOT (mini, 이전 동작). full: data/InternData-N1/vln_ce/raw_data/r2r')
     ap.add_argument('--scene_root', default='data/scene_data/mp3d_ce/mp3d')
     ap.add_argument('--rig', default='125cm_30deg')
     ap.add_argument('--navmesh_dir', default=None,
@@ -112,7 +113,7 @@ def run_vlnce(args, cfg):
     sc_ref = npth.NavScene(pf, stairs_group='none') if args.stairs_mode == 'none' else sc
     meta = json.load(open(GS / 'logs' / 'scene_meta' / f'{s}.json'))
     md = nu.MeshDistance(nu.load_mesh_zup(meta['mesh_path']))
-    rawidx = vlnce_gt.raw_index(vlnce_gt.DEFAULT_RAW_ROOT)
+    rawidx = vlnce_gt.raw_index(args.raw_root or vlnce_gt.DEFAULT_RAW_ROOT)
     h_b = vlnce_gt.vlnce_rig.rig_height_m(args.rig)
     n_ep = len(glob.glob(f'{args.data_root}/{s}/data/chunk-000/*.parquet'))
     seen, flat_n, rows, arrays = set(), 0, [], {}

@@ -23,13 +23,21 @@
 | P4 계단 높이 | 계단 경로에서 걸은 z 가 nav3d z 를 따르나 (걸은 위치를 nav3d 경로에 xy 투영한 자리의 z 와 비교) | 계단 경로 전부 최대 |Δz| ≤ 0.15 m | 챌판 0.17 m 보다 작아야 다른 단을 밟은 게 아니다 |
 | P5 형식 | 내보낸 것이 릴리스와 같은 구조 | 스트림 프레임 수 == parquet 행, 21 컬럼, 이미지 640×480 | 학습 로더가 그대로 읽어야 한다 |
 
+## 어떤 에피소드를 내보내나
+- 기본 (`--episodes_json` 없음): 21 이 경로를 만든 **모든 trajectory** (`--scenes` 로 씬을 줄일 수 있다).
+- `--instructions all` (기본): 릴리스처럼 **지시문마다 에피소드 하나** — 경로는 한 번 렌더하고, 같은 trajectory 의 지시문(R2R 은 보통 3 개)마다
+  같은 프레임 · 그 지시문으로 내보낸다. `first` = trajectory 마다 하나 (첫 지시문, 2026-10-24 이전 동작).
+- `--data_root`: mini(`data/InternData-N1-v0.5-mini`, 기본 = render.yaml) · full(`data/InternData-N1`) — 릴리스 · 원본 · 씬 경로를 그 루트로.
+
 사용 (habitat 컨테이너, 저장소 루트):
     /usr/bin/python scripts/dataset_converters/nav3d/vlnce/51_render.py
+    /usr/bin/python scripts/dataset_converters/nav3d/vlnce/51_render.py --episodes_json <씬: [릴리스 ep]> --instructions first   (이전 동작)
 """
 
 import argparse
 import copy
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -42,6 +50,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / 'instruction_labeling' / 'render'))
 import nav3d_report as R  # noqa: E402
 import nav3d_utils as nu  # noqa: E402
+from data_roots import apply_data_root  # noqa: E402
 
 LOG = 'scripts/dataset_converters/nav3d/logs/vlnce/51_render'
 
@@ -49,7 +58,11 @@ LOG = 'scripts/dataset_converters/nav3d/logs/vlnce/51_render'
 def parse():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--config', default='scripts/dataset_converters/instruction_labeling/configs/render.yaml')
-    ap.add_argument('--episodes_json', default='scripts/dataset_converters/nav3d/logs/common/episodes.json')
+    ap.add_argument('--episodes_json', default='', help='{씬: [릴리스 episode_index]} 로 일부만. 빈값 = 21 이 만든 trajectory 전부')
+    ap.add_argument('--scenes', default='', help='쉼표. 빈값 = 21 결과가 있는 씬 전부 (--episodes_json 이 없을 때만)')
+    ap.add_argument('--instructions', default='all', choices=['all', 'first'],
+                    help='all = 지시문마다 에피소드 (릴리스와 같은 단위) / first = trajectory 마다 하나 (이전 동작)')
+    ap.add_argument('--data_root', default='', help='빈값 = render.yaml 경로 (mini). full: data/InternData-N1')
     ap.add_argument('--nav03_dir', default='scripts/dataset_converters/nav3d/logs/common/refine_paths/scenes')
     ap.add_argument('--nav02_dir', default='scripts/dataset_converters/nav3d/logs/common/compare_vlnce_gt/scenes')
     ap.add_argument('--modes', default='wp,sg')
@@ -63,6 +76,36 @@ def parse():
                     help='depth 구멍 채우기. none(기본) = habitat 원본 — 2026-10-15 사용자 결정: 채워도 릴리스와의 차이가 크게 줄지 않음(05a). '
                          'min19 = 3×3 최소 이웃 × 19 (depth_fill.py, 참고용)')
     return ap.parse_args()
+
+
+def all_trajectories(cfg, args) -> dict:
+    """{씬: [21 이 경로를 만든 trajectory 의 대표 릴리스 ep]} — 21 은 trajectory 마다 첫 릴리스 ep 를 키로 쓴다."""
+    from release_io import list_release_scenes
+    want = set(args.scenes.split(',')) if args.scenes else None
+    sel = {}
+    for scene in list_release_scenes(cfg):
+        z = Path(args.nav03_dir) / f'{scene}_traj.npz'
+        if (want and scene not in want) or not z.exists() or not (Path(args.nav02_dir) / f'{scene}.json').exists():
+            continue
+        eps = sorted({int(m.group(1)) for k in np.load(z).files if (m := re.match(r'^(\d+)_(wp|sg)_ref$', k))})
+        if eps:
+            sel[scene] = eps
+    return sel
+
+
+def instruction_siblings(cfg, scene, rel, eps) -> dict:
+    """대표 ep -> 같은 trajectory 의 다른 릴리스 ep [(episode_index, raw)] (릴리스는 지시문마다 에피소드 하나)."""
+    from release_io import match_raw
+    by_tid = {}
+    for i in sorted(rel):
+        raw = match_raw(cfg, scene, rel[i]['task'])
+        if raw is not None:
+            by_tid.setdefault(raw['trajectory_id'], []).append((i, raw))
+    out = {}
+    for ep in eps:
+        raw = match_raw(cfg, scene, rel[ep]['task'])
+        out[ep] = [(i, rw) for i, rw in by_tid.get(raw['trajectory_id'], []) if i != ep] if raw is not None else []
+    return out
 
 
 def resample(P: np.ndarray, step: float) -> np.ndarray:
@@ -125,12 +168,14 @@ def main():
 
     cfg = load_cfg(args.config)
     cfg = copy.deepcopy(cfg)
+    if args.data_root:
+        apply_data_root(cfg, args.data_root)
     cfg['paths']['out_root'] = Path(args.out_root)
     cfg['paths']['cache_root'] = Path(args.out_root).parent / '_traj_cache'
     cfg['action_gen'] = {'method': 'greedy_wp', 'goal_radius': args.goal_radius, 'max_steps': 1000}
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    sel = json.loads(Path(args.episodes_json).read_text())
+    sel = json.loads(Path(args.episodes_json).read_text()) if args.episodes_json else all_trajectories(cfg, args)
     modes = [m for m in args.modes.split(',') if m]
     qt = RS.release_qtables(cfg)
     schema = RS.load_schema(cfg['image']['schema_ref'])
@@ -139,6 +184,7 @@ def main():
         Z = np.load(Path(args.nav03_dir) / f'{scene}_traj.npz')
         mf = {e['ep']: e for e in json.load(open(Path(args.nav02_dir) / f'{scene}.json'))['episodes']}
         rel = {e['episode_index']: e for e in release_episodes(cfg, scene)}
+        siblings = instruction_siblings(cfg, scene, rel, eps) if args.instructions == 'all' else {}
         rs = None if args.no_render else RigSim(cfg, scene_glb(cfg, scene), gpu=args.gpu)
         for mode in modes:
             cache = cfg['paths']['cache_root'] / f'nav3d_{mode}' / scene
@@ -159,7 +205,8 @@ def main():
                      'start_position': Wh[0].tolist(), 'start_rotation': raw['start_rotation'],
                      'reference_path': Wh.tolist(), 'goals': [{'position': Wh[-1].tolist()}],
                      'instruction': {'instruction_text': raw['instruction']['instruction_text']}}
-                trajs[tid] = [e]
+                trajs[tid] = [e] + [dict(e, episode_id=i, instruction={'instruction_text': rw['instruction']['instruction_text']})
+                                    for i, rw in siblings.get(ep, [])]
                 tdir = cache / str(tid)
                 if rs is not None:
                     meta = RS.render_trajectory(rs, e, cfg, tdir, qt)

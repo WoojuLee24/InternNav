@@ -3,8 +3,8 @@
 연결 파일: 코드는 `checks/loader_check.py` 에 있다. 이 파일은 거기에 아래 ARGS 를 앞에 붙여 실행만 한다
 (뒤에 같은 인자를 주면 한 번만 받는 인자는 뒤 값이 이기고, 여러 번 받는 인자(--vlnce 등)는 더해진다).
 
-사용 (저장소 루트):
-    python3 scripts/dataset_converters/nav3d/vlnce/71_loader_check.py
+검사할 데이터셋은 뒤에 붙인다 (mini 예, run_pipeline 이 --data 에 맞춰 붙인다):
+    python3 scripts/dataset_converters/nav3d/vlnce/71_loader_check.py --vlnce 'nav3d wp=data/InternData-N1-v0.5-mini/vln_ce_nav3d/traj_data/r2r/nav3d_wp=125,0,30' --vlnce 'nav3d sg=data/InternData-N1-v0.5-mini/vln_ce_nav3d/traj_data/r2r/nav3d_sg=125,0,30'
 """
 
 import runpy
@@ -15,10 +15,6 @@ TARGET = 'checks/loader_check.py'
 ARGS = [
     '--vlnce',
     '릴리스 vln_ce (대조)=CONTROL_CE=125,0,30',
-    '--vlnce',
-    'nav3d wp (MP3D)=data/InternData-N1-v0.5-mini/vln_ce_nav3d/traj_data/r2r/nav3d_wp=125,0,30',
-    '--vlnce',
-    'nav3d sg (MP3D)=data/InternData-N1-v0.5-mini/vln_ce_nav3d/traj_data/r2r/nav3d_sg=125,0,30',
     '--vlnpe',
     '릴리스 vln_pe (대조)=CONTROL_PE',
     '--out',
