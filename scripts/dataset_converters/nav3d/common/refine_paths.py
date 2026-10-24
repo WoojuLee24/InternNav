@@ -56,6 +56,10 @@ def parse():
     ap.add_argument('--data_root', default='data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r')
     ap.add_argument('--raw_root', default=None, help='원본 R2R json.gz 폴더. None = vlnce_gt.DEFAULT_RAW_ROOT (mini, 이전 동작). full: data/InternData-N1/vln_ce/raw_data/r2r')
     ap.add_argument('--scene_root', default='data/scene_data/mp3d_ce/mp3d')
+    ap.add_argument('--mesh_root', default=None,
+                    help='vln_ce 씬 obj mesh 루트 (<root>/<씬>/matterport_mesh/*/*.obj, geometry_utils.find_scene_mesh). '
+                         'None = gs_vlnpe/logs/scene_meta/<씬>.json 의 mesh_path (이전 동작 — 그 파일을 만드는 gs_vlnpe 01 은 pxr 이 필요). '
+                         '예: data/InternData-N1-v0.5-mini/scene_data/mp3d_n1 (이 PC 61 씬에서 scene_meta 와 같은 파일)')
     ap.add_argument('--rig', default='125cm_30deg')
     ap.add_argument('--navmesh_dir', default=None,
                     help='vln_ce 씬 navmesh 를 이 폴더의 <scene>.navmesh 로 (예: vln_pe H1 반지름으로 다시 만든 것, build_navmesh_h1.py). '
@@ -111,8 +115,12 @@ def run_vlnce(args, cfg):
     pf = nu.load_pathfinder(vlnce_navmesh(args, s))
     sc = npth.NavScene(pf)
     sc_ref = npth.NavScene(pf, stairs_group='none') if args.stairs_mode == 'none' else sc
-    meta = json.load(open(GS / 'logs' / 'scene_meta' / f'{s}.json'))
-    md = nu.MeshDistance(nu.load_mesh_zup(meta['mesh_path']))
+    if args.mesh_root:
+        from geometry_utils import find_scene_mesh
+        mesh_path = str(find_scene_mesh(args.mesh_root, s))
+    else:
+        mesh_path = json.load(open(GS / 'logs' / 'scene_meta' / f'{s}.json'))['mesh_path']
+    md = nu.MeshDistance(nu.load_mesh_zup(mesh_path))
     rawidx = vlnce_gt.raw_index(args.raw_root or vlnce_gt.DEFAULT_RAW_ROOT)
     h_b = vlnce_gt.vlnce_rig.rig_height_m(args.rig)
     n_ep = len(glob.glob(f'{args.data_root}/{s}/data/chunk-000/*.parquet'))

@@ -68,7 +68,7 @@ python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --stage 3,4 --ove
 | 번호 | 스크립트 | 하는 일 | 출력 |
 |---|---|---|---|
 | 11 | `vlnce/11_compare_gt.py` → `common/compare_vlnce_gt.py` | 릴리스 GT 를 같은 지도·도구로 다시 계획 | `logs/common/compare_vlnce_gt/scenes/` (51 이 층 이동 표시를 읽는다) |
-| 21 | `vlnce/21_refine_paths.py` → `common/refine_paths.py` | 공식 navmesh 위 wp · sg 경로 다듬기 (실행기는 `--max_flat 0` = 전부) | `logs/common/refine_paths/scenes/<씬>_traj.npz` |
+| 21 | `vlnce/21_refine_paths.py` → `common/refine_paths.py` | 공식 navmesh 위 wp · sg 경로 다듬기 (실행기는 `--max_flat 0` = 전부, mesh 는 `--mesh_root <루트>/scene_data/mp3d_n1`) | `logs/common/refine_paths/scenes/<씬>_traj.npz` |
 | 51 | `vlnce/51_render.py` | GreedyGeodesicFollower → habitat 렌더 → 릴리스 포맷 (`--instructions all`) | `data/.../vln_ce_nav3d/traj_data/r2r/nav3d_{wp,sg}` · 색인 `.../traj_data/_index/` |
 | 61 | `vlnce/61_label.py` → `common/label_paths.py` | b1 라벨 (VLM 서버 `common/vlm_server.py` — 실행기는 안 떠 있으면 띄우고 끝나면 내린다) | `data/.../instruction_labels_nav3d/` |
 | 71 | `vlnce/71_loader_check.py` → `checks/loader_check.py` | 학습 로더로 읽기 | `logs/checks/loader_check/summary_vlnce_nav3d.json` |
