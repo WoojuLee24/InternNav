@@ -1,12 +1,14 @@
-"""nav3d 파이프라인 실행기 — 대상(vlnce · vlnpe · noeun)마다 단계를 순서대로 돌린다. 한 단계만, 구간만 돌릴 수도 있다.
+"""nav3d 파이프라인 실행기 — 데이터셋(vlnce · vlnpe · noeun)마다 단계를 순서대로 돌린다. 단계 · 단계 묶음 · 구간만 돌릴 수도 있다.
 
-각 단계는 기존 번호 스크립트를 **입력·출력 경로를 모두 적어서** 부를 뿐이다 (스크립트 코드·기본값은 그대로).
-그래서 단계마다 그 스크립트를 따로 돌려도 똑같다 (`--dry_run` 이 그 명령을 보여 준다).
+각 단계는 데이터셋 폴더의 번호 스크립트(또는 common/ 연결 파일)를 **입력·출력 경로를 다 적어서** 부를 뿐이다.
+그래서 스크립트를 따로 돌려도 똑같다 (`--dry_run` 이 그 명령을 보여 준다).
 
-| 대상 | 무엇 | 최종 산출 |
+번호 앞자리 = 단계 (세 데이터셋 공통): 1 준비 · 2 경로 만들기 · 3 경로 보정 · 4 걷기 · 5 렌더(데이터 저장) · 6 라벨 · 7 검사.
+
+| 데이터셋 | 무엇 | 최종 산출 |
 |---|---|---|
-| vlnce | MP3D 61 씬 nav3d 경로 → habitat 렌더 → b1 라벨 | `vln_ce_nav3d/traj_data/r2r/nav3d_{wp,sg}` |
-| vlnpe | MP3D nav3d sg 경로 → (a) 경로 위 카메라 Isaac 렌더 · (b) H1 물리 걷기 | `vln_pe_nav3d_sg` · `vln_pe_nav3d_h1` |
+| vlnce | MP3D nav3d 경로 → habitat 렌더 → b1 라벨 | `vln_ce_nav3d/traj_data/r2r/nav3d_{wp,sg}` |
+| vlnpe | MP3D nav3d sg 경로 → (A) 경로 위 카메라 Isaac 렌더 · (B) H1 물리 걷기 | `vln_pe_nav3d_sg` · `vln_pe_nav3d_h1` |
 | noeun | 노은역 navmesh 경로 → RBQ 물리 걷기 + 경로 보정 → Isaac 렌더 (v6) | `vln_{ce,pe}_noeun_nav3d_rbq_v6` |
 
 컨테이너: 단계마다 `habitat` (/usr/bin/python + habitat_sim) 또는 `isaac` (/workspace/isaaclab/_isaac_sim/python.sh).
@@ -16,9 +18,9 @@
 사용 (저장소 루트, 아무 python3):
     python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --list
     python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --dry_run
+    python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --stage 3,4 --overwrite
     python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --only straighten_stairs --overwrite
-    python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --from floor_to_mesh --to straighten_stairs --overwrite
-    python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnce --scenes 17DRP5sb8fy,1LXtFkjw3qL --jobs 4
+    python3 scripts/dataset_converters/nav3d/run_pipeline.py vlnce --scenes 17DRP5sb8fy,1LXtFkjw3qL --max_episodes 3
 """
 
 import argparse
@@ -34,19 +36,19 @@ from pathlib import Path
 HAB = '/usr/bin/python'
 ISAAC = '/workspace/isaaclab/_isaac_sim/python.sh'
 N = 'scripts/dataset_converters/nav3d'
-C = f'{N}/checks'
 L = f'{N}/logs'
 D = 'data/InternData-N1-v0.5-mini'
-D04 = f'{L}/04_export_paths/noeun_station'
-D06K = f'{L}/06k_rbq_walk'
-EPISODES = f'{L}/05_vlnce_gt_render/episodes.json'   # (씬, 릴리스 episode_index) 고른 목록 — 만든 스크립트가 없다 (README)
+PATHS = f'{L}/noeun/paths'      # 노은역 paths json (04 → 보정 → v6)
+WALK = f'{L}/noeun/walk'        # 노은역 걷기 입력(eps_*)·결과(walk_*)
 LABEL_MODELS = 'scripts/dataset_converters/instruction_labeling/configs/model'
-# 06k RBQ 걷기 설정 (walk_noeun_v3 · v5trig json 의 args 에 남은 값): 전진 중 방향 보정 1.5 · 제자리 회전 문턱 30° · 높이 스캔 필터 −0.2
-WALK = ['--steer_gain', '1.5', '--turn_threshold_deg', '30', '--scan_obstacle_depth', '-0.2']
+STAGES = {1: '준비', 2: '경로 만들기', 3: '경로 보정', 4: '걷기', 5: '렌더', 6: '라벨', 7: '검사'}
+# 노은역 RBQ 걷기 설정 (walk_noeun_v3 · v5trig json 의 args 에 남은 값): 전진 중 방향 보정 1.5 · 제자리 회전 문턱 30° · 높이 스캔 필터 −0.2
+RBQ_WALK = ['--steer_gain', '1.5', '--turn_threshold_deg', '30', '--scan_obstacle_depth', '-0.2']
 
 
 @dataclass
 class Step:
+    stage: int                                    # 번호 앞자리 (STAGES)
     name: str                                     # 단계 이름 (--only · --from · --to)
     env: str                                      # 'habitat' | 'isaac'
     what: str                                     # 한 줄 설명
@@ -55,134 +57,127 @@ class Step:
     outputs: list = field(default_factory=list)   # 이미 있으면 --overwrite 없이 멈춘다. '{scene}' 은 씬마다
 
 
-def mp3d_paths_steps(jobs_note: str) -> list:
-    """vlnce · vlnpe 가 같이 쓰는 앞 단계 (공식 MP3D navmesh 위 경로)."""
+def mp3d_paths_steps(ds: str, jobs: int) -> list:
+    """vlnce · vlnpe 가 같이 쓰는 앞 단계 (공식 MP3D navmesh 위 경로). 연결 파일은 데이터셋 폴더에."""
     return [
-        Step('gt_compare', 'habitat', f'02 vln_ce GT 와 같은 지도·도구로 다시 계획 (05b · 06q 가 층 이동 표시를 읽는다) {jobs_note}',
-             [[HAB, f'{N}/02_vlnce_gt_compare.py', '--scene', '{scene}', '--recompute'],
-              [HAB, f'{N}/02_vlnce_gt_compare.py', '--aggregate']],
-             outputs=[f'{L}/02_vlnce_gt_compare/scenes/{{scene}}.json']),
-        Step('refine_paths', 'habitat', f'03 navmesh find_path 경로 다듬기 (wp = GT 경유점, sg = 시작·끝만) {jobs_note}',
-             [[HAB, f'{N}/03_refine_paths.py', '--dataset', 'vln_ce', '--scene', '{scene}'],
-              [HAB, f'{N}/03_refine_paths.py', '--aggregate']],
-             outputs=[f'{L}/03_refine_paths/scenes/{{scene}}_traj.npz']),
+        Step(1, 'compare_gt', 'habitat', f'릴리스 GT 를 같은 지도·도구로 다시 계획 (층 이동 표시를 뒤 단계가 읽는다, 씬마다 동시 {jobs})',
+             [[HAB, f'{N}/{ds}/11_compare_gt.py', '--scene', '{scene}', '--recompute'],
+              [HAB, f'{N}/{ds}/11_compare_gt.py', '--aggregate']],
+             outputs=[f'{L}/common/compare_vlnce_gt/scenes/{{scene}}.json']),
+        Step(2, 'refine_paths', 'habitat', f'navmesh find_path 경로 다듬기 (wp = GT 경유점, sg = 시작·끝만, 씬마다 동시 {jobs})',
+             [[HAB, f'{N}/{ds}/21_refine_paths.py', '--scene', '{scene}'],
+              [HAB, f'{N}/{ds}/21_refine_paths.py', '--aggregate']],
+             outputs=[f'{L}/common/refine_paths/scenes/{{scene}}_traj.npz']),
     ]
 
 
 def pipelines(args) -> dict:
-    ctrl_ce = '릴리스 vln_ce (대조)=CONTROL_CE=125,0,30'
-    ctrl_pe = '릴리스 vln_pe (대조)=CONTROL_PE'
-    per_scene = f'(씬마다, 동시 {args.jobs})'
-    vlnce = mp3d_paths_steps(per_scene) + [
-        Step('render_habitat', 'habitat', '05b wp·sg 경로 → GreedyGeodesicFollower → habitat 렌더 → 릴리스 포맷',
-             [[HAB, f'{N}/05b_vlnce_render_paths.py']],
-             inputs=[EPISODES], outputs=[f'{D}/vln_ce_nav3d/traj_data/r2r']),
-        Step('label', 'habitat', f'07 instruction 라벨 (method {args.label_method}, model {args.label_model}) — VLM 서버 필요',
-             [[HAB, f'{N}/07_label_paths.py', '--sources', 'nav3d_wp,nav3d_sg', '--method', args.label_method, '--model', args.label_model]],
-             inputs=[EPISODES]),
-        Step('loader_check', 'habitat', '08 학습 로더로 읽기 (릴리스 한 씬 대조)',
-             [[HAB, f'{C}/08_loader_check.py', '--vlnce', ctrl_ce,
-               '--vlnce', f'nav3d wp (MP3D)={D}/vln_ce_nav3d/traj_data/r2r/nav3d_wp=125,0,30',
-               '--vlnce', f'nav3d sg (MP3D)={D}/vln_ce_nav3d/traj_data/r2r/nav3d_sg=125,0,30',
-               '--vlnpe', ctrl_pe, '--out', f'{L}/08_loader_check/summary_vlnce_nav3d.json']],
-             outputs=[f'{L}/08_loader_check/summary_vlnce_nav3d.json']),
+    n = args.max_episodes
+    lim = lambda flag: [flag, str(n)] if n else []  # noqa: E731 — 일부 에피소드만 (검증용)
+    ep = ['--episodes_json', args.episodes_json]
+    vlnce = mp3d_paths_steps('vlnce', args.jobs) + [
+        Step(5, 'render', 'habitat', 'wp·sg 경로 → GreedyGeodesicFollower → habitat 렌더 → 릴리스 포맷',
+             [[HAB, f'{N}/vlnce/51_render.py', *ep]],
+             inputs=[args.episodes_json], outputs=[f'{D}/vln_ce_nav3d/traj_data/r2r']),
+        Step(6, 'label', 'habitat', f'instruction 라벨 (method {args.label_method}, model {args.label_model}) — VLM 서버 필요',
+             [[HAB, f'{N}/vlnce/61_label.py', '--method', args.label_method, '--model', args.label_model, *ep, *lim('--limit')]],
+             inputs=[args.episodes_json]),
+        Step(7, 'loader_check', 'habitat', '학습 로더로 읽기 (릴리스 한 씬 대조)',
+             [[HAB, f'{N}/vlnce/71_loader_check.py']], outputs=[f'{L}/checks/loader_check/summary_vlnce_nav3d.json']),
     ]
-    vlnpe = mp3d_paths_steps(per_scene) + [
-        # (a) 경로 위에 카메라를 바로 놓는 방식
-        Step('h1_pairs', 'habitat', '06h vln_pe H1 궤적 ↔ vln_ce ep 짝 (06q 입력)',
-             [[HAB, f'{N}/06h_vlnpe_h1_paths.py']], outputs=[f'{L}/06h_vlnpe_h1/summary.json']),
-        Step('camera_values', 'habitat', '06v vln_pe GT 에서 카메라 높이·앞 거리·pitch 재기 (06q 입력)',
-             [[HAB, f'{N}/06v_vlnpe_check.py', '--stage', 'prepare']], outputs=[f'{L}/06v_vlnpe/prepare.json']),
-        Step('camera_prepare', 'habitat', '06q sg 경로 → mesh 바닥 → 씬별 렌더 명령 (render_cmds.sh)',
-             [[HAB, f'{N}/06q_vlnpe_mp3d_check.py', '--stage', 'prepare']],
-             inputs=[EPISODES], outputs=[f'{L}/06q_vlnpe_mp3d/render_cmds.sh']),
-        Step('camera_render', 'isaac', '06p 씬별 Isaac 렌더 → vln_pe 포맷 (render_cmds.sh 실행)',
-             [['bash', f'{L}/06q_vlnpe_mp3d/render_cmds.sh']], outputs=[f'{D}/vln_pe_nav3d_sg/traj_data']),
-        Step('camera_loader_check', 'habitat', '08 학습 로더로 읽기 (06q check 가 결과를 읽는다)',
-             [[HAB, f'{C}/08_loader_check.py', '--vlnce', ctrl_ce, '--vlnpe', f'MP3D sg vln_pe={D}/vln_pe_nav3d_sg/traj_data',
-               '--out', f'{L}/08_loader_check/summary_06q.json']],
-             outputs=[f'{L}/08_loader_check/summary_06q.json']),
-        Step('camera_check', 'habitat', '06q 판정 (카메라 높이 · 경로 · 로더)',
-             [[HAB, f'{N}/06q_vlnpe_mp3d_check.py', '--stage', 'check']], outputs=[f'{L}/06q_vlnpe_mp3d/summary.json']),
-        # (b) H1 이 물리로 걷는 방식
-        Step('walk_prepare', 'habitat', '06r 같은 ep 로 raw split 두 개 (nav3d_gt · nav3d_sg)',
-             [[HAB, f'{N}/06r_h1_walk_vlnpe.py', '--stage', 'prepare']],
-             inputs=[EPISODES], outputs=[f'{D}/vln_pe_nav3d_raw/r2r']),
-        Step('walk_h1', 'isaac', '06r H1 물리 걷기 → vln_pe 포맷 (gt · sg)',
-             [[ISAAC, f'{N}/06r_h1_walk_vlnpe.py', '--stage', 'walk', '--split', 'nav3d_gt'],
-              [ISAAC, f'{N}/06r_h1_walk_vlnpe.py', '--stage', 'walk', '--split', 'nav3d_sg']],
+    sub_scenes = ['--scenes', args.scenes, '--stairs_scenes', ''] if args.scenes else []
+    vlnpe = mp3d_paths_steps('vlnpe', args.jobs) + [
+        Step(5, 'h1_pairs', 'habitat', '(A) vln_pe H1 궤적 ↔ vln_ce ep 짝 (21 경로가 있어야 한다)',
+             [[HAB, f'{N}/vlnpe/51_h1_pairs.py']], outputs=[f'{L}/vlnpe/51_h1_pairs/summary.json']),
+        Step(5, 'camera_values', 'habitat', '(A) vln_pe GT 에서 카메라 높이·앞 거리·pitch 재기',
+             [[HAB, f'{N}/vlnpe/52_camera_values.py', '--stage', 'prepare', *sub_scenes]],
+             outputs=[f'{L}/vlnpe/52_camera_values/prepare.json']),
+        Step(5, 'camera_prepare', 'habitat', '(A) sg 경로 → mesh 바닥 → 씬별 렌더 명령 (render_cmds.sh)',
+             [[HAB, f'{N}/vlnpe/53_camera.py', '--stage', 'prepare', *ep]],
+             inputs=[args.episodes_json], outputs=[f'{L}/vlnpe/53_camera/render_cmds.sh']),
+        Step(5, 'camera_render', 'isaac', '(A) 씬별 Isaac 렌더 → vln_pe 포맷 (render_cmds.sh = 54_render_camera.py 씬마다)',
+             [['bash', f'{L}/vlnpe/53_camera/render_cmds.sh']], outputs=[f'{D}/vln_pe_nav3d_sg/traj_data']),
+        Step(5, 'walk_prepare', 'habitat', '(B) 같은 ep 로 raw split 두 개 (nav3d_gt · nav3d_sg)',
+             [[HAB, f'{N}/vlnpe/55_walk_h1.py', '--stage', 'prepare', *ep]],
+             inputs=[args.episodes_json], outputs=[f'{D}/vln_pe_nav3d_raw/r2r']),
+        Step(5, 'walk_h1', 'isaac', '(B) H1 물리 걷기 → vln_pe 포맷 (gt · sg)',
+             [[ISAAC, f'{N}/vlnpe/55_walk_h1.py', '--stage', 'walk', '--split', 'nav3d_gt', *lim('--max_episodes')],
+              [ISAAC, f'{N}/vlnpe/55_walk_h1.py', '--stage', 'walk', '--split', 'nav3d_sg', *lim('--max_episodes')]],
              outputs=[f'{D}/vln_pe_nav3d_h1/traj_data/nav3d_gt', f'{D}/vln_pe_nav3d_h1/traj_data/nav3d_sg']),
-        Step('walk_compare', 'habitat', '06r 성공률 · 도착 오차 · sg vs gt',
-             [[HAB, f'{N}/06r_h1_walk_vlnpe.py', '--stage', 'compare']], outputs=[f'{L}/06r_h1_walk/summary.json']),
+        Step(7, 'loader_check', 'habitat', '(A) 학습 로더로 읽기 (camera_check 가 결과를 읽는다)',
+             [[HAB, f'{N}/vlnpe/71_loader_check.py']], outputs=[f'{L}/checks/loader_check/summary_06q.json']),
+        Step(7, 'camera_check', 'habitat', '(A) 판정 (카메라 높이 · 경로 · 로더)',
+             [[HAB, f'{N}/vlnpe/53_camera.py', '--stage', 'check', *ep]], outputs=[f'{L}/vlnpe/53_camera/summary.json']),
+        Step(7, 'walk_compare', 'habitat', '(B) 성공률 · 도착 오차 · sg vs gt',
+             [[HAB, f'{N}/vlnpe/55_walk_h1.py', '--stage', 'compare', *ep]], outputs=[f'{L}/vlnpe/55_walk_h1/summary.json']),
     ]
-    P0, P_MF, P_ST = (f'{D04}/noeun_station_paths{s}.json' for s in ('', '_meshfloor', '_meshfloor_straight'))
-    P_V4, P_V5, P_V6 = (f'{D04}/noeun_station_paths_meshfloor_straight_{v}.json' for v in ('v4', 'v5', 'v6'))
-    CAND, CAND_MF, CAND_ST = (f'{D04}/noeun_station_paths_cand{s}.json' for s in ('', '_meshfloor', '_meshfloor_straight'))
+    P0, P_MF, P_ST = (f'{PATHS}/noeun_station_paths{s}.json' for s in ('', '_meshfloor', '_meshfloor_straight'))
+    P_V4, P_V5, P_V6 = (f'{PATHS}/noeun_station_paths_meshfloor_straight_{v}.json' for v in ('v4', 'v5', 'v6'))
+    CAND, CAND_MF, CAND_ST = (f'{PATHS}/noeun_station_paths_cand{s}.json' for s in ('', '_meshfloor', '_meshfloor_straight'))
     CE6, PE6 = f'{D}/vln_ce_noeun_nav3d_rbq_v6', f'{D}/vln_pe_noeun_nav3d_rbq_v6'
-    # 06k_parallel 은 <log>/walk_<tag>.json 을 쓰고, 넘겨받은 ep 목록도 <log>/eps_<tag>.json 으로 다시 쓴다
+    # 42_walk_rbq 는 <log>/walk_<tag>.json 을 쓰고, 넘겨받은 ep 목록도 <log>/eps_<tag>.json 으로 다시 쓴다
     # (tag 이름이 입력과 같으면 같은 내용으로 덮는다 — noeun_cand · noeun_v6, 이전 실행과 같음).
-    walk = lambda eps, tag, extra=():['python3', f'{N}/06k_parallel.py', '--episodes_json', eps, '--tag', tag, '--', *WALK, *extra]  # noqa: E731
+    walk = lambda eps, tag, extra=(): [  # noqa: E731
+        'python3', f'{N}/noeun/42_walk_rbq.py', '--episodes_json', eps, '--tag', tag, '--workers', str(args.walk_workers),
+        '--', *RBQ_WALK, *extra]
+    flat = ['--n_multifloor', str(n), '--flat', f'0:{n // 2},1:{n - n // 2}'] if n else []
     noeun = [
-        Step('mesh_gs_check', 'habitat', '00 충돌 mesh ↔ 3DGS 정합 · 바닥 구멍 (holes.csv = 04 U4 입력)',
-             [[HAB, f'{N}/00_mesh_gs_check.py', '--scene', 'noeun_station']], outputs=[f'{L}/00_mesh_gs/noeun_station/holes.csv']),
-        Step('build_navmesh', 'habitat', '01 mesh → navmesh · 층 · 계단',
-             [[HAB, f'{N}/01_build_navmesh.py', '--scene', 'noeun_station']],
-             outputs=[f'{L}/01_build_navmesh/noeun_station/noeun_station.navmesh']),
-        Step('refine_paths', 'habitat', '03 층 사이 경로 100 개 다듬기',
-             [[HAB, f'{N}/03_refine_paths.py', '--scene', 'noeun_station']],
-             outputs=[f'{L}/03_refine_paths/scenes/noeun_station_traj.npz']),
-        Step('export_paths', 'habitat', '04 층 이동 100 + 평지 100 고르기 (U1~U5) → paths json',
-             [[HAB, f'{N}/04_export_paths.py']], outputs=[P0]),
-        Step('floor_to_mesh', 'habitat', '04b 점별 바닥 z: navmesh → 장면 mesh',
-             [[HAB, f'{N}/04b_paths_mesh_floor.py', '--paths_json', P0, '--out', P_MF]], outputs=[P_MF]),
-        Step('straighten_narrow', 'habitat', '04c 좁은 통로(개찰구) 안 경로를 곧게',
-             [[HAB, f'{N}/04c_straighten_narrow.py', '--paths_json', P_MF, '--out', P_ST]], outputs=[P_ST]),
-        Step('make_walk_inputs', 'habitat', '06k 입력 (0.5 m 경유점 + 출발 yaw)',
-             [[HAB, f'{N}/06k_make_walk_inputs.py', '--paths_json', P_ST, '--out', f'{D06K}/eps_noeun_all_v2.json']],
-             outputs=[f'{D06K}/eps_noeun_all_v2.json']),
-        Step('walk_first', 'isaac', '06k RBQ 200 ep 첫 걷기 → 넘어진 ep 를 고른다 (v3)',
-             [walk(f'{D06K}/eps_noeun_all_v2.json', 'noeun_v3')], outputs=[f'{D06K}/walk_noeun_v3.json']),
-        Step('replace_candidates', 'habitat', '04d gen 넘어진 ep 마다 같은 종류의 새 경로 후보 3 개 (U1~U6)',
-             [[HAB, f'{N}/04d_replace_episodes.py', 'gen', '--paths_json', P_ST, '--walk_json', f'{D06K}/walk_noeun_v3.json',
+        Step(1, 'check_assets', 'habitat', '충돌 mesh ↔ 3DGS 정합 · 바닥 구멍 (holes.csv = select_paths U4 입력)',
+             [[HAB, f'{N}/noeun/11_check_assets.py', '--scene', 'noeun_station']],
+             outputs=[f'{L}/noeun/11_check_assets/noeun_station/holes.csv']),
+        Step(1, 'build_navmesh', 'habitat', 'mesh → navmesh · 층 · 계단',
+             [[HAB, f'{N}/noeun/12_build_navmesh.py', '--scene', 'noeun_station']],
+             outputs=[f'{L}/noeun/12_build_navmesh/noeun_station/noeun_station.navmesh']),
+        Step(2, 'refine_paths', 'habitat', '층 사이 경로 다듬기',
+             [[HAB, f'{N}/noeun/21_refine_paths.py', *lim('--n_pairs')]],
+             outputs=[f'{L}/common/refine_paths/scenes/noeun_station_traj.npz']),
+        Step(2, 'select_paths', 'habitat', '층 이동 + 평지 고르기 (사용 가능 판정 U1~U5) → paths json',
+             [[HAB, f'{N}/noeun/22_select_paths.py', *flat]], outputs=[P0]),
+        Step(3, 'floor_to_mesh', 'habitat', '점별 바닥 z: navmesh → 장면 mesh',
+             [[HAB, f'{N}/noeun/31_floor_to_mesh.py', '--paths_json', P0, '--out', P_MF]], outputs=[P_MF]),
+        Step(3, 'straighten_narrow', 'habitat', '좁은 통로(개찰구) 안 경로를 곧게',
+             [[HAB, f'{N}/noeun/32_straighten_narrow.py', '--paths_json', P_MF, '--out', P_ST]], outputs=[P_ST]),
+        Step(4, 'make_walk_inputs', 'habitat', 'RBQ 걷기 입력 (0.5 m 경유점 + 출발 yaw)',
+             [[HAB, f'{N}/noeun/41_make_walk_inputs.py', '--paths_json', P_ST, '--out', f'{WALK}/eps_noeun_all_v2.json']],
+             outputs=[f'{WALK}/eps_noeun_all_v2.json']),
+        Step(4, 'walk_first', 'isaac', 'RBQ 첫 걷기 → 넘어진 ep 를 고른다 (v3)',
+             [walk(f'{WALK}/eps_noeun_all_v2.json', 'noeun_v3')], outputs=[f'{WALK}/walk_noeun_v3.json']),
+        Step(4, 'replace_candidates', 'habitat', '넘어진 ep 마다 같은 종류의 새 경로 후보 3 개 (U1~U6)',
+             [[HAB, f'{N}/noeun/43_replace_fallen.py', 'gen', '--paths_json', P_ST, '--walk_json', f'{WALK}/walk_noeun_v3.json',
                '--cand_json', CAND]], outputs=[CAND]),
-        Step('candidates_fix_paths', 'habitat', '후보에 04b · 04c 를 그대로',
-             [[HAB, f'{N}/04b_paths_mesh_floor.py', '--paths_json', CAND, '--out', CAND_MF],
-              [HAB, f'{N}/04c_straighten_narrow.py', '--paths_json', CAND_MF, '--out', CAND_ST]], outputs=[CAND_MF, CAND_ST]),
-        Step('candidates_walk_inputs', 'habitat', '04d eps 후보 → 06k 입력',
-             [[HAB, f'{N}/04d_replace_episodes.py', 'eps', '--cand_straight_json', CAND_ST,
-               '--eps_json', f'{D06K}/eps_noeun_all_v2.json', '--cand_eps_json', f'{D06K}/eps_noeun_cand.json']],
-             outputs=[f'{D06K}/eps_noeun_cand.json']),
-        Step('walk_candidates', 'isaac', '06k 후보 걷기',
-             [walk(f'{D06K}/eps_noeun_cand.json', 'noeun_cand')], outputs=[f'{D06K}/walk_noeun_cand.json']),
-        Step('replace_merge', 'habitat', '04d merge 성공한 첫 후보로 갈아 끼움 → v4 (paths · eps · walk)',
-             [[HAB, f'{N}/04d_replace_episodes.py', 'merge', '--paths_json', P_ST, '--eps_json', f'{D06K}/eps_noeun_all_v2.json',
-               '--walk_json', f'{D06K}/walk_noeun_v3.json', '--cand_walk', f'{D06K}/walk_noeun_cand.json',
-               '--cand_eps_json', f'{D06K}/eps_noeun_cand.json', '--cand_straight_json', CAND_ST, '--out_tag', 'v4']],
-             outputs=[P_V4, f'{D06K}/eps_noeun_v4.json', f'{D06K}/walk_noeun_v4.json']),
-        Step('shift_unsafe_starts', 'habitat', '04f 출발 자리(U6) 실패 ep 의 출발점을 경로 따라 앞으로 → v5',
-             [[HAB, f'{N}/04f_fix_start.py', '--paths_json', P_V4, '--eps_json', f'{D06K}/eps_noeun_v4.json', '--out_tag', 'v5']],
-             outputs=[P_V5, f'{D06K}/eps_noeun_v5.json']),
-        Step('straighten_stairs', 'habitat', '04g 계단 구간을 곧게 (ep 86: 계단 위 제자리 회전으로 넘어짐) → v6',
-             [[HAB, f'{N}/04g_straighten_stairs.py', '--paths_json', P_V5, '--eps_json', f'{D06K}/eps_noeun_v5.json',
-               '--episode_ids', '86', '--out_tag', 'v6']],
-             outputs=[P_V6, f'{D06K}/eps_noeun_v6.json']),
-        Step('walk', 'isaac', '06k RBQ 200 ep 최종 걷기 (프레임 = 0.25 m / 15° 마다, --record trigger)',
-             [walk(f'{D06K}/eps_noeun_v6.json', 'noeun_v6', ['--record', 'trigger'])], outputs=[f'{D06K}/walk_noeun_v6.json']),
-        Step('render', 'isaac', '06m 걸은 자세로 D455 렌더 → vln_ce · vln_pe 포맷',
-             [[ISAAC, f'{N}/06m_render_rbq.py', '--walk_json', f'{D06K}/walk_noeun_v6.json', '--format', 'vlnce',
-               '--out_root', CE6, '--log_dir', f'{L}/06m_render_rbq/v6'],
-              [ISAAC, f'{N}/06m_render_rbq.py', '--walk_json', f'{D06K}/walk_noeun_v6.json', '--format', 'vlnpe',
-               '--out_root', PE6, '--log_dir', f'{L}/06m_render_rbq/v6']],
+        Step(4, 'candidates_fix_paths', 'habitat', '후보에 31 · 32 를 그대로',
+             [[HAB, f'{N}/noeun/31_floor_to_mesh.py', '--paths_json', CAND, '--out', CAND_MF],
+              [HAB, f'{N}/noeun/32_straighten_narrow.py', '--paths_json', CAND_MF, '--out', CAND_ST]], outputs=[CAND_MF, CAND_ST]),
+        Step(4, 'candidates_walk_inputs', 'habitat', '후보 → 걷기 입력',
+             [[HAB, f'{N}/noeun/43_replace_fallen.py', 'eps', '--cand_straight_json', CAND_ST,
+               '--eps_json', f'{WALK}/eps_noeun_all_v2.json', '--cand_eps_json', f'{WALK}/eps_noeun_cand.json']],
+             outputs=[f'{WALK}/eps_noeun_cand.json']),
+        Step(4, 'walk_candidates', 'isaac', '후보 걷기',
+             [walk(f'{WALK}/eps_noeun_cand.json', 'noeun_cand')], outputs=[f'{WALK}/walk_noeun_cand.json']),
+        Step(4, 'replace_merge', 'habitat', '성공한 첫 후보로 갈아 끼움 → v4 (paths · eps · walk)',
+             [[HAB, f'{N}/noeun/43_replace_fallen.py', 'merge', '--paths_json', P_ST, '--eps_json', f'{WALK}/eps_noeun_all_v2.json',
+               '--walk_json', f'{WALK}/walk_noeun_v3.json', '--cand_walk', f'{WALK}/walk_noeun_cand.json',
+               '--cand_eps_json', f'{WALK}/eps_noeun_cand.json', '--cand_straight_json', CAND_ST, '--out_tag', 'v4']],
+             outputs=[P_V4, f'{WALK}/eps_noeun_v4.json', f'{WALK}/walk_noeun_v4.json']),
+        Step(4, 'shift_starts', 'habitat', '출발 자리(U6) 실패 ep 의 출발점을 경로 따라 앞으로 → v5',
+             [[HAB, f'{N}/noeun/44_shift_starts.py', '--paths_json', P_V4, '--eps_json', f'{WALK}/eps_noeun_v4.json', '--out_tag', 'v5']],
+             outputs=[P_V5, f'{WALK}/eps_noeun_v5.json']),
+        Step(4, 'straighten_stairs', 'habitat', f'계단 구간을 곧게 (ep {args.stairs_episode_ids}: 계단 위 제자리 회전으로 넘어짐) → v6',
+             [[HAB, f'{N}/noeun/45_straighten_stairs.py', '--paths_json', P_V5, '--eps_json', f'{WALK}/eps_noeun_v5.json',
+               '--episode_ids', args.stairs_episode_ids, '--out_tag', 'v6']],
+             outputs=[P_V6, f'{WALK}/eps_noeun_v6.json']),
+        Step(4, 'walk', 'isaac', 'RBQ 최종 걷기 (프레임 = 0.25 m / 15° 마다, --record trigger)',
+             [walk(f'{WALK}/eps_noeun_v6.json', 'noeun_v6', ['--record', 'trigger'])], outputs=[f'{WALK}/walk_noeun_v6.json']),
+        Step(5, 'render', 'isaac', '걸은 자세로 D455 렌더 → vln_ce · vln_pe 포맷',
+             [[ISAAC, f'{N}/noeun/51_render_rbq.py', '--walk_json', f'{WALK}/walk_noeun_v6.json', '--format', fmt,
+               '--out_root', root, '--log_dir', f'{L}/noeun/51_render_rbq/v6', *lim('--max_episodes')]
+              for fmt, root in (('vlnce', CE6), ('vlnpe', PE6))],
              outputs=[CE6, PE6]),
-        Step('check_render', 'habitat', '06n 렌더 검사 M1~M8 (두 포맷)',
-             [[HAB, f'{C}/06n_check_rbq_render.py', '--walk_json', f'{D06K}/walk_noeun_v6.json', '--paths_json', P_V6,
-               '--vlnce_root', f'{CE6}/traj_data/r2r/noeunstation', '--vlnpe_root', f'{PE6}/traj_data/r2r/noeunstation',
-               '--out_dir', f'{L}/06n_check_rbq_render_v6']],
-             outputs=[f'{L}/06n_check_rbq_render_v6/summary.json']),
-        Step('loader_check', 'habitat', '08 학습 로더로 읽기 (릴리스 한 씬 대조)',
-             [[HAB, f'{C}/08_loader_check.py', '--vlnce', ctrl_ce, '--vlnce', f'노은역 RBQ v6={CE6}/traj_data/r2r=60,15,15',
-               '--vlnpe', ctrl_pe, '--vlnpe', f'노은역 RBQ v6={PE6}/traj_data', '--out', f'{L}/08_loader_check/summary_rbq_v6.json']],
-             outputs=[f'{L}/08_loader_check/summary_rbq_v6.json']),
+        Step(7, 'render_check', 'habitat', '렌더 검사 M1~M8 (두 포맷)',
+             [[HAB, f'{N}/noeun/71_render_check.py', *lim('--max_episodes')]],
+             outputs=[f'{L}/checks/noeun_rbq_render_check_v6/summary.json']),
+        Step(7, 'loader_check', 'habitat', '학습 로더로 읽기 (릴리스 한 씬 대조)',
+             [[HAB, f'{N}/noeun/72_loader_check.py']], outputs=[f'{L}/checks/loader_check/summary_rbq_v6.json']),
     ]
     return {'vlnce': vlnce, 'vlnpe': vlnpe, 'noeun': noeun}
 
@@ -192,14 +187,21 @@ def parse():
     ap.add_argument('target', choices=['vlnce', 'vlnpe', 'noeun'])
     ap.add_argument('--list', action='store_true', help='단계 목록만')
     ap.add_argument('--dry_run', action='store_true', help='명령만 출력 (실행 안 함)')
-    ap.add_argument('--only', default='', help='이 단계들만 (쉼표)')
+    ap.add_argument('--stage', default='', help='이 단계 묶음만 (번호 앞자리, 쉼표). 1 준비 2 경로 3 보정 4 걷기 5 렌더 6 라벨 7 검사')
+    ap.add_argument('--only', default='', help='이 단계들만 (이름, 쉼표)')
     ap.add_argument('--from', dest='start', default='', help='이 단계부터')
     ap.add_argument('--to', dest='stop', default='', help='이 단계까지')
     ap.add_argument('--overwrite', action='store_true', help='출력이 이미 있어도 돌린다')
-    ap.add_argument('--scenes', default='', help='씬마다 도는 단계(vlnce · vlnpe 02 · 03)의 씬 (쉼표). 비우면 vln_ce 릴리스 61 씬 전부')
-    ap.add_argument('--jobs', type=int, default=4, help='씬마다 도는 단계의 동시 프로세스 수 (README 기록과 같은 4)')
+    ap.add_argument('--scenes', default='', help='씬마다 도는 단계(compare_gt · refine_paths)의 씬 (쉼표). 비우면 vln_ce 릴리스 61 씬 전부')
+    ap.add_argument('--jobs', type=int, default=4, help='씬마다 도는 단계의 동시 프로세스 수 (이전 기록과 같은 4)')
+    ap.add_argument('--episodes_json', default=f'{L}/common/episodes.json',
+                    help='vlnce · vlnpe 가 쓸 (씬, 릴리스 episode_index) 목록 — 만든 스크립트가 없다 (README)')
+    ap.add_argument('--max_episodes', type=int, default=0,
+                    help='일부만 (검증용). 0 = 전부. noeun: 경로 수·렌더 ep, vlnce: 라벨 수, vlnpe: H1 걷기 ep')
+    ap.add_argument('--stairs_episode_ids', default='86', help='noeun straighten_stairs 가 펼 ep (v5 걷기를 보고 사람이 고른 값)')
+    ap.add_argument('--walk_workers', type=int, default=5, help='noeun RBQ 걷기 동시 프로세스 (24 코어에 5)')
     ap.add_argument('--label_method', default='b1', help='instruction_labeling configs/methods/<이름>.yaml')
-    ap.add_argument('--label_model', default='qwen3vl8b-local', help='configs/model/<이름>.yaml (07 기본 = 이 PC 의 로컬 서버)')
+    ap.add_argument('--label_model', default='qwen3vl8b-local', help='configs/model/<이름>.yaml (기본 = 이 PC 의 로컬 서버)')
     return ap.parse_args()
 
 
@@ -213,7 +215,11 @@ def select(steps, args) -> list:
         return [s for s in steps if s.name in args.only.split(',')]
     i0 = names.index(args.start) if args.start else 0
     i1 = names.index(args.stop) if args.stop else len(steps) - 1
-    return steps[i0:i1 + 1]
+    todo = steps[i0:i1 + 1]
+    if args.stage:
+        keep = {int(x) for x in args.stage.split(',')}
+        todo = [s for s in todo if s.stage in keep]
+    return todo
 
 
 @functools.lru_cache(maxsize=None)
@@ -263,7 +269,7 @@ def label_server_error(model: str):
         return None
     except Exception as e:  # noqa: BLE001 — 연결 실패 이유를 그대로 보여 준다
         return (f'VLM 서버가 응답하지 않음 ({m.group(1)}: {e}). 다른 터미널에서 먼저 띄운다:\n'
-                f'  PYTHONPATH=/ws/src/InternNav/.venv_label/site {HAB} {N}/07_vlm_server.py')
+                f'  PYTHONPATH=/ws/src/InternNav/.venv_label/site {HAB} {N}/common/vlm_server.py')
 
 
 def run_one(cmd, log: Path = None) -> int:
@@ -292,17 +298,21 @@ def run_step(step: Step, args) -> None:
                 sys.exit(f'[{step.name}] 실패 (exit {rc}): {" ".join(c)}')
 
 
+def scripts_of(step: Step) -> str:
+    return ' · '.join(dict.fromkeys(Path(t).name for c in step.cmds for t in c if t.endswith(('.py', '.sh')) and t not in (HAB, ISAAC)))
+
+
 def main():
     args = parse()
     steps = pipelines(args)[args.target]
     if args.list:
         print(f'{args.target} 단계 ({len(steps)}):')
         for i, s in enumerate(steps, 1):
-            print(f'  {i:2d}. {s.name:24s} [{s.env:7s}] {s.what}')
+            print(f'  {i:2d}. [{s.stage} {STAGES[s.stage]:5s}] {s.name:22s} [{s.env:7s}] {scripts_of(s):40s} {s.what}')
         return
     todo = select(steps, args)
     for s in todo:
-        print(f'\n[{args.target}] {s.name} [{s.env}] — {s.what}', flush=True)
+        print(f'\n[{args.target}] {s.stage} {STAGES[s.stage]} · {s.name} [{s.env}] — {s.what}', flush=True)
         if args.dry_run:
             for c in s.cmds:
                 print('  $ ' + ' '.join(c))
@@ -313,8 +323,7 @@ def main():
             continue
         if not env_ok(s.env):
             sys.exit(f'[{s.name}] 는 {s.env} 컨테이너에서 돈다 (지금 컨테이너에 없음). 거기서 이어서:\n'
-                     f'  python3 {N}/run_pipeline.py {args.target} --from {s.name}'
-                     + (f' --to {args.stop}' if args.stop else '') + (' --overwrite' if args.overwrite else ''))
+                     f'  python3 {N}/run_pipeline.py {" ".join(_resume_args(args, s.name))}')
         missing = [p for p in s.inputs if not Path(p).exists()]
         if missing:
             sys.exit(f'[{s.name}] 입력 없음: {missing}')
@@ -327,6 +336,20 @@ def main():
                 sys.exit(f'[{s.name}] {err}')
         run_step(s, args)
     print(f'\n[{args.target}] {"명령만 출력 (실행 안 함)" if args.dry_run else "끝"}: {", ".join(s.name for s in todo)}')
+
+
+def _resume_args(args, step_name: str) -> list:
+    """다른 컨테이너에서 이어 돌릴 때의 인자 — 지금 준 인자에서 --from 만 바꾼다."""
+    out = [args.target, '--from', step_name]
+    for flag, val in (('--to', args.stop), ('--stage', args.stage), ('--scenes', args.scenes)):
+        if val:
+            out += [flag, val]
+    for flag, val, default in (('--max_episodes', args.max_episodes, 0), ('--jobs', args.jobs, 4),
+                               ('--walk_workers', args.walk_workers, 5), ('--stairs_episode_ids', args.stairs_episode_ids, '86'),
+                               ('--episodes_json', args.episodes_json, f'{L}/common/episodes.json')):
+        if val != default:
+            out += [flag, str(val)]
+    return out + (['--overwrite'] if args.overwrite else [])
 
 
 if __name__ == '__main__':
