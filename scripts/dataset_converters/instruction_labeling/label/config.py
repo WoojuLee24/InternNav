@@ -82,6 +82,8 @@ def resolve(m: dict) -> dict:
     route['rooms'] = None if rooms_key == 'none' else route_res['rooms'][rooms_key]
     motion_key = rt.get('motion', 'list')  # list = 번호 목록 (b0/b1) -> None (gen_hash 에서 빠짐)
     route['motion'] = None if motion_key == 'list' else route_res['motion'][motion_key]
+    facts_key = rt.get('facts', 'list')  # list = 번호 명령문 목록 (b0/b1) -> None (gen_hash 에서 빠짐)
+    route['facts'] = None if facts_key == 'list' else route_res['facts'][facts_key]
     cue_key = rt.get('stop_cue', 'none')
     route['stop_cue'] = None if cue_key == 'none' else route_res['stop_cue'][cue_key]
     sel_key = rt.get('stop_select', 'none')
@@ -117,7 +119,8 @@ def resolve(m: dict) -> dict:
              # 형제별 서술 방식 / 문체 맞춘 fewshot: 끄면 None (gen_hash 에서 빠짐)
              'sibling': style_res['sibling'][st.get('sibling', 'none')],
              'fewshot_match': style_res['fewshot_match'][st.get('fewshot_match', 'none')],
-             'pathrule': style_res['pathrule'][st.get('pathrule', 'none')]}
+             'pathrule': style_res['pathrule'][st.get('pathrule', 'none')],
+             'knobs': style_res['knobs'][st.get('knobs', 'none')]}
     assert not (style['sibling'] and style['pathrule']), 'style.sibling 과 style.pathrule 은 함께 쓰지 않는다'
     assert not style['pathrule'] or a['delivery'] == 'image', 'style.pathrule 은 delivery=image 에서만'
     if style['sibling'] and any('start_turn' in p for p in style['sibling']):  # 방식별 시작 회전: 키 -> 확률표 내용 (gen_hash 에 들어가게)
@@ -137,8 +140,19 @@ def resolve(m: dict) -> dict:
     assert not visual or (a['delivery'] == 'image' and not fr['extra_rigs'] and not style['sibling'] and not style['pathrule']
                           and not route['stop_cue'] and not route['stop_select'] and fr.get('approach', 'none') == 'none'), \
         'frames.overlay / topdown 은 delivery=image, 기본 rig 하나, sibling·pathrule·stop_cue·stop_select·approach 없이'
+    assert not route['facts'] or (a['delivery'] in ('image', 'joint3-v1') and not visual and not route['motion'] and not style['sibling'] and not style['pathrule']
+                                  and not route['stop_cue'] and not route['stop_select'] and not fr['extra_rigs']), \
+        'route.facts 는 delivery=image, 기본 rig 하나, overlay·topdown·motion·sibling·pathrule·stop_cue·stop_select 없이'
+    assert not style['knobs'] or route['facts'], 'style.knobs 는 route.facts 와 함께 (손잡이를 inputs 에 기록하는 경로)'
+    writer_key = st.get('writer', 'none')  # style.writer: gepa_labeling 이 고친 글 (style_instruction, facts_header) 로 바꿔 넣는다. none -> 그대로
+    if writer_key != 'none':
+        w = style_res['writer'][writer_key]
+        assert style['knobs'] and route['facts'], 'style.writer 는 style.knobs·route.facts 와 함께'
+        style['knobs'] = dict(style['knobs'], instruction=w['style_instruction'])
+        route['facts'] = dict(route['facts'], header=w['facts_header'])
     delivery = _yaml(CONF / 'delivery' / f'{a["delivery"]}.yaml')
     assert delivery['name'] == a['delivery']
+    assert delivery['type'] != 'joint' or (route['facts'] and style['knobs']), 'delivery=joint3 은 route.facts·style.knobs 와 함께 (사람마다 손잡이 한 줄)'
     model = _yaml(CONF / 'model' / f'{a["model"]}.yaml')
     assert model['name'] == a['model']
     return {

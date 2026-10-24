@@ -141,6 +141,9 @@ def build_request(cfg: dict, ep: dict, track: dict) -> tuple:
     if cfg['frames'].get('overlay') or cfg['frames']['select_def'].get('topdown'):  # 작성자 B·C: 이동 정보를 그림으로
         from visual import build_request_visual
         return build_request_visual(cfg, ep, track)
+    if cfg['route'].get('facts'):  # route.facts: 명령문 목록 대신 사실 메모 (label/facts.py)
+        from facts import build_request_facts
+        return build_request_facts(cfg, ep, track)
     rc = cfg['route']
     sel = select_frames(cfg, ep, track)
     sib = track['item'].get('sib_idx', 0)

@@ -319,3 +319,25 @@ stop_select:                # route.stop_select=<key>: A·P·R 후보 캐시(lab
 motion:                     # route.motion=<key>: 번호 목록(PATH MOTION SEQUENCE)을 프롬프트에서 뺀다. list = b0/b1 그대로 (cfg 에서 None)
   none:                     # 이동 정보는 그림(frames.overlay / frames.select=topdown-v1)으로만 준다. 방 순서 줄·정지 단서 줄은 남긴다
     header: "PATH FACTS:"   # 템플릿의 "PATH MOTION SEQUENCE:" 자리
+facts:                      # route.facts=<key>: 번호 명령문 목록(PATH MOTION SEQUENCE) 대신 같은 사실을 "사실 메모" 로 (label/facts.py). list = b0/b1 그대로 (cfg 에서 None)
+  memo-v1:                  # 사실 내용(회전·계단·걷는 거리·방 순서)은 route_words 와 같고, 표현만 명령문이 아닌 서술로. header 는 gepa_labeling 이 고치는 글의 시작점
+    header: "PATH FACTS (for reference only: you do not have to mention every fact, and do not copy their order or wording; describe the route the way a person would):"
+    start: "At the start you are not facing the way the path goes: it heads {side} you."   # 출발 회전을 말할 때만
+    side: {left: "to the left of", right: "to the right of", around: "behind"}
+    sequence: "After that, the path has, in order: {items}."          # 출발 회전을 말했을 때
+    sequence_first: "From the start, the path has, in order: {items}."  # 출발 회전이 없을 때
+    items:
+      left: "a left turn"
+      right: "a right turn"
+      around: "a U-turn"
+      slight_left: "a slight bend to the left"
+      slight_right: "a slight bend to the right"
+      up: "a flight of stairs going up"
+      down: "a flight of stairs going down"
+      few: "a few steps"
+      short: "a short walk"
+      long: "a long walk"
+    end: "The path ends at the place shown in the last image."
+    rooms: "Rooms (from scene annotation): the path starts in the {first}{middle} and ends in the {goal}."
+    rooms_middle: ", passes through the {rooms}"
+    rooms_single: "Rooms (from scene annotation): the whole path stays in the {goal}."

@@ -31,10 +31,11 @@ import backend  # noqa: E402
 import config  # noqa: E402
 import e2e  # noqa: E402
 import two_stage  # noqa: E402
+import joint  # noqa: E402
 from route_words import CODE_VERSION  # noqa: E402
 from sources import REPO, episode_track, items  # noqa: E402
 
-GENERATORS = {'image': e2e.generate, 'two_stage': two_stage.generate}  # delivery 정의의 type 으로 선택
+GENERATORS = {'image': e2e.generate, 'two_stage': two_stage.generate, 'joint': joint.generate}  # delivery 정의의 type 으로 선택
 DEV_SUBSET = HERE.parent / 'eval' / 'dev_subset.json'
 VOCAB_SOURCE = REPO / 'data/InternData-N1-v0.5-mini/vln_ce/raw_data/r2r/val_unseen/val_unseen.json.gz'
 

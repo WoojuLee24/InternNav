@@ -1,0 +1,66 @@
+# 0단계: 사람(GT) 문장 말투 유형 나누기 설정 (style_types/*.py)
+# 유형 기준은 train 문장으로만 만든다. val_seen / val_unseen 은 같은 기준으로 유형만 붙인다.
+out_dir: data/InternData-N1-v0.5-mini/instruction_labels/_style_types
+report_dir: logs/gepa_labeling/style_types
+raw_root: data/InternData-N1-v0.5-mini/vln_ce/raw_data/r2r
+route_method: b1                 # 경로 회전 수 계산 규칙 (instruction_labeling configs/methods/<method>.yaml 의 route)
+
+rules:
+  length_bins: [15, 35]          # 단어 수: <=15 짧음 / <=35 보통 / 그 이상 김
+  sent_bins: [1, 3]              # 문장 수: 1 / 2~3 / 4 이상
+  start_turn_min_deg: 30         # 출발 회전이 이 각 이상인 경로에서만 "시작 회전을 말했나" 를 잰다
+  openers:                       # 순서대로 처음 맞는 것 (소문자 문장 앞부분에 re.match)
+    - [turn, '(turn|make a|spin|bear|veer|rotate)\b']
+    - [exit, '((walk|go|head|move|step|come)\s+(out|outside)|exit|leave)\b']
+    - [move, '(walk|go|head|move|continue|proceed|step|take|travel|enter|climb|follow)\b']
+    - [context, '(with|facing|from|starting|when|once|after|you are|you will|if|at the)\b']
+    - [stop, '(stand|wait|stop)\b']
+  endings:                       # 마지막 문장에서 처음 맞는 것, 없으면 none
+    - [stop, '\bstop\b']
+    - [wait, '\bwait\b']
+    - [stay, '\b(stand|remain|stay|halt)\b']
+  turn_words: '\b(left|right|around)\b'
+  # 설명 방식 비율 (B 방식): 회전 명령 수 / (회전 명령 수 + 지나는 것 표현 수). 섞인 문장은 중간 값
+  turn_cmd: '\b(turn|make a|take a|hang a|go|veer|bear|spin|pivot)\s+(a\s+)?(sharp\s+|slight\s+|hard\s+)?(left|right|around)\b'
+  landmark_phrase: '\b(past|passing|through|into|around|along|toward|towards|across|between|beside|alongside|by|up|down|out of|onto)\s+(the|a|an|that|this|your)\b'
+  number_words: '\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+|first|second|third|fourth|few|couple)\b'
+  object_words: '\b(table|chair|couch|sofa|bed|door|doorway|stairs|staircase|steps|rug|painting|picture|plant|counter|sink|window|fireplace|piano|mirror|tv|television|lamp|shelf|bookshelf|cabinet|desk|bench|railing|column|pillar|statue|toilet|tub|bathtub|fridge|refrigerator|island|arch|archway|vase|towel|shower|dresser|ottoman|stool|wall|stove|oven|cabinets|counters|chairs|tables|doors|plants)\b'
+  room_words: '\b(room|hallway|hall|bedroom|bathroom|kitchen|living|dining|office|closet|laundry|garage|porch|balcony|patio|lobby|entryway|foyer|landing|area|lounge|library|gym|spa|den|study)\b'
+
+judge:                           # gemma 가 보기 중에서 고르는 축 (글만, 이미지 없음)
+  model: gemma-4-31B-it
+  base_url: http://localhost:8100/v1
+  api_key: token-abc123
+  workers: 64
+  max_tokens: 80
+  temperature: 0.0
+  axes:
+    goal_only: ['yes', 'no']
+  variants:                      # gemma 는 "목적지만 말하는 문장인가" 하나만 본다 (설명 방식 step↔landmark 는 규칙 비율; 1차 gemma 판정은 두 프롬프트 일치 77 %)
+    a: |
+      Read this navigation instruction a person wrote for walking inside a house:
+      "{text}"
+
+      Does it ONLY say where to go or stop (the destination), giving essentially no directions for the way there?
+      Examples of yes: "Go to the light switch.", "Walk to the third painting and wait."
+      Examples of no: anything that mentions turns, rooms or objects to pass on the way.
+
+      Answer with ONLY a JSON object: {{"goal_only": "yes"}} or {{"goal_only": "no"}}
+    b: |
+      Instruction: "{text}"
+
+      Question: apart from naming the final place, does this instruction describe the route (turns, things passed, rooms walked through)?
+      If it describes the route at all, goal_only is "no". If it only names the final place, goal_only is "yes".
+      Reply with only JSON: {{"goal_only": "yes|no"}}
+
+cluster:                         # 2차 (B 방식): 사람이 읽을 수 있는 축만, 경로가 정하는 특징(출발 회전 말함)·사소한 글 습관(숫자·then·대문자)은 뺀다
+  k_range: [4, 10]               # 실루엣 점수로 고른다 (1차는 BIC 가 범위 끝까지 내려가 고를 수 없었다)
+  silhouette_sample: 4000
+  seed: 0
+  numeric: [step_share, turn_ratio, log_words, n_sents]
+  categorical: [goal_only, opener, ending, stop_ref]
+
+human:
+  n: 200
+  seed: 0
+  file: human_200_v2.csv          # goal_only 칸에 yes / no, step_share 확인용으로 granularity 칸에 step / mixed / landmark
