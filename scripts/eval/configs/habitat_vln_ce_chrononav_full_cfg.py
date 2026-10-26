@@ -38,7 +38,7 @@ eval_cfg = EvalCfg(
             "vis_debug": False,
             "attn_implementation": "eager",
             "load_in_4bit": True,
-            "use_kv_cache": True,
+            "use_kv_cache": False,  # disable to prevent OOM on RTX 3080 Ti (12GB) at step 32
             "vision_cache_tau": 0.92,
         },
     ),

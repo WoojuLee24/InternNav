@@ -1251,10 +1251,12 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                             del inputs
                             torch.cuda.empty_cache()
                             _s2_cache_hits += 1  # count OOM recovery as cache hit for stats
-                            if _prev_llm_outputs is not None:
+                            if _prev_llm_outputs is not None and '↓' not in _prev_llm_outputs:
+                                # Only reuse prev if it was not a LOOKDOWN — LOOKDOWN prevents
+                                # step_id increment and causes infinite loops on repeated OOM.
                                 llm_outputs = _prev_llm_outputs
                             else:
-                                llm_outputs = ""
+                                llm_outputs = "←"  # fall back to LEFT: always increments step_id
                             print(f'[S2-OOM] ep={episode_id} step={step_id}: OOM recovery, reusing prev output')
 
                     _prev_llm_outputs = llm_outputs
