@@ -76,7 +76,16 @@ def parse():
     ap.add_argument('--pick', default='spread', help="noeun 에서 --limit 일 때: 'spread' (층 이동·평지 고르게) | 'head'")
     ap.add_argument('--workers', type=int, default=2, help='서버가 요청을 하나씩 처리하므로 2 면 충분 (이미지 인코딩만 겹침)')
     ap.add_argument('--out_root', default=f'{D}/instruction_labels_nav3d')
-    return ap.parse_args()
+    ap.add_argument('--split', default='train', choices=['train', 'val_unseen'],
+                    help='train = 릴리스 기준 (이전 동작). val_unseen = 51 --split val_unseen 결과 (vln_ce_nav3d_val_unseen, _index 의 episode_id = 원본 R2R id). '
+                         '--nav3d_root · --nav03_dir 가 기본값이면 val_unseen 위치로 바꾼다. 출력은 <out_root>/<name>/<source>_val_unseen/')
+    a = ap.parse_args()
+    if a.split == 'val_unseen':  # 기본 위치만 val 로 (직접 준 경로는 그대로)
+        if a.nav3d_root == f'{D}/vln_ce_nav3d/traj_data/r2r':
+            a.nav3d_root = f'{D}/vln_ce_nav3d_val_unseen/traj_data/r2r'
+        if a.nav03_dir == 'scripts/dataset_converters/nav3d/logs/common/refine_paths/scenes':
+            a.nav03_dir = 'scripts/dataset_converters/nav3d/logs/common/refine_paths_val_unseen/scenes'
+    return a
 
 
 def make_vertices(P: np.ndarray, args) -> np.ndarray:
@@ -121,6 +130,8 @@ def items_gt_nav3d(args, source: str) -> list:
     rc = load_cfg(HERE.parent / 'instruction_labeling' / 'configs' / 'render.yaml')
     if args.data_root:
         apply_data_root(rc, args.data_root)
+    if args.split == 'val_unseen':  # val: 릴리스가 없다 — _index 의 episode_id(원본 R2R id) 로 원본 json 에서 바로 찾는다
+        return items_val(args, source, rc)
     if not args.episodes_json:
         return items_all(args, source, rc)
     sel = json.loads(Path(args.episodes_json).read_text())
@@ -188,6 +199,55 @@ def items_all(args, source: str, rc) -> list:
         assert False, f'unreachable source={source!r}'
 
 
+def items_val(args, source: str, rc) -> list:
+    """val_unseen: nav3d_{wp,sg} 의 _index 한 줄 = 지시문 하나. raw = 원본 val_unseen json 의 그 episode_id,
+    경로 = 21 (--split val_unseen) npz 의 '<trajectory_id>_{wp,sg}_ref' (val 은 trajectory_id 가 원본 R2R id)."""
+    assert source in ('nav3d_wp', 'nav3d_sg'), f'val_unseen 은 nav3d_wp · nav3d_sg 만: {source!r}'
+    assert not args.episodes_json, 'val_unseen 은 --episodes_json 없이 전부'
+    by_id = {e['episode_id']: e for e in json.load(gzip.open(Path(rc['paths']['raw_root']) / 'val_unseen' / 'val_unseen.json.gz'))['episodes']}
+    root = REPO / args.nav3d_root / source
+    out = []
+    for idx_f in sorted((root.parent.parent / '_index' / source).glob('*.jsonl')):
+        scene = idx_f.stem
+        rows = [json.loads(line) for line in open(idx_f)]
+        Z = np.load(Path(args.nav03_dir) / f'{scene}_traj.npz')
+        rank = sibling_rank([(r['episode_id'], r['trajectory_id']) for r in rows])
+        for r in rows:
+            key = f'{r["trajectory_id"]}_{source.split("_")[1]}_ref'
+            raw = by_id[r['episode_id']]
+            assert raw['trajectory_id'] == r['trajectory_id'], (scene, r)
+            Wh = nu.ours_to_hab(make_vertices(Z[key].astype(np.float64), args))
+            e = dict(strip_gt(raw), reference_path=Wh.tolist(), start_position=Wh[0].tolist(), goals=[{'position': Wh[-1].tolist(), 'radius': 3.0}])
+            out.append({'ep': e, 'scene': scene, 'root': root, 'episode_index': r['episode_index'], 'split': 'val_unseen',
+                        'sib_idx': rank[r['episode_id']], 'src': {'source': source, 'split': 'val_unseen', 'index_episode_id': r['episode_id']}})
+    return out
+
+
+def joint_results(client, cfg: dict, its: list) -> dict:
+    """delivery=joint3-v1 ('후'): 경로(trajectory) 마다 형제 문장을 한 번에 — label/joint.py 의 _generate_traj 를 직접 부른다.
+    joint.generate 는 형제 수를 R2R 릴리스·렌더 목록에서 세고 결과를 (split, trajectory) 로 캐시해서 nav3d 의 wp·sg 가 섞일 수 있다
+    -> 여기서는 형제를 이 item 목록에서 묶고 캐시를 쓰지 않는다. 반환: {episode_id: e2e.generate 와 같은 형식}"""
+    import joint
+    by_t = {}
+    for it in its:
+        by_t.setdefault(it['ep']['trajectory_id'], []).append(it)
+    out = {}
+    for tid, sib in by_t.items():
+        sib = sorted(sib, key=lambda x: x['sib_idx'])
+        assert [x['sib_idx'] for x in sib] == list(range(len(sib))), f'trajectory {tid}: 형제 순번이 0..n-1 이 아니다 {[x["sib_idx"] for x in sib]}'
+        it0 = sib[0]
+        r = joint._generate_traj(client, cfg, it0['ep'], episode_track(it0, cfg['frames']['rigs'][0]), len(sib))
+        g, sel = r['g'], r['sel']
+        for i, it in enumerate(sib):
+            inputs = {'frames': [f['frame'] for f in sel], 'frame_labels': [f['label'] for f in sel], 'rigs': cfg['frames']['rigs'],
+                      'route_words': joint.facts_memo(g, cfg['route']), 'rooms': g.get('rooms'), 'initial_turn_deg': round(g['initial'], 1),
+                      'start_turn_said': g['start_turn_said'], 'stop_style': r['knobs'][i]['ending'], 'stop_cue': None,
+                      'knobs': r['knobs'][i], 'joint_index': i, 'joint_texts': r['texts']}
+            out[it['ep']['episode_id']] = {'text': r['texts'][i], 'quality_ok': not r['issues'][i], 'quality_issues': r['issues'][i],
+                                           'error': r['error'], 'attempts': r['attempts'], 'inputs': inputs}
+    return out
+
+
 def sibling_rank(pairs) -> dict:
     """[(릴리스 ep, trajectory_id)] -> {ep: 같은 trajectory 안 순서}."""
     by_t = {}
@@ -238,7 +298,7 @@ def run_source(args, source: str):
     its = items_noeun(args) if source == 'noeun' else items_gt_nav3d(args, source)
     if args.limit and not (source == 'noeun' and args.pick == 'spread'):
         its = its[:args.limit]
-    out_dir = REPO / args.out_root / name / source
+    out_dir = REPO / args.out_root / name / (source if args.split == 'train' else f'{source}_{args.split}')
     md = out_dir / 'meta'
     md.mkdir(parents=True, exist_ok=True)
     todo = []
@@ -263,9 +323,32 @@ def run_source(args, source: str):
         (md / f'ep_{it["ep"]["episode_id"]:06d}.json').write_text(json.dumps(m, ensure_ascii=False))
         return r
 
+    if cfg['delivery']['type'] == 'joint':  # '후': 형제 하나라도 없으면 그 경로 형제 전부를 한 번에 다시 만든다
+        need = {it['ep']['trajectory_id'] for it in todo}
+        todo = [it for it in its if it['ep']['trajectory_id'] in need]
+        groups = {}
+        for it in todo:
+            groups.setdefault(it['ep']['trajectory_id'], []).append(it)
+
+        def work_traj(sib):
+            res = joint_results(client, cfg, sib)
+            for it in sib:
+                track_n = len(episode_track(it, cfg['frames']['rigs'][0])['action'])
+                m = {'episode_id': it['ep']['episode_id'], 'scene': it['scene'], 'episode_index': it['episode_index'], 'gen_hash': ghash,
+                     'name': name, 'src': it['src'], 'reference_path_n': len(it['ep']['reference_path']), 'frames_total': track_n,
+                     'generated': res[it['ep']['episode_id']]}
+                (md / f'ep_{it["ep"]["episode_id"]:06d}.json').write_text(json.dumps(m, ensure_ascii=False))
+            return [res[it['ep']['episode_id']] for it in sib]
+
+        work = work_traj  # joint 은 경로 단위로 돈다
+        todo = list(groups.values())
     n_err = 0
     with ThreadPoolExecutor(args.workers) as ex:
         for k, r in enumerate(ex.map(work, todo), 1):
+            if isinstance(r, list):  # joint: 경로 하나의 형제 결과들
+                n_err += sum(x['error'] is not None for x in r)
+                print(f'  {k}/{len(todo)} 경로 err={n_err} {time.time() - t0:.0f}s | {r[0]["text"][:110]}', flush=True)
+                continue
             n_err += r['error'] is not None
             print(f'  {k}/{len(todo)} err={n_err} {time.time() - t0:.0f}s | {r["text"][:110]}', flush=True)
     eps = []

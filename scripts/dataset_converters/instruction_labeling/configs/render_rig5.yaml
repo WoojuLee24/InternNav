@@ -1,0 +1,43 @@
+# instruction_labeling 렌더 설정 — mini 학습 rig 5종 (render.yaml + 125cm_45deg · 60cm_15deg · 60cm_30deg). nav3d 경로를 GT 와 같은 학습법(카메라 4 데이터셋)으로 학습하기 위해 (2026-10-26).
+# 원본: render.yaml (rig 2종). 바뀐 것은 camera.rigs · rig_height_m · rig_hfov 뿐.
+# instruction_labeling P1 렌더 설정. 값은 InternNav 학습(r2r_125cm_0_30)·habitat 평가(vln_r2r_mini_ld30.yaml)와 같게 둔다.
+paths:
+  release_root: data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r      # 릴리스 train (대조 기준, 읽기 전용)
+  raw_root: data/InternData-N1-v0.5-mini/vln_ce/raw_data/r2r           # R2R json.gz (train / val_unseen)
+  scene_root: data/InternData-N1-v0.5-mini/scene_data/mp3d_ce/mp3d     # <scene>/<scene>.glb + .navmesh
+  out_root: data/InternData-N1-v0.5-mini/vln_ce_render/traj_data/r2r   # <split>/<scene>/ 로 쓴다
+  cache_root: data/InternData-N1-v0.5-mini/vln_ce_render/_traj_cache   # trajectory 단위 렌더 캐시
+camera:
+  width: 640
+  height: 480
+  hfov: 79.0              # 릴리스 K fx=388.19 에서 역산 (vlnce_rig.py)
+  height_m: 1.25          # 센서 높이 (habitat 기본 [0,1.25,0])
+  rigs:                   # 이름 -> pitch_down(도). mini 릴리스 rig 5종
+    125cm_0deg: 0.0
+    125cm_30deg: 30.0
+    125cm_45deg: 45.0
+    60cm_15deg: 15.0
+    60cm_30deg: 30.0
+  rig_height_m:           # rig 별 센서 높이 (없는 rig 는 height_m = 1.25)
+    60cm_15deg: 0.6
+    60cm_30deg: 0.6
+  rig_hfov:               # rig 별 hfov (없는 rig 는 hfov = 79). 60cm 는 69.0 (릴리스 재생 대조로 확정 2026-10-26: 68.7 SSIM 0.89·depth 일치 11 %, 69.0 SSIM 0.98·99.7 %; vlnce_rig.py 의 68.7 은 근사)
+    60cm_15deg: 69.0
+    60cm_30deg: 69.0
+  depth_max_m: 10.0       # 릴리스 depth 는 10 m clip, uint16 mm
+agent:
+  height: 1.5
+  radius: 0.1
+  allow_sliding: true
+  forward_m: 0.25
+  turn_deg: 15.0
+image:
+  jpeg_quality: 75        # 릴리스 luma 양자화 테이블 = 표준 Q75
+  jpeg_subsampling: 2     # 4:2:0 (PIL 표기)
+  # 릴리스 chroma 양자화 테이블이 표준 Q75 와 첫 값이 달라(8 vs 9) 릴리스 jpg 의 테이블을 그대로 쓴다
+  jpeg_qtables_ref: data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r/17DRP5sb8fy/videos/chunk-000/observation.images.rgb.125cm_0deg/episode_000000_0.jpg
+  schema_ref: data/InternData-N1-v0.5-mini/vln_ce/traj_data/r2r/17DRP5sb8fy/data/chunk-000/episode_000000.parquet
+action_gen:               # val 처럼 action 이 없는 split 의 action 생성기 (P1-A 결과로 선택)
+  method: greedy_wp       # greedy_wp | greedy_goal | greedy_dense
+  goal_radius: 0.25
+  max_steps: 500
