@@ -44,16 +44,29 @@ class BodyMemory:
 
     def loop_detected(self, threshold: float = 0.5) -> bool:
         """True if current position is within threshold of any earlier position."""
-        if len(self._buf) < 10:
+        if len(self._buf) < 8:
             return False
         positions = np.array([s[:2] for s in self._buf])
         current = positions[-1]
-        # Compare against all but last 5 steps (avoid detecting immediate vicinity)
-        earlier = positions[:-5]
+        # Compare against all but last 4 steps (avoid detecting immediate vicinity)
+        earlier = positions[:-4]
         if len(earlier) == 0:
             return False
         dists = np.linalg.norm(earlier - current, axis=1)
         return bool(dists.min() < threshold)
+
+    def is_oscillating(self, window: int = 12, var_threshold: float = 0.5) -> bool:
+        """True if the agent has been stuck in a small area for recent steps."""
+        if len(self._buf) < window:
+            return False
+        positions = np.array([s[:2] for s in self._buf])[-window:]
+        # Variance of positions in the window
+        pos_var = float(np.var(positions, axis=0).sum())
+        return pos_var < var_threshold
+
+    def get_recovery_action(self) -> dict:
+        """Return a recovery directive when oscillation is detected."""
+        return {'action': 'backtrack', 'steps': 3}
 
     def velocity_profile(self) -> Dict[str, float]:
         if len(self._buf) < 2:

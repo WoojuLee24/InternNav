@@ -1125,6 +1125,7 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             action = None
             messages = []
             _prev_llm_outputs = None  # last S2 output; reused on VisionEmbeddingCache hit
+            _s2_hold_count = 0        # consecutive frames where cache was hit; reset at max_hold
 
             done = False
             flag = False
@@ -1208,12 +1209,22 @@ class HabitatVLNEvaluator(DistributedEvaluator):
 
                     # VisionEmbeddingCache: check fingerprint BEFORE moving inputs to GPU
                     # to avoid peak-memory fragmentation on cache hits.
+                    # max_hold=15: force S2 re-plan every 15 consecutive cache-hit frames
+                    # to prevent stale plans causing the agent to loop indefinitely.
+                    _S2_MAX_HOLD = 15
                     _skip_s2 = False
                     if _use_vision_cache:
                         _fp = torch.from_numpy(rgb).permute(2, 0, 1).float() / 255.0
                         _, _cache_hit = _vision_cache.get_or_compute(
                             _fp, lambda x: x.mean(0, keepdim=True)
                         )
+                        if _cache_hit:
+                            _s2_hold_count += 1
+                        else:
+                            _s2_hold_count = 0
+                        if _s2_hold_count >= _S2_MAX_HOLD:
+                            _cache_hit = False   # Force S2 re-plan
+                            _s2_hold_count = 0
                         if _cache_hit and _prev_llm_outputs is not None:
                             llm_outputs = _prev_llm_outputs
                             _skip_s2 = True

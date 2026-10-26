@@ -94,6 +94,9 @@ class InternVLAN1Agent(Agent):
         # WorldPredictor: online BCE reachability (Prophet-style), generates training signal
         self.world_predictor = WorldPredictor(feature_dim=256, device=str(self.device))
 
+        # Recovery counter: non-zero forces backtrack actions in S1 loop
+        self._recovery_steps_remaining = 0
+
         # Start S2 thread
         self._start_s2_thread()
 
@@ -142,6 +145,7 @@ class InternVLAN1Agent(Agent):
         self.task_memory.reset([])
         self.world_memory.reset()
         self.body_memory.reset()
+        self._recovery_steps_remaining = 0
 
         if self.vis_debug:
             self.fps_writer = imageio.get_writer(f"{self.debug_path}/fps_{self.episode_idx}.mp4", fps=5)
@@ -187,6 +191,20 @@ class InternVLAN1Agent(Agent):
                 #         time.sleep(0.5)  # Sleep briefly if already inferring
                 #         continue
 
+                # Build memory context to inject into S2 prompt
+                _mem_ctx_parts = []
+                try:
+                    if self.body_memory.is_oscillating():
+                        _mem_ctx_parts.append("You appear to be revisiting a location. Change direction.")
+                        self._recovery_steps_remaining = 3
+                    if hasattr(self.task_memory, 'current_segment'):
+                        _seg = self.task_memory.current_segment()
+                        if _seg:
+                            _mem_ctx_parts.append(f"Current instruction step: {_seg}")
+                except Exception:
+                    pass
+                _memory_context = " ".join(_mem_ctx_parts)
+
                 # Execute inference
                 success = True
                 try:
@@ -198,6 +216,7 @@ class InternVLAN1Agent(Agent):
                             self.s2_input.instruction,
                             self.camera_intrinsic,
                             self.s2_input.look_down,
+                            memory_context=_memory_context,
                         )
                 except Exception as e:
                     print(f"s2 infer error: {e}")
@@ -213,6 +232,7 @@ class InternVLAN1Agent(Agent):
                             self.s2_input.instruction,
                             self.camera_intrinsic,
                             False,
+                            memory_context=_memory_context,
                         )
                     except Exception as e:
                         print(f"s2 infer error: {e}")
@@ -355,6 +375,14 @@ class InternVLAN1Agent(Agent):
         output = {}
         # Simple branch:
         # 1. If S2 output is full discrete actions, don't execute S1 and return directly
+        # Recovery override: force LEFT turn (action=2) when oscillation was detected
+        if self._recovery_steps_remaining > 0:
+            output['action'] = [2]  # LEFT — escape the loop
+            self._recovery_steps_remaining -= 1
+            self.episode_step += 1
+            self.dual_forward_step += 1
+            return output
+
         print('===============', self.s2_output.output_action, '=================')
         if self.s2_output.output_action is not None:
             output['action'] = [self.s2_output.output_action[0]]

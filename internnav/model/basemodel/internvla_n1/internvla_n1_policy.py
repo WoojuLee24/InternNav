@@ -107,7 +107,7 @@ class InternVLAN1Net(PreTrainedModel):
         self.rgb_list.append(image)
         self.episode_idx += 1
 
-    def s2_step(self, rgb, depth, pose, instruction, intrinsic, look_down=False):
+    def s2_step(self, rgb, depth, pose, instruction, intrinsic, look_down=False, memory_context: str = ""):
         # Need to be careful: look_down images are not added to rgb_list and won't be selected as history
         # 1. Preprocess input
         image = Image.fromarray(rgb).convert('RGB')
@@ -122,6 +122,9 @@ class InternVLAN1Net(PreTrainedModel):
             # 2.1 instruction
             sources = copy.deepcopy(self.conversation)
             sources[0]["value"] = sources[0]["value"].replace('<instruction>.', instruction)
+            # Inject memory context (loop warnings, progress hints) when available
+            if memory_context:
+                sources[0]["value"] += f" Navigation context: {memory_context}"
             # 2.2 images
             cur_images = self.rgb_list[-1:]
             if self.episode_idx == 0:
