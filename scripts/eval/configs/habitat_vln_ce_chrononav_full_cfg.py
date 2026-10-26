@@ -45,13 +45,13 @@ eval_cfg = EvalCfg(
     env=EnvCfg(
         env_type='habitat',
         env_settings={
-            # Full 1839-episode val_unseen (no num_episode_sample limit)
-            'config_path': '/workspace/ChronoNav/scripts/vln_eval/vln_r2r_debug.yaml',
+            # Shuffled 50-episode sample for SR estimation (representative multi-scene mix)
+            'config_path': '/workspace/ChronoNav/scripts/vln_eval/vln_r2r_chrononav_50_shuffled.yaml',
         },
     ),
     eval_type='habitat_vln',
     eval_settings={
-        "output_path": "./logs/vln_ce_full/chrononav_full_val_unseen",
+        "output_path": "./logs/vln_ce_full/chrononav_50_shuffled",
         "save_video": False,
         "epoch": 0,
         "max_steps_per_episode": 500,
