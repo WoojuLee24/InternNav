@@ -36,6 +36,10 @@ class RigSim:
         cam, ag = cfg['camera'], cfg['agent']
         self.rigs = dict(cam['rigs'])            # rig -> pitch_down deg
         self.height_m = float(cam['height_m'])
+        # rig 별 센서 높이 (optional): 없으면 모든 rig 가 height_m (기존 동작). 예: {60cm_15deg: 0.6} (mini 학습 rig 5종 렌더용)
+        self.rig_height_m = {r: float((cam.get('rig_height_m') or {}).get(r, self.height_m)) for r in self.rigs}
+        # rig 별 hfov (optional): 없으면 모든 rig 가 hfov (기존 동작). 릴리스 60cm rig 는 ≈68.7° (gs_vlnpe/vlnce_rig.py _RIG_HFOV)
+        self.rig_hfov = {r: float((cam.get('rig_hfov') or {}).get(r, cam['hfov'])) for r in self.rigs}
 
         sim_cfg = habitat_sim.SimulatorConfiguration()
         sim_cfg.scene_id = str(scene_glb)
@@ -50,8 +54,8 @@ class RigSim:
                 s.uuid = f'{kind}.{rig}'
                 s.sensor_type = stype
                 s.resolution = [int(cam['height']), int(cam['width'])]
-                s.hfov = float(cam['hfov'])
-                s.position = [0.0, self.height_m, 0.0]
+                s.hfov = self.rig_hfov[rig]
+                s.position = [0.0, self.rig_height_m[rig], 0.0]
                 s.orientation = [-np.deg2rad(float(pitch)), 0.0, 0.0]  # x축 음수 회전 = 아래
                 specs.append(s)
 
