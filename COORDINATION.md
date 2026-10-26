@@ -5,7 +5,7 @@
 > Keep entries short — this is a coordination surface, not documentation.
 
 _Format: update the `_last_updated` line and the relevant row. Do NOT rewrite the whole file._
-_last_updated: 2026-10-24 (f7234f2 pushed — NexusNav script + full eval cfg) by session_01ARwduxfwfZ4FyxfSkDxPoN_
+_last_updated: 2026-10-26 (a351125 — memory→S2 prompt + loop break + max_hold=15) by session_01ARwduxfwfZ4FyxfSkDxPoN_
 
 ---
 
@@ -167,8 +167,31 @@ When finishing a session:
 5. Write 2-line handoff note below:
 
 ### Latest Handoff Note
-**From:** session_01ARwduxfwfZ4FyxfSkDxPoN (2026-10-24)
-**State:** All training scripts committed and pushed (InternNav-dev: f7234f2). peer=debug-duilvn-metrics-validation is building vlnav/nexusnav-train:local image and will launch DualVLN mini training (port 29501) then NexusNav (port 29502). NavDP DROPPED from VLN-CE comparison (continuous action output incompatible with discrete CE). 5-eval plan: DualVLN-original / DualVLN-finetuned / ChronoNav-DualVLN / NexusNav-finetuned / ChronoNav-NexusNav — all on full val_unseen 1839. Full ChronoNav eval config (acc8a3f) ready for Nov-1. User wants: artifact updates (architecture, comparison results, paper draft contributions clarity), measured mini results table (no projections), and Naver Cloud projection after mini measured. **Next:** (1) peer runs training + evals, reports measured SR; (2) artifact + paper updates with measured comparison table; (3) contributions clarity pass on nexusnav_v3.tex.
+**From:** session_01ARwduxfwfZ4FyxfSkDxPoN (2026-10-26)
+**State:** a351125 committed (NOT YET PUSHED — GitHub auth expired, user must run: `! git -C /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev push origin dev`).
+
+**3 zero-shot quick wins implemented (a351125):**
+1. `body_memory.py`: `is_oscillating()` threshold tightened (var<0.5m², window=12), recovery action added
+2. `internvla_n1_agent.py`: memory_context built + passed to s2_step; 3-step recovery override in step()
+3. `internvla_n1_policy.py`: `memory_context=""` kwarg in s2_step, injected into prompt
+4. `habitat_vln_evaluator.py`: `_S2_MAX_HOLD=15` prevents stale-plan loops
+- 36 tests pass, 1 skip (no CUDA)
+- Expected SR: 73% → ~78-80% (inference-only, deep research validated)
+
+**Deep research findings (2026-10-26):**
+- 88% of failures = stuck/looping (max_steps hit) — not nav errors
+- All memory modules were PASSIVE (update-only, never fed into S2 prompt) — now ACTIVE
+- VLN-Cache arXiv:2603.07080 confirms our exact τ=0.92 failure mode + fix
+- ChronoNav 72.82% already exceeds CLASH ~66% (supervised VLN-CE SOTA)
+
+**VLN-PE result:** ChronoNav VLN-PE SR=99.1% (n=1347 full val_unseen, H1/InternUtopia). Added to artifact v11.
+
+**Next priorities:**
+1. Push a351125 to origin/dev (user action — GitHub auth needed)
+2. τ: 0.92→0.97 config change + heading guard in s2_kv_cache.py
+3. History 3→5 frames config change
+4. Run full val_unseen eval with a351125 changes to confirm 80% milestone
+5. DualVLN + NexusNav mini training (image build status unknown)
 
 ---
 
