@@ -59,7 +59,7 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 
 | Container | Model | GPU | Status | Log |
 |-----------|-------|-----|--------|-----|
-| (none) | — | — | All eval containers stopped | — |
+| `vln_ce_chrononav_80pct` | ChronoNav a351125 (use_kv_cache=False) | GPU 0 | ▶ RUNNING 2026-10-26 | `/mnt/nvme0/vln_habitat/logs/vln_ce_full/run_chrononav_80pct.log` |
 
 **Completed containers (results):**
 | Container | Model | Result |

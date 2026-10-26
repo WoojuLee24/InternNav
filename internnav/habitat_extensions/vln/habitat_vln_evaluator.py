@@ -1127,6 +1127,12 @@ class HabitatVLNEvaluator(DistributedEvaluator):
             _prev_llm_outputs = None  # last S2 output; reused on VisionEmbeddingCache hit
             _s2_hold_count = 0        # consecutive frames where cache was hit; reset at max_hold
 
+            # Inline oscillation detection (mirrors BodyMemory.is_oscillating())
+            # Track GPS positions; when position variance < 0.5 m² over last 12 steps → stuck.
+            _pos_history: list = []   # (x, y) tuples from GPS
+            _osci_warning_active = False
+            _recovery_steps: int = 0  # force 3×LEFT when oscillation detected
+
             done = False
             flag = False
 
@@ -1144,6 +1150,22 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                 depth = filter_depth(depth.reshape(depth.shape[:2]), blur_type=None)
                 depth = depth * (self._max_depth - self._min_depth) + self._min_depth
                 depth = depth * 1000
+
+                # Inline oscillation detection — mirrors BodyMemory.is_oscillating()
+                _pos_history.append((x, y))
+                if len(_pos_history) > 12:
+                    _pos_history.pop(0)
+                _osci_warning_active = False
+                if len(_pos_history) >= 12 and _recovery_steps == 0:
+                    _xs = [p[0] for p in _pos_history]
+                    _ys = [p[1] for p in _pos_history]
+                    _var = (np.var(_xs) + np.var(_ys))
+                    if _var < 0.5:
+                        _osci_warning_active = True
+                        _recovery_steps = 3
+                        print(f"[OSCI] step={step_id} var={_var:.4f} → recovery mode", flush=True)
+                if _recovery_steps > 0:
+                    _recovery_steps -= 1
 
                 agent_state = self.env._env.sim.get_agent_state()
                 height = agent_state.position[1] - initial_height  # Habitat GPS makes west negative, so flip y
@@ -1213,7 +1235,12 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                     # to prevent stale plans causing the agent to loop indefinitely.
                     _S2_MAX_HOLD = 15
                     _skip_s2 = False
-                    if _use_vision_cache:
+                    # Recovery override: oscillation detected → force LEFT turns, skip S2
+                    if _recovery_steps > 0 and not _osci_warning_active:
+                        action_seq = [action_code.LEFT]
+                        _skip_s2 = True
+                        llm_outputs = _prev_llm_outputs or ""
+                    elif _use_vision_cache:
                         _fp = torch.from_numpy(rgb).permute(2, 0, 1).float() / 255.0
                         _, _cache_hit = _vision_cache.get_or_compute(
                             _fp, lambda x: x.mean(0, keepdim=True)

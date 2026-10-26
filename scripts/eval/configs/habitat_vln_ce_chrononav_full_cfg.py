@@ -39,7 +39,7 @@ eval_cfg = EvalCfg(
             "attn_implementation": "eager",
             "load_in_4bit": True,
             "use_kv_cache": False,  # disable to prevent OOM on RTX 3080 Ti (12GB) at step 32
-            "vision_cache_tau": 0.92,
+            # vision_cache_tau removed: τ=0.92 collapses SR 80%→18% (B2 A/B confirmed)
         },
     ),
     env=EnvCfg(
