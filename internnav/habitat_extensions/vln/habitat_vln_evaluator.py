@@ -965,8 +965,9 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                 _diag_gl_errors(f"before_step step={step_id} action={action}")
                 _diag_gl_reset(f"before_step step={step_id} action={action}")
                 if action == action_code.LOOKDOWN:
-                    self.env.step(action)
                     observations, _, done, _ = self.env.step(action)
+                    if not done:
+                        observations, _, done, _ = self.env.step(action)
                     flag = True
                 else:
                     observations, _, done, _ = self.env.step(action)
@@ -1382,8 +1383,9 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                     cv2.imwrite(self._live_frame_path, cv2.cvtColor(live_img, cv2.COLOR_RGB2BGR))
 
                 if action == action_code.LOOKDOWN:
-                    self.env.step(action)
                     observations, _, done, _ = self.env.step(action)
+                    if not done:
+                        observations, _, done, _ = self.env.step(action)
                     flag = True
                 else:
                     observations, _, done, _ = self.env.step(action)
