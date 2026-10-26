@@ -1162,7 +1162,7 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                     _var = (np.var(_xs) + np.var(_ys))
                     if _var < 0.5:
                         _osci_warning_active = True
-                        _recovery_steps = 3
+                        _recovery_steps = 6  # 6 steps of recovery: spans one full S2 cycle
                         print(f"[OSCI] step={step_id} var={_var:.4f} → recovery mode", flush=True)
                 if _recovery_steps > 0:
                     _recovery_steps -= 1
@@ -1235,11 +1235,15 @@ class HabitatVLNEvaluator(DistributedEvaluator):
                     # to prevent stale plans causing the agent to loop indefinitely.
                     _S2_MAX_HOLD = 15
                     _skip_s2 = False
-                    # Recovery override: oscillation detected → force LEFT turns, skip S2
+                    # Recovery override: oscillation detected → force FORWARD turns, skip S2
+                    # Using FORWARD (not LEFT) because the agent is already stuck turning left;
+                    # forcing forward breaks the spin and physically moves to a new position.
                     if _recovery_steps > 0 and not _osci_warning_active:
-                        action_seq = [action_code.LEFT]
+                        action_seq = [action_code.FORWARD] * 3
                         _skip_s2 = True
+                        _recovery_steps = 0  # consumed all recovery steps in one batch
                         llm_outputs = _prev_llm_outputs or ""
+                        print(f"[OSCI_RECOVERY] step={step_id} forcing 3×FORWARD", flush=True)
                     elif _use_vision_cache:
                         _fp = torch.from_numpy(rgb).permute(2, 0, 1).float() / 255.0
                         _, _cache_hit = _vision_cache.get_or_compute(
