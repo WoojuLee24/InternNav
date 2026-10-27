@@ -105,7 +105,7 @@ docker run --rm \
      --weight_decay 0 --warmup_ratio 0.05 --max_grad_norm 1 \
      --lr_scheduler_type cosine --logging_steps 1 \
      --model_max_length 1024 --gradient_checkpointing True \
-     --dataloader_num_workers 2 \
+     --dataloader_num_workers 0 \
      --run_name ${MODEL}_vln_ce_mini \
      --report_to none \
    2>&1 | tee /workspace/InternNav/logs/train_${MODEL}_mini.log" \
