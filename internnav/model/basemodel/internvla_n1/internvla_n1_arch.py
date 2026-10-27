@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 LatentEmbSize = 768
 MODEL_PATH_TO = "checkpoints"
@@ -119,6 +120,186 @@ class QFormer(nn.Module):
         return out
 
 
+class PredictiveWorldModelHead(nn.Module):
+    """Predicts future visual latents at horizon steps from current features (NavForesee-style).
+
+    Training: auxiliary loss L_pred = MSE(predicted, actual_future.detach())
+    Inference: uncertainty = mean prediction error → S2 firing gate signal.
+
+    Input: current visual features (B, N, feat_dim) from rgb_model intermediate layers
+    Output: predicted latents at each horizon, shape (B, len(horizons), N, feat_dim)
+    """
+
+    def __init__(self, feat_dim=384, hidden_dim=512, horizons=(2, 4)):
+        super().__init__()
+        self.horizons = horizons
+        self.feat_encoder = nn.Sequential(
+            nn.Linear(feat_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        self.horizon_heads = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, feat_dim),
+            )
+            for _ in horizons
+        ])
+
+    def forward(self, visual_feats):
+        # visual_feats: (B, N, feat_dim)
+        encoded = self.feat_encoder(visual_feats)  # (B, N, hidden_dim)
+        predictions = []
+        for head in self.horizon_heads:
+            predictions.append(head(encoded))  # (B, N, feat_dim)
+        return torch.stack(predictions, dim=1)  # (B, len(horizons), N, feat_dim)
+
+    def compute_uncertainty(self, visual_feats_seq):
+        """Compute per-step prediction error for the S2 gate signal.
+
+        visual_feats_seq: list of (B, N, feat_dim) tensors, length >= max(horizons)+1
+        Returns: uncertainty scalar (B,) or None if not enough history.
+        """
+        if len(visual_feats_seq) < max(self.horizons) + 1:
+            return None
+        current = visual_feats_seq[-1]
+        errors = []
+        for i, horizon in enumerate(self.horizons):
+            if len(visual_feats_seq) > horizon:
+                actual_future = visual_feats_seq[-horizon]
+                pred = self.forward(current)[:, i]
+                error = F.mse_loss(pred, actual_future.detach(), reduction='none').mean(dim=(-1, -2))
+                errors.append(error)
+        if not errors:
+            return None
+        return torch.stack(errors, dim=0).mean(dim=0)
+
+
+class LACPModule(nn.Module):
+    """Latent Anticipatory Causal Predictor (LACP).
+
+    2M-parameter module that predicts future WM-head uncertainty from current
+    DiT action latents. Makes the failure gate anticipatory (fires before failure)
+    rather than reactive (fires after detecting prediction error).
+
+    NexusNav contribution C11. First anticipatory VLN failure gate (CVPR 2026).
+
+    Input:  action_features (B, T, input_dim) — DiT latent before traj_dit forward
+    Output: anticipated_uncertainty (B, T) — predicted WM error at t+1, values >= 0
+    Training loss: MSE(predicted, actual_wm_uncertainty.detach())
+    """
+
+    def __init__(self, input_dim: int = 384, d_model: int = 256, n_layers: int = 2, n_heads: int = 4):
+        super().__init__()
+        self.input_proj = nn.Linear(input_dim, d_model)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=n_heads, dim_feedforward=d_model * 4,
+            dropout=0.0, batch_first=True, norm_first=True,
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        self.out_proj = nn.Linear(d_model, 1)
+
+    def forward(self, action_features: torch.Tensor) -> torch.Tensor:
+        """
+        action_features: (B, T, input_dim)
+        returns: anticipated_uncertainty (B, T) — values >= 0
+        """
+        x = self.input_proj(action_features)   # (B, T, d_model)
+        x = self.transformer(x)                 # (B, T, d_model)
+        out = self.out_proj(x).squeeze(-1)      # (B, T)
+        return F.softplus(out)                  # ensure >= 0
+
+
+class ProgressMonitorHead(nn.Module):
+    """Predicts scalar navigation progress in [0,1] from the [TRAJ] hidden state.
+
+    Aux loss: L_prog = λ_prog * MSE(pred, frame_ratio)
+    Train-time only — head is dropped at eval; improved representation persists.
+
+    Reference: Ma et al., ICLR 2019 (arXiv:1901.03035). +8pp SR on R2R val_unseen.
+    VLN-CE transfer estimated +3-4pp. NexusNav contribution Block A.
+    """
+
+    def __init__(self, hidden_size: int = 3584):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(hidden_size, 256),
+            nn.GELU(),
+            nn.Linear(256, 1),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, traj_h: torch.Tensor) -> torch.Tensor:
+        # traj_h: (B, hidden_size) — the [TRAJ]-position hidden state
+        return self.net(traj_h).squeeze(-1)  # (B,)
+
+
+class ContrastiveViewProjector(nn.Module):
+    """NT-Xent projection head for view-invariant visual feature learning.
+
+    Two independent feature-dropout augmentations of the current frame produce
+    two views → NT-Xent contrastive loss forces view-agnostic representations.
+
+    Reference: VIL arXiv:2507.08831 (IEEE RA-L 2026). +8-15pp on V²-VLNCE,
+    +2-4pp on standard R2R-CE val_unseen. NexusNav contribution Block B.
+    """
+
+    def __init__(self, feat_dim: int = 384, proj_dim: int = 128):
+        super().__init__()
+        self.proj = nn.Sequential(
+            nn.Linear(feat_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, proj_dim),
+        )
+
+    def forward(self, feats: torch.Tensor) -> torch.Tensor:
+        # feats: (B, N, feat_dim) — mean-pool then project then L2-normalize
+        return F.normalize(self.proj(feats.mean(dim=1)), dim=-1)  # (B, proj_dim)
+
+    @staticmethod
+    def nt_xent(z1: torch.Tensor, z2: torch.Tensor, temperature: float = 0.07) -> torch.Tensor:
+        B = z1.shape[0]
+        z = torch.cat([z1, z2], dim=0)                      # (2B, D)
+        sim = torch.mm(z, z.T) / temperature                 # (2B, 2B)
+        sim.fill_diagonal_(float('-inf'))
+        labels = torch.cat([
+            torch.arange(B, 2 * B, device=z.device),
+            torch.arange(B, device=z.device),
+        ])
+        return F.cross_entropy(sim, labels)
+
+
+class DirectionPredictionHead(nn.Module):
+    """Predicts heading direction (cos θ, sin θ) toward next waypoint.
+
+    Loss: 1 − cosine_similarity(pred, gt_direction), range [0, 2].
+    Trains the [TRAJ] token to encode spatial directional awareness.
+    gt_direction = normalize(traj_poses[:, 0, :2]) — first relative waypoint.
+
+    Reference: directional grounding in BEVBert (arXiv:2212.04385),
+    FILD-Nav (IJCAI 2026, +2pp SR, +7pp OSR). NexusNav contribution Block C.
+    """
+
+    def __init__(self, hidden_size: int = 3584):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(hidden_size, 128),
+            nn.GELU(),
+            nn.Linear(128, 2),
+        )
+
+    def forward(self, traj_h: torch.Tensor) -> torch.Tensor:
+        # traj_h: (B, hidden_size) → (B, 2) unit vector
+        return F.normalize(self.net(traj_h), dim=-1)
+
+    @staticmethod
+    def direction_loss(pred: torch.Tensor, gt_direction: torch.Tensor) -> torch.Tensor:
+        # pred, gt_direction: (B, 2) unit vectors; loss in [0, 2], 0=perfect
+        cos_sim = (pred * gt_direction).sum(dim=-1)  # (B,)
+        return (1.0 - cos_sim).mean()
+
+
 class InternVLAN1MetaModel:
     def __init__(self, config):
         super(InternVLAN1MetaModel, self).__init__(config)
@@ -138,6 +319,12 @@ class InternVLAN1MetaModel:
                     self.rgb_model = build_depthanythingv2(config)
                     self.memory_encoder = MemoryEncoder()
                     self.rgb_resampler = QFormer()
+                    self.wm_head = PredictiveWorldModelHead(feat_dim=384, hidden_dim=512, horizons=(2, 4))
+                    self.imag_token_proj = nn.Linear(384, LatentEmbSize)
+                    self.lacp = LACPModule(input_dim=384, d_model=256, n_layers=2, n_heads=4)
+                    self.progress_head = ProgressMonitorHead(hidden_size=config.hidden_size)
+                    self.view_contrast_proj = ContrastiveViewProjector(feat_dim=384, proj_dim=128)
+                    self.direction_head = DirectionPredictionHead(hidden_size=config.hidden_size)
 
             elif 'navdp' in config.system1:
                 if 'async' in config.system1:
@@ -162,6 +349,12 @@ class InternVLAN1MetaModel:
                 self.rgb_model = build_depthanythingv2(model_args)
                 self.memory_encoder = MemoryEncoder()
                 self.rgb_resampler = QFormer()
+                self.wm_head = PredictiveWorldModelHead(feat_dim=384, hidden_dim=512, horizons=(2, 4))
+                self.imag_token_proj = nn.Linear(384, LatentEmbSize)
+                self.lacp = LACPModule(input_dim=384, d_model=256, n_layers=2, n_heads=4)
+                self.progress_head = ProgressMonitorHead(hidden_size=self.config.hidden_size)
+                self.view_contrast_proj = ContrastiveViewProjector(feat_dim=384, proj_dim=128)
+                self.direction_head = DirectionPredictionHead(hidden_size=self.config.hidden_size)
         elif 'navdp' in model_args.system1:
             if 'async' in model_args.system1:
                 self.navdp = build_navdp(model_args, memory_size=2)

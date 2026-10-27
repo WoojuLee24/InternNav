@@ -1,191 +1,126 @@
-"""
-NavCoT: Navigation Chain-of-Thought for S2 (Qwen2.5-VL-7B) — C10.
+"""NavCoT: structured chain-of-thought reasoning step for S2 planner.
 
-Injects reasoning prompts into S2 instructions, eliciting step-by-step
-thinking before action selection.  Two modes:
-  compact  — 1 sentence suffix (+5 tokens, zero latency cost, immediate +1-2pp)
-  full     — multi-step CoT block (+20ms decode budget, full +4-7pp after fine-tune)
+Wraps S2's text generation with a CoT prefix that elicits landmark
+grounding and sub-goal prediction before the final action tokens.
 
-Integration: call augment_instruction() on the instruction string before
-passing to policy.s2_step().  Stateless — safe to call per S2 invocation.
+Paper ref: Wei et al. (2022) Chain-of-Thought Prompting NeurIPS;
+applied here as first CoT use in continuous VLN (NexusNav contribution C10).
 """
-from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
-
-__all__ = ["NavCoTConfig", "NavCoT", "generate_navcot_data_script"]
+from typing import Optional
 
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
+NAVCOT_SYSTEM = (
+    "You are a navigation assistant. Before predicting the next waypoint, "
+    "reason step-by-step about: (1) what landmarks are visible, "
+    "(2) which instruction step is currently active, "
+    "(3) whether the goal is visible, "
+    "(4) the best sub-goal direction. "
+    "Format: <think>...</think><action>WAYPOINT or STOP</action>"
+)
+
+COT_PROMPT_TEMPLATE = (
+    "Navigation instruction: {instruction}\n"
+    "Steps completed: {steps_done}/{steps_total}\n"
+    "Current position: heading={heading:.1f}deg elevation={elevation:.1f}deg\n"
+    "Memory context: {memory_context}\n"
+    "Visible landmarks: {landmarks}\n"
+    "Task: Reason step-by-step, then predict the next waypoint direction or STOP.\n"
+    "<think>"
+)
+
 
 @dataclass
-class NavCoTConfig:
-    enabled: bool = True
-    mode: str = "compact"       # "compact" | "full"
-    inject_at_s2: bool = True
-    max_reasoning_tokens: int = 64
+class NavCoTOutput:
+    reasoning: str
+    action_text: str
+    full_response: str
+    cot_enabled: bool
 
 
-# ---------------------------------------------------------------------------
-# Prompts
-# ---------------------------------------------------------------------------
+class NavCoTWrapper:
+    """Wraps S2 inference with structured chain-of-thought.
 
-_COMPACT_SUFFIX = " Think step by step before acting."
+    Drop-in replacement for direct S2 prompt calls.
+    Set enabled=False to fall back to direct prediction (zero overhead).
+    """
 
-_FULL_TEMPLATE = (
-    "\nBefore choosing your next navigation action, reason step by step:\n"
-    "1. What do I see that relates to the instruction?\n"
-    "2. What part of the instruction have I completed, and what's next?\n"
-    "3. What direction makes progress toward the goal?\n"
-    "Reasoning: "
-)
+    def __init__(self, enabled: bool = True, max_think_tokens: int = 128):
+        self.enabled = enabled
+        self.max_think_tokens = max_think_tokens
+        self._step_count = 0
 
-_HISTORY_PREFIX_TPL = "Recent actions: {history}. "
-
-# Pattern to extract reasoning + action from model output
-_REASONING_PATTERN = re.compile(
-    r"Reasoning:\s*(.*?)(?:Action:|$)", re.DOTALL | re.IGNORECASE
-)
-
-
-# ---------------------------------------------------------------------------
-# NavCoT
-# ---------------------------------------------------------------------------
-
-class NavCoT:
-    """Stateless CoT prompt manager for S2 instruction augmentation."""
-
-    def __init__(self, config: Optional[NavCoTConfig] = None) -> None:
-        self.cfg = config if config is not None else NavCoTConfig()
-
-    def augment_instruction(
+    def build_cot_prompt(
         self,
         instruction: str,
-        step: int = 0,
-        history: Optional[List[str]] = None,
+        steps_done: int = 0,
+        steps_total: int = 10,
+        heading: float = 0.0,
+        elevation: float = 0.0,
+        memory_context: str = "",
+        landmarks: str = "none detected",
     ) -> str:
-        """Return instruction augmented with CoT prompt suffix."""
-        if not self.cfg.enabled or not self.cfg.inject_at_s2:
-            return instruction
+        return COT_PROMPT_TEMPLATE.format(
+            instruction=instruction,
+            steps_done=steps_done,
+            steps_total=steps_total,
+            heading=heading,
+            elevation=elevation,
+            memory_context=memory_context[:200],
+            landmarks=landmarks[:100],
+        )
 
-        prefix = ""
-        if history:
-            recent = history[-3:] if len(history) > 3 else history
-            prefix = _HISTORY_PREFIX_TPL.format(history=", ".join(recent))
+    def build_cot_context_prefix(
+        self,
+        instruction: str,
+        steps_done: int = 0,
+        steps_total: int = 10,
+        heading: float = 0.0,
+        elevation: float = 0.0,
+        memory_context: str = "",
+        landmarks: str = "none detected",
+    ) -> str:
+        """Return a context prefix to prepend to memory_context for s2_step.
 
-        if self.cfg.mode == "full":
-            return f"{prefix}{instruction}{_FULL_TEMPLATE}"
-        else:
-            return f"{prefix}{instruction}{_COMPACT_SUFFIX}"
-
-    def extract_reasoning(self, s2_output_text: str) -> Tuple[str, str]:
+        Injects CoT elicitation into the memory context so s2_step reasons
+        before committing to a waypoint. Lightweight — no additional forward pass.
         """
-        Parse S2 output for reasoning trace.
-        Returns (reasoning, action_text).  Falls back to ("", full_text).
-        """
-        if not s2_output_text:
-            return "", s2_output_text
+        if not self.enabled:
+            return memory_context
+        cot_prefix = (
+            f"[NavCoT] Step {steps_done}/{steps_total} | "
+            f"heading={heading:.0f}deg | "
+            f"landmarks={landmarks[:80]} | "
+            "Think: what landmark is next? Is goal visible? Best direction? "
+        )
+        return cot_prefix + memory_context
 
-        m = _REASONING_PATTERN.search(s2_output_text)
-        if m:
-            reasoning = m.group(1).strip()
-            action_start = m.end()
-            action_text = s2_output_text[action_start:].strip()
-            if action_text.lower().startswith("action:"):
-                action_text = action_text[7:].strip()
-            return reasoning, action_text
+    def parse_cot_output(self, raw: str) -> NavCoTOutput:
+        """Extract <think> and <action> blocks from raw model output."""
+        think_match = re.search(r'<think>(.*?)</think>', raw, re.DOTALL)
+        action_match = re.search(r'<action>(.*?)</action>', raw, re.DOTALL)
+        reasoning = think_match.group(1).strip() if think_match else ""
+        action_text = action_match.group(1).strip() if action_match else raw.strip()
+        return NavCoTOutput(
+            reasoning=reasoning,
+            action_text=action_text,
+            full_response=raw,
+            cot_enabled=self.enabled,
+        )
 
-        return "", s2_output_text
+    def get_system_prompt(self) -> str:
+        return NAVCOT_SYSTEM if self.enabled else ""
 
+    def increment_step(self):
+        self._step_count += 1
 
-# ---------------------------------------------------------------------------
-# Training data generation helper
-# ---------------------------------------------------------------------------
+    def reset(self):
+        self._step_count = 0
 
-def generate_navcot_data_script() -> str:
-    """
-    Returns a ready-to-run Python script string for generating CoT training data.
-
-    The script:
-    1. Loads R2R train split JSON (~61K instructions × ~6 steps = ~366K samples)
-    2. Samples up to max_episodes per split (default 2000 → ~10K steps, ~$30 GPT-4o-mini)
-    3. For each step: calls GPT-4o-mini to generate a CoT reasoning trace
-    4. Saves JSONL: {instruction, step_idx, action, reasoning, scene_desc}
-    """
-    return r'''
-import json
-import os
-import random
-import time
-
-try:
-    import openai
-except ImportError:
-    raise SystemExit("pip install openai first")
-
-client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-
-R2R_TRAIN = "data/v1/annotations/R2R_train.json"
-OUT_FILE  = "data/navcot_r2r_train.jsonl"
-MAX_EPISODES = int(os.environ.get("MAX_EPISODES", "2000"))
-MODEL = "gpt-4o-mini"
-
-SYSTEM_PROMPT = (
-    "You are an expert robot navigator. Given a navigation instruction and the "
-    "current step context, produce a concise chain-of-thought reasoning (2-3 sentences) "
-    "that explains why the agent should take the given action at this step. "
-    "Be specific about landmarks and spatial relationships."
-)
-
-with open(R2R_TRAIN) as f:
-    episodes = json.load(f)
-
-random.seed(42)
-random.shuffle(episodes)
-episodes = episodes[:MAX_EPISODES]
-
-written = 0
-with open(OUT_FILE, "a") as out:
-    for ep in episodes:
-        instruction = ep["instructions"][0]
-        path_len = len(ep.get("path", []))
-        for step_idx in range(max(1, path_len - 1)):
-            user_msg = (
-                f"Instruction: {instruction}\n"
-                f"Step {step_idx + 1} of {path_len - 1}.\n"
-                f"Action taken: FORWARD\n"
-                "Provide step-by-step reasoning:"
-            )
-            try:
-                resp = client.chat.completions.create(
-                    model=MODEL,
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user",   "content": user_msg},
-                    ],
-                    max_tokens=128,
-                    temperature=0.3,
-                )
-                reasoning = resp.choices[0].message.content.strip()
-                record = {
-                    "instruction": instruction,
-                    "step_idx": step_idx,
-                    "path_len": path_len,
-                    "action": "FORWARD",
-                    "reasoning": reasoning,
-                }
-                out.write(json.dumps(record) + "\n")
-                written += 1
-                if written % 100 == 0:
-                    print(f"Written {written} records...")
-                time.sleep(0.05)
-            except Exception as e:
-                print(f"Error at ep {ep.get('path_id')}: {e}")
-                continue
-
-print(f"Done: {written} CoT records → {OUT_FILE}")
-'''
+    @staticmethod
+    def extract_landmarks_from_memory(memory_context: str) -> str:
+        """Pull landmark mentions from WorldMemory context string."""
+        matches = re.findall(r'\b[A-Z][a-z]+(?: [A-Z][a-z]+)*\b', memory_context)
+        return ', '.join(set(matches[:5])) if matches else "none detected"

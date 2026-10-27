@@ -13,7 +13,12 @@ from transformers import (
 )
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from .internvla_n1_arch import InternVLAN1MetaForCausalLM, InternVLAN1MetaModel
+from .internvla_n1_arch import (
+    ContrastiveViewProjector,
+    DirectionPredictionHead,
+    InternVLAN1MetaForCausalLM,
+    InternVLAN1MetaModel,
+)
 
 TRAJ_TOKEN_INDEX = 151667
 IMAGE_TOKEN_INDEX = 151655
@@ -292,6 +297,91 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
                     mask = loss_mask.flatten(0, 1)[:, None, None]
                     masked_loss = loss * mask
                     loss = masked_loss.sum() / mask.sum() / (loss.shape[1] * loss.shape[2])
+
+                    # WM auxiliary loss (NavForesee-style): predict future visual latents
+                    if (
+                        hasattr(self.get_model(), 'wm_head')
+                        and 'async' in self.get_system1_type()
+                        and traj_images is not None
+                        and traj_images.size(1) >= 3
+                    ):
+                        B_traj = traj_images.size(0)
+                        T_traj = traj_images.size(1)
+                        # images_dp_feat: (B*T, 2, 256, 384); index 1 = current frame
+                        cur_frame_feats = images_dp_feat[:, 1].view(B_traj, T_traj, 256, 384).detach()
+                        wm_loss = torch.tensor(0.0, device=loss.device, dtype=torch.float32)
+                        wm_count = 0
+                        wm_dtype = next(self.get_model().wm_head.parameters()).dtype
+                        for h_i, horizon in enumerate(self.get_model().wm_head.horizons):
+                            if T_traj > horizon:
+                                src = cur_frame_feats[:, :T_traj - horizon].reshape(-1, 256, 384).to(wm_dtype)
+                                tgt = cur_frame_feats[:, horizon:].reshape(-1, 256, 384).to(wm_dtype).detach()
+                                preds = self.get_model().wm_head(src)  # (B*(T-h), len(horizons), 256, 384)
+                                wm_loss = wm_loss + F.mse_loss(preds[:, h_i].float(), tgt.float())
+                                wm_count += 1
+                        if wm_count > 0:
+                            wm_lambda = getattr(self.config, 'wm_lambda', 0.1)
+                            loss = loss + wm_lambda * (wm_loss / wm_count)
+
+                    # LACP anticipatory loss (C11): predict WM uncertainty from DiT latents
+                    if hasattr(self.get_model(), 'lacp'):
+                        # action_features: (bsz, T, 384) — computed above in nextdit block
+                        anticipated = self.get_model().lacp(action_features.detach())  # (bsz, T)
+                        # Supervision target: zeros (cold-start); replaced by actual WM uncertainty
+                        # once WM head has warmed up (curriculum: start with zero target)
+                        lacp_target = torch.zeros_like(anticipated)
+                        lacp_lambda = getattr(self.config, 'lacp_lambda', 0.05)
+                        lacp_loss = F.mse_loss(anticipated.float(), lacp_target.float())
+                        loss = loss + lacp_lambda * lacp_loss
+
+                    # Block A — ProgressMonitorHead: predict navigation progress from [TRAJ] token
+                    if hasattr(self.get_model(), 'progress_head') and t_s_pos is not None and traj_poses is not None:
+                        B_orig = len(t_s_pos)
+                        prog_h = torch.stack(
+                            [hidden_states[b, t_s_pos[b]].float() for b in range(B_orig)], dim=0
+                        )  # (B, hidden_size)
+                        prog_pred = self.get_model().progress_head(prog_h)  # (B,)
+                        prog_target = loss_mask.float().sum(dim=1) / (loss_mask.shape[1] + 1e-6)
+                        prog_lambda = getattr(self.config, 'prog_lambda', 0.1)
+                        loss = loss + prog_lambda * F.mse_loss(prog_pred, prog_target.float())
+
+                    # Block B — ContrastiveViewProjector: NT-Xent on two dropout augmentations
+                    if (
+                        self.training
+                        and hasattr(self.get_model(), 'view_contrast_proj')
+                        and 'async' in self.get_system1_type()
+                    ):
+                        cur_feat = images_dp_feat[:, 1] if images_dp_feat.shape[1] >= 2 else images_dp_feat[:, 0]
+                        aug1 = F.dropout(cur_feat.float(), p=0.15, training=True)
+                        aug2 = F.dropout(cur_feat.float(), p=0.15, training=True)
+                        z1 = self.get_model().view_contrast_proj(
+                            aug1.unsqueeze(1) if aug1.dim() == 2 else aug1
+                        )
+                        z2 = self.get_model().view_contrast_proj(
+                            aug2.unsqueeze(1) if aug2.dim() == 2 else aug2
+                        )
+                        contrast_lambda = getattr(self.config, 'contrast_lambda', 0.05)
+                        loss = loss + contrast_lambda * ContrastiveViewProjector.nt_xent(z1, z2)
+
+                    # Block C — DirectionPredictionHead: predict (cos θ, sin θ) to first waypoint
+                    if (
+                        hasattr(self.get_model(), 'direction_head')
+                        and t_s_pos is not None
+                        and traj_poses is not None
+                        and traj_poses.shape[2] >= 2
+                    ):
+                        first_wp = traj_poses[:, 0, :2].float()  # (B, 2)
+                        gt_direction = first_wp / first_wp.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+                        # Reuse prog_h if Block A ran (same token, same batch size)
+                        if not (hasattr(self.get_model(), 'progress_head') and t_s_pos is not None):
+                            B_orig = len(t_s_pos)
+                            prog_h = torch.stack(
+                                [hidden_states[b, t_s_pos[b]].float() for b in range(B_orig)], dim=0
+                            )
+                        dir_pred = self.get_model().direction_head(prog_h)  # (B, 2)
+                        dir_lambda = getattr(self.config, 'dir_lambda', 0.1)
+                        loss = loss + dir_lambda * DirectionPredictionHead.direction_loss(dir_pred, gt_direction)
+
                 elif 'navdp' in self.get_system1_type():
                     if 'async' in self.get_system1_type():
                         cur_images = traj_images.flatten(0, 1)
@@ -385,7 +475,17 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
                     )  # [bs*select_size,512,384]
                     memory_feat = torch.cat([images_dp_feat.flatten(1, 2), memory_feat], dim=-1)
                     memory_tokens = self.get_model().rgb_resampler(memory_feat)
-                hidden_states = torch.cat([memory_tokens, traj_latents], dim=1)
+
+                # Imagination conditioning: inject predicted future latent as extra DiT token
+                if hasattr(self.get_model(), 'wm_head'):
+                    cur_feat = images_dp_feat[:, 1].mean(dim=0, keepdim=True)  # (1, 256, 384) current frame
+                    with torch.no_grad():
+                        future_preds = self.get_model().wm_head(cur_feat.to(dtype))  # (1, len(h), 256, 384)
+                        long_lat = future_preds[:, -1].mean(dim=1)  # (1, 384) long-horizon, spatial mean
+                        imag_token = self.get_model().imag_token_proj(long_lat).unsqueeze(1)  # (1, 1, 768)
+                    hidden_states = torch.cat([memory_tokens, imag_token, traj_latents], dim=1)
+                else:
+                    hidden_states = torch.cat([memory_tokens, traj_latents], dim=1)
             else:
                 hidden_states = traj_latents
             hidden_states_null = torch.zeros_like(hidden_states, device=device, dtype=dtype)

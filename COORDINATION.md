@@ -5,7 +5,7 @@
 > Keep entries short — this is a coordination surface, not documentation.
 
 _Format: update the `_last_updated` line and the relevant row. Do NOT rewrite the whole file._
-_last_updated: 2026-10-27 (9a3d7bc — ZeRO-Infinity recipe + MAX_STEPS=600 cap; DualVLN TRAINING step-0 clear) by session_01ARwduxfwfZ4FyxfSkDxPoN_
+_last_updated: 2026-10-27 (merge: nexusnav-s2→dev — C1-C12 all integrated; ZeRO-Infinity recipe + MAX_STEPS=600 cap) by merge-agent_
 
 ---
 
@@ -13,13 +13,15 @@ _last_updated: 2026-10-27 (9a3d7bc — ZeRO-Infinity recipe + MAX_STEPS=600 cap;
 
 | Worktree path | Branch | Purpose | **LIVE SESSION** |
 |---------------|--------|---------|---------|
-| `/home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev` | `dev` | Main integration + eval fixes (MERGE TARGET) | **model-2e** (this session) |
+| `/home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev` | `dev` | Main integration — all C1-C12 merged (MERGE TARGET) | **merge-agent (post-merge)** |
 | `/mnt/nvme0/worktrees/vln-ce` | `wt/vln-ce` | Mini training (dualvln→chrononav→nexusnav) + eval | **debug-duilvn-metrics-validation** |
-| `/mnt/nvme0/worktrees/nexusnav-s2` | `wt/nexusnav-s2` | NexusNav SOTA architecture + S2 module wiring | **NexusNav and ChronoNav SOTA coordination** |
-| `/mnt/nvme0/worktrees/paper` | `wt/paper` | Paper writing (NexusNav + ChronoNav) | FREE |
+| `/mnt/nvme0/worktrees/nexusnav-s2` | `wt/nexusnav-s2` | NexusNav model arch: C1-C12 WM/LACP/BEV/NavCoT + A/B/C aux heads | **MERGED — read-only** |
+| `/mnt/nvme0/worktrees/paper` | `wt/paper` | NexusNav + ChronoNav paper writing | FREE |
 | `/mnt/nvme0/worktrees/wiring` | `wt/wiring` | Future module wiring | FREE |
 
-**All worktree branches are at db0cc9b (rebased 2026-10-27). All include: OSCI fix, LOOKDOWN crash fix, t_s_pos LM-loss fix.**
+**All worktree branches include: OSCI fix, LOOKDOWN crash fix, t_s_pos LM-loss fix.**
+**DOCKER GPU FLAG: `--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all` (NOT `--gpus all` — /run/nvidia-persistenced/socket absent on this host)**
+**C8/C9 (GRPO/NavPRM) are COMMENTED stubs — activate only when Naver A100 resources available.**
 
 **How to use:**
 1. New session: pick a worktree that matches your work. Edit files ONLY in that worktree's directory.
@@ -217,4 +219,4 @@ When finishing a session:
 | VLN-CE action space | STOP=0, FORWARD=1, LEFT=2, RIGHT=3 |
 | Hardstop: SR<62% at ≥200 eps | kill + result.json |
 | Hardstop: SR≥62% at ≥500 eps | cap at 500 eps |
-| GPU rule (this machine) | single GPU → `--gpus all` |
+| GPU rule (this machine) | `--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all` — NOT `--gpus all` (/run/nvidia-persistenced/socket absent) |

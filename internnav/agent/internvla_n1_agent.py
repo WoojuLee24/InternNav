@@ -12,6 +12,8 @@ from gym import spaces
 from PIL import Image
 
 from internnav.agent.base import Agent
+from internnav.agent.navcot import NavCoTWrapper
+from internnav.model.basemodel.nexusnav.bev_fusion import BEVFusion
 from internnav.agent.latent_reasoning import LatentReasoner, S2ThoughtCache
 from internnav.agent.memory.body_memory import BodyMemory
 from internnav.agent.memory.task_memory import TaskMemory
@@ -23,7 +25,7 @@ try:
 except Exception:
     _HAS_LACP = False
 try:
-    from internnav.agent.bev_fusion import BEVFusion, BEVConfig
+    from internnav.agent.bev_fusion import BEVFusion as _AgentBEVFusion, BEVConfig
     _HAS_BEV = True
 except Exception:
     _HAS_BEV = False
@@ -115,21 +117,17 @@ class InternVLAN1Agent(Agent):
             self.lacp.eval()
         self._lacp_h_pred = None  # pending prediction to compare K steps later
 
-        # C12 BEVFusion: depth → BEV occupancy → 4 CLIP tokens for S2 context
-        self.bev_fusion = BEVFusion(BEVConfig()).to(self.device) if _HAS_BEV else None
-        if self.bev_fusion is not None:
-            self.bev_fusion.eval()
-
-        # C10 NavCoT: chain-of-thought prompt builder + parser for S2
-        self.navcot_builder = NavCoTBuilder(NavCoTConfig()) if _HAS_NAVCOT else None
+        # C10 NavCoT: structured chain-of-thought elicitation before each S2 step
+        self.navcot = NavCoTWrapper(enabled=True, max_think_tokens=128)
         self._action_history: list = []
 
-        # C10 NavCoT simple mode (navcot.py) — active when nav_cot.py is unavailable
-        try:
-            from internnav.agent.navcot import NavCoT as _NavCoTSimple
-            self._navcot_simple = _NavCoTSimple()
-        except Exception:
-            self._navcot_simple = None
+        # C12 BEVFusion: depth → BEV occupancy → 4 CLIP tokens for S2 context
+        # Enabled via config.use_bev_fusion (default False — set True when training with C12)
+        self.bev_fusion = (
+            BEVFusion(token_dim=3584, n_tokens=4).to(self.device)
+            if getattr(self._model_settings, 'use_bev_fusion', False)
+            else None
+        )
 
         # Recovery counter: non-zero forces backtrack actions in S1 loop
         self._recovery_steps_remaining = 0
@@ -183,6 +181,7 @@ class InternVLAN1Agent(Agent):
         self.world_memory.reset()
         self.body_memory.reset()
         self._recovery_steps_remaining = 0
+        self.navcot.reset()
 
         # Reset C10/C11/C12 per-episode state
         if self.lacp is not None:
@@ -285,6 +284,32 @@ class InternVLAN1Agent(Agent):
                 except Exception:
                     pass
 
+                # NavCoT (C10): prepend structured CoT elicitation to memory context
+                try:
+                    _pose_for_cot = self.s2_input.pose
+                    _heading = float(_pose_for_cot[2]) * 57.3 if _pose_for_cot is not None and len(_pose_for_cot) > 2 else 0.0
+                    _landmarks = NavCoTWrapper.extract_landmarks_from_memory(_memory_context)
+                    _memory_context = self.navcot.build_cot_context_prefix(
+                        instruction=self.s2_input.instruction or "",
+                        steps_done=self.episode_step,
+                        heading=_heading,
+                        memory_context=_memory_context,
+                        landmarks=_landmarks,
+                    )
+                    self.navcot.increment_step()
+                except Exception:
+                    pass  # CoT prefix is best-effort
+
+                # BEV tokens (C12): compute 4 spatial tokens from depth before S2 call
+                _bev_tokens = None
+                if self.bev_fusion is not None and self.s2_input.depth is not None:
+                    try:
+                        _depth_t = torch.from_numpy(self.s2_input.depth).float().to(self.device)
+                        with torch.no_grad():
+                            _bev_tokens = self.bev_fusion(_depth_t)  # (1, 4, 3584)
+                    except Exception:
+                        _bev_tokens = None  # BEV tokens are best-effort
+
                 # Execute inference
                 success = True
                 try:
@@ -297,6 +322,7 @@ class InternVLAN1Agent(Agent):
                             self.camera_intrinsic,
                             self.s2_input.look_down,
                             memory_context=_memory_context,
+                            bev_tokens=_bev_tokens,  # C12: top-down spatial awareness
                         )
                 except Exception as e:
                     print(f"s2 infer error: {e}")
@@ -313,6 +339,7 @@ class InternVLAN1Agent(Agent):
                             self.camera_intrinsic,
                             False,
                             memory_context=_memory_context,
+                            bev_tokens=_bev_tokens,  # C12
                         )
                     except Exception as e:
                         print(f"s2 infer error: {e}")

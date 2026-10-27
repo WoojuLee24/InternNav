@@ -107,7 +107,7 @@ class InternVLAN1Net(PreTrainedModel):
         self.rgb_list.append(image)
         self.episode_idx += 1
 
-    def s2_step(self, rgb, depth, pose, instruction, intrinsic, look_down=False, memory_context: str = ""):
+    def s2_step(self, rgb, depth, pose, instruction, intrinsic, look_down=False, memory_context: str = "", bev_tokens=None):
         # Need to be careful: look_down images are not added to rgb_list and won't be selected as history
         # 1. Preprocess input
         image = Image.fromarray(rgb).convert('RGB')
@@ -168,9 +168,27 @@ class InternVLAN1Net(PreTrainedModel):
         inputs = self.processor(text=[text], images=self.input_images, return_tensors="pt").to(self.device)
 
         # 3. Model inference
+        # BEV tokens (C12): prepend 4 top-down spatial tokens to S2 context when available
+        _gen_inputs = dict(inputs)
+        if bev_tokens is not None:
+            try:
+                base_embeds = self.model.model.embed_tokens(_gen_inputs['input_ids'])
+                bev = bev_tokens.to(base_embeds.device, base_embeds.dtype)
+                _gen_inputs['inputs_embeds'] = torch.cat([bev, base_embeds], dim=1)
+                _gen_inputs.pop('input_ids', None)
+                # Extend attention mask to cover prepended BEV tokens
+                if 'attention_mask' in _gen_inputs:
+                    bev_mask = torch.ones(
+                        base_embeds.shape[0], bev.shape[1],
+                        dtype=_gen_inputs['attention_mask'].dtype,
+                        device=_gen_inputs['attention_mask'].device,
+                    )
+                    _gen_inputs['attention_mask'] = torch.cat([bev_mask, _gen_inputs['attention_mask']], dim=1)
+            except Exception:
+                _gen_inputs = dict(inputs)  # fallback: no BEV
         with torch.no_grad():
             output_ids = self.model.generate(
-                **inputs,
+                **_gen_inputs,
                 max_new_tokens=128,
                 do_sample=False,
                 use_cache=True,
