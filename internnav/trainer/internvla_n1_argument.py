@@ -19,6 +19,7 @@ class ModelArguments:
     debug_modes: str = field(default="")
     debug_dir: Optional[str] = field(default=None)
     wm_lambda: float = field(default=0.1, metadata={"help": "Weight for WM auxiliary prediction loss (NavForesee-style). 0.0 disables."})
+    lacp_lambda: float = field(default=0.05, metadata={"help": "Weight for LACP anticipatory uncertainty loss (C11). 0.0 disables."})
 
 
 @dataclass

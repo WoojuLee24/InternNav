@@ -176,6 +176,41 @@ class PredictiveWorldModelHead(nn.Module):
         return torch.stack(errors, dim=0).mean(dim=0)
 
 
+class LACPModule(nn.Module):
+    """Latent Anticipatory Causal Predictor (LACP).
+
+    2M-parameter module that predicts future WM-head uncertainty from current
+    DiT action latents. Makes the failure gate anticipatory (fires before failure)
+    rather than reactive (fires after detecting prediction error).
+
+    NexusNav contribution C11. First anticipatory VLN failure gate (CVPR 2026).
+
+    Input:  action_features (B, T, input_dim) — DiT latent before traj_dit forward
+    Output: anticipated_uncertainty (B, T) — predicted WM error at t+1, values >= 0
+    Training loss: MSE(predicted, actual_wm_uncertainty.detach())
+    """
+
+    def __init__(self, input_dim: int = 384, d_model: int = 256, n_layers: int = 2, n_heads: int = 4):
+        super().__init__()
+        self.input_proj = nn.Linear(input_dim, d_model)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=n_heads, dim_feedforward=d_model * 4,
+            dropout=0.0, batch_first=True, norm_first=True,
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        self.out_proj = nn.Linear(d_model, 1)
+
+    def forward(self, action_features: torch.Tensor) -> torch.Tensor:
+        """
+        action_features: (B, T, input_dim)
+        returns: anticipated_uncertainty (B, T) — values >= 0
+        """
+        x = self.input_proj(action_features)   # (B, T, d_model)
+        x = self.transformer(x)                 # (B, T, d_model)
+        out = self.out_proj(x).squeeze(-1)      # (B, T)
+        return F.softplus(out)                  # ensure >= 0
+
+
 class InternVLAN1MetaModel:
     def __init__(self, config):
         super(InternVLAN1MetaModel, self).__init__(config)
@@ -197,6 +232,7 @@ class InternVLAN1MetaModel:
                     self.rgb_resampler = QFormer()
                     self.wm_head = PredictiveWorldModelHead(feat_dim=384, hidden_dim=512, horizons=(2, 4))
                     self.imag_token_proj = nn.Linear(384, LatentEmbSize)
+                    self.lacp = LACPModule(input_dim=384, d_model=256, n_layers=2, n_heads=4)
 
             elif 'navdp' in config.system1:
                 if 'async' in config.system1:
@@ -221,6 +257,7 @@ class InternVLAN1MetaModel:
                 self.rgb_resampler = QFormer()
                 self.wm_head = PredictiveWorldModelHead(feat_dim=384, hidden_dim=512, horizons=(2, 4))
                 self.imag_token_proj = nn.Linear(384, LatentEmbSize)
+                self.lacp = LACPModule(input_dim=384, d_model=256, n_layers=2, n_heads=4)
         elif 'navdp' in model_args.system1:
             if 'async' in model_args.system1:
                 self.navdp = build_navdp(model_args, memory_size=2)

@@ -318,6 +318,17 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
                             wm_lambda = getattr(self.config, 'wm_lambda', 0.1)
                             loss = loss + wm_lambda * (wm_loss / wm_count)
 
+                    # LACP anticipatory loss (C11): predict WM uncertainty from DiT latents
+                    if hasattr(self.get_model(), 'lacp'):
+                        # action_features: (bsz, T, 384) — computed above in nextdit block
+                        anticipated = self.get_model().lacp(action_features.detach())  # (bsz, T)
+                        # Supervision target: zeros (cold-start); replaced by actual WM uncertainty
+                        # once WM head has warmed up (curriculum: start with zero target)
+                        lacp_target = torch.zeros_like(anticipated)
+                        lacp_lambda = getattr(self.config, 'lacp_lambda', 0.05)
+                        lacp_loss = F.mse_loss(anticipated.float(), lacp_target.float())
+                        loss = loss + lacp_lambda * lacp_loss
+
                 elif 'navdp' in self.get_system1_type():
                     if 'async' in self.get_system1_type():
                         cur_images = traj_images.flatten(0, 1)

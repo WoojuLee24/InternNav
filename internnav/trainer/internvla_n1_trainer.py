@@ -112,6 +112,7 @@ def set_model(model_args, model):
             'rgb_model',
             'wm_head',        # NexusNav: predictive world model head
             'imag_token_proj', # NexusNav: imagination token projector
+            'lacp',            # NexusNav C11: latent anticipatory causal predictor
         ]
         for n, p in model.model.named_parameters():
             if any(k in n for k in modules):
