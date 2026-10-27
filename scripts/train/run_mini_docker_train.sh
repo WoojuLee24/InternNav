@@ -56,7 +56,7 @@ docker run --rm \
   -e NVIDIA_VISIBLE_DEVICES=0 \
   -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
   -e CUDA_VISIBLE_DEVICES=0 \
-  -e PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64 \
+  -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:32 \   # expandable_segments needed on 12GB RTX 3080Ti for ZeRO-Infinity
   -e PYTHONUNBUFFERED=1 \
   -e TOKENIZERS_PARALLELISM=false \
   -e BITSANDBYTES_NOWELCOME=1 \
@@ -91,7 +91,7 @@ docker run --rm \
      --bf16 \
      --num_history ${NUM_HIST} --data_augmentation True \
      --resize_h 256 --resize_w 256 \
-     --sample_step 4 --num_future_steps 4 --predict_step_num 32 \
+     --sample_step 4 --num_future_steps 2 --predict_step_num 16 \   # mini-calibration: halved from 4/32 for 12GB stability; restore to 4/32 for Naver full run
      --pixel_goal_only False --system1 none \
      --output_dir /workspace/InternNav/data/checkpoints/${OUT} \
      --num_train_epochs ${EPOCHS} --max_steps ${MAX_STEPS} \
