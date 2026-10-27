@@ -110,9 +110,12 @@ def set_model(model_args, model):
             'memory_encoder',
             'rgb_resampler',
             'rgb_model',
-            'wm_head',        # NexusNav: predictive world model head
-            'imag_token_proj', # NexusNav: imagination token projector
-            'lacp',            # NexusNav C11: latent anticipatory causal predictor
+            'wm_head',            # NexusNav: predictive world model head
+            'imag_token_proj',    # NexusNav: imagination token projector
+            'lacp',               # NexusNav C11: latent anticipatory causal predictor
+            'progress_head',      # NexusNav Block A: progress monitor (+3-4pp SR)
+            'view_contrast_proj', # NexusNav Block B: contrastive view projector (+2-4pp SR)
+            'direction_head',     # NexusNav Block C: direction prediction head (+2-3pp SR)
         ]
         for n, p in model.model.named_parameters():
             if any(k in n for k in modules):

@@ -20,6 +20,9 @@ class ModelArguments:
     debug_dir: Optional[str] = field(default=None)
     wm_lambda: float = field(default=0.1, metadata={"help": "Weight for WM auxiliary prediction loss (NavForesee-style). 0.0 disables."})
     lacp_lambda: float = field(default=0.05, metadata={"help": "Weight for LACP anticipatory uncertainty loss (C11). 0.0 disables."})
+    prog_lambda: float = field(default=0.1, metadata={"help": "Block A: weight for ProgressMonitorHead MSE loss. 0.0 disables."})
+    contrast_lambda: float = field(default=0.05, metadata={"help": "Block B: weight for ContrastiveViewProjector NT-Xent loss. 0.0 disables."})
+    dir_lambda: float = field(default=0.1, metadata={"help": "Block C: weight for DirectionPredictionHead cosine loss. 0.0 disables."})
 
 
 @dataclass
