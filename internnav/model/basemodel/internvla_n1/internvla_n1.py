@@ -221,89 +221,97 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
 
         loss = None
         if labels is not None:
-            traj_hidden_states = []
-            for b in range(hidden_states.shape[0]):
-                traj_hidden_states.append(hidden_states[b, t_s_pos[b] : t_s_pos[b] + self.config.n_query, :])
-
-            traj_hidden_states = torch.stack(traj_hidden_states, dim=0)
-            traj_hidden_states = traj_hidden_states.unsqueeze(1).repeat(1, traj_poses.size(1), 1, 1).flatten(0, 1)
-            loss_mask = torch.arange(traj_images.size(1), device=self.device).expand(
-                traj_images.size(0), traj_images.size(1)
-            ) < video_frame_num.unsqueeze(1)
-
-            if 'nextdit' in self.get_system1_type():
-                if 'async' in self.get_system1_type():
-                    cur_images = traj_images.flatten(0, 1)
-                    pix_goal_images = traj_images[:, 0:1].repeat(1, traj_images.size(1), 1, 1, 1).flatten(0, 1)
-                    bsz = cur_images.size(0)
-                    images_dp = torch.stack([pix_goal_images, cur_images], dim=1).permute(0, 1, 4, 2, 3)
-                    images_dp_norm = (images_dp - self._resnet_mean.to(images_dp.device)) / self._resnet_std.to(images_dp.device)
-
-                    images_dp_feat = (
-                        self.get_model()
-                        .rgb_model.get_intermediate_layers(images_dp_norm.flatten(0, 1).to(next(self.get_model().rgb_model.parameters()).dtype))[0]
-                        .unflatten(dim=0, sizes=(bsz, -1))
-                    )
-
-                    memory_feat = self.get_model().memory_encoder(
-                        images_dp_feat.flatten(1, 2)
-                    )  # [bs*select_size,512,384]
-                    memory_feat = torch.cat([images_dp_feat.flatten(1, 2), memory_feat], dim=-1)
-                    memory_tokens = self.get_model().rgb_resampler(memory_feat)
-
-                    traj_hidden_states = self.get_model().cond_projector(traj_hidden_states)
-                    latents = torch.cat([memory_tokens, traj_hidden_states], dim=1)
-                else:
-                    traj_hidden_states = self.get_model().cond_projector(traj_hidden_states)
-                    latents = traj_hidden_states
-
-                relative_poses = traj_poses.flatten(0, 1)
-                bsz = relative_poses.shape[0]
-                noise = torch.randn(relative_poses.shape, device=relative_poses.device, dtype=relative_poses.dtype)
-                u = torch.rand(size=(bsz,), device="cpu")
-                indices = (u * self.get_model().noise_scheduler.config.num_train_timesteps).long()
-                timesteps = self.get_model().noise_scheduler.timesteps[indices].to(device=latents.device)
-                sigmas = self.get_sigmas(
-                    timesteps, latents.device, n_dim=relative_poses.shape[-1], dtype=relative_poses.dtype
+            if t_s_pos is None:
+                # S2-only (VLN-CE) path: no trajectory tokens, compute standard LM loss
+                shift_logits = logits[..., :-1, :].contiguous()
+                shift_labels = labels[..., 1:].contiguous()
+                loss = nn.CrossEntropyLoss()(
+                    shift_logits.view(-1, self.config.vocab_size), shift_labels.view(-1)
                 )
-
-                noisy_trajectory = (1 - sigmas) * relative_poses + sigmas * noise
-                action_features = self.get_model().action_encoder(noisy_trajectory)
-                pos_ids = torch.arange(relative_poses.shape[1]).reshape(1, -1).repeat(bsz, 1).to(relative_poses.device)
-                pos_embed = self.get_model().pos_encoding(pos_ids)
-                action_features += pos_embed
-
-                noise_pred = self.get_model().traj_dit(
-                    x=action_features,
-                    timestep=timesteps,
-                    z_latents=latents,
-                )
-                noise_pred = self.get_model().action_decoder(noise_pred)
-                target = noise - relative_poses
-                loss = F.mse_loss(noise_pred.float(), target.float(), reduction="none")
-                mask = loss_mask.flatten(0, 1)[:, None, None]
-                masked_loss = loss * mask
-                loss = masked_loss.sum() / mask.sum() / (loss.shape[1] * loss.shape[2])
-            elif 'navdp' in self.get_system1_type():
-                if 'async' in self.get_system1_type():
-                    cur_images = traj_images.flatten(0, 1)
-                    cur_depths = traj_depths.flatten(0, 1)
-                    pix_goal_images = traj_images[:, 0:1].repeat(1, traj_images.size(1), 1, 1, 1).flatten(0, 1)
-                    pix_goal_depths = traj_depths[:, 0:1].repeat(1, traj_depths.size(1), 1, 1).flatten(0, 1)
-                    images_dp = torch.stack([pix_goal_images, cur_images], dim=1)  # (bs*select_size, 2, 224, 224, 3)
-                    depths_dp = torch.stack([pix_goal_depths, cur_depths], dim=1).unsqueeze(
-                        -1
-                    )  # (bs*select_size, 2, 224, 224, 1)
-                    pred_pg, noise = self.model.navdp.forward_vlm_traj(
-                        traj_hidden_states, images_dp, depths_dp, tensor_label_actions=traj_poses
-                    )
-                    pg_action_loss = (pred_pg - noise).square()
-                    mask = loss_mask.flatten(0, 1)[:, None, None]
-                    masked_loss = pg_action_loss * mask
-                    loss = masked_loss.sum() / mask.sum() / (pg_action_loss.shape[1] * pg_action_loss.shape[2])
-
             else:
-                raise NotImplementedError
+                traj_hidden_states = []
+                for b in range(hidden_states.shape[0]):
+                    traj_hidden_states.append(hidden_states[b, t_s_pos[b] : t_s_pos[b] + self.config.n_query, :])
+
+                traj_hidden_states = torch.stack(traj_hidden_states, dim=0)
+                traj_hidden_states = traj_hidden_states.unsqueeze(1).repeat(1, traj_poses.size(1), 1, 1).flatten(0, 1)
+                loss_mask = torch.arange(traj_images.size(1), device=self.device).expand(
+                    traj_images.size(0), traj_images.size(1)
+                ) < video_frame_num.unsqueeze(1)
+
+                if 'nextdit' in self.get_system1_type():
+                    if 'async' in self.get_system1_type():
+                        cur_images = traj_images.flatten(0, 1)
+                        pix_goal_images = traj_images[:, 0:1].repeat(1, traj_images.size(1), 1, 1, 1).flatten(0, 1)
+                        bsz = cur_images.size(0)
+                        images_dp = torch.stack([pix_goal_images, cur_images], dim=1).permute(0, 1, 4, 2, 3)
+                        images_dp_norm = (images_dp - self._resnet_mean.to(images_dp.device)) / self._resnet_std.to(images_dp.device)
+
+                        images_dp_feat = (
+                            self.get_model()
+                            .rgb_model.get_intermediate_layers(images_dp_norm.flatten(0, 1).to(next(self.get_model().rgb_model.parameters()).dtype))[0]
+                            .unflatten(dim=0, sizes=(bsz, -1))
+                        )
+
+                        memory_feat = self.get_model().memory_encoder(
+                            images_dp_feat.flatten(1, 2)
+                        )  # [bs*select_size,512,384]
+                        memory_feat = torch.cat([images_dp_feat.flatten(1, 2), memory_feat], dim=-1)
+                        memory_tokens = self.get_model().rgb_resampler(memory_feat)
+
+                        traj_hidden_states = self.get_model().cond_projector(traj_hidden_states)
+                        latents = torch.cat([memory_tokens, traj_hidden_states], dim=1)
+                    else:
+                        traj_hidden_states = self.get_model().cond_projector(traj_hidden_states)
+                        latents = traj_hidden_states
+
+                    relative_poses = traj_poses.flatten(0, 1)
+                    bsz = relative_poses.shape[0]
+                    noise = torch.randn(relative_poses.shape, device=relative_poses.device, dtype=relative_poses.dtype)
+                    u = torch.rand(size=(bsz,), device="cpu")
+                    indices = (u * self.get_model().noise_scheduler.config.num_train_timesteps).long()
+                    timesteps = self.get_model().noise_scheduler.timesteps[indices].to(device=latents.device)
+                    sigmas = self.get_sigmas(
+                        timesteps, latents.device, n_dim=relative_poses.shape[-1], dtype=relative_poses.dtype
+                    )
+
+                    noisy_trajectory = (1 - sigmas) * relative_poses + sigmas * noise
+                    action_features = self.get_model().action_encoder(noisy_trajectory)
+                    pos_ids = torch.arange(relative_poses.shape[1]).reshape(1, -1).repeat(bsz, 1).to(relative_poses.device)
+                    pos_embed = self.get_model().pos_encoding(pos_ids)
+                    action_features += pos_embed
+
+                    noise_pred = self.get_model().traj_dit(
+                        x=action_features,
+                        timestep=timesteps,
+                        z_latents=latents,
+                    )
+                    noise_pred = self.get_model().action_decoder(noise_pred)
+                    target = noise - relative_poses
+                    loss = F.mse_loss(noise_pred.float(), target.float(), reduction="none")
+                    mask = loss_mask.flatten(0, 1)[:, None, None]
+                    masked_loss = loss * mask
+                    loss = masked_loss.sum() / mask.sum() / (loss.shape[1] * loss.shape[2])
+                elif 'navdp' in self.get_system1_type():
+                    if 'async' in self.get_system1_type():
+                        cur_images = traj_images.flatten(0, 1)
+                        cur_depths = traj_depths.flatten(0, 1)
+                        pix_goal_images = traj_images[:, 0:1].repeat(1, traj_images.size(1), 1, 1, 1).flatten(0, 1)
+                        pix_goal_depths = traj_depths[:, 0:1].repeat(1, traj_depths.size(1), 1, 1).flatten(0, 1)
+                        images_dp = torch.stack([pix_goal_images, cur_images], dim=1)  # (bs*select_size, 2, 224, 224, 3)
+                        depths_dp = torch.stack([pix_goal_depths, cur_depths], dim=1).unsqueeze(
+                            -1
+                        )  # (bs*select_size, 2, 224, 224, 1)
+                        pred_pg, noise = self.model.navdp.forward_vlm_traj(
+                            traj_hidden_states, images_dp, depths_dp, tensor_label_actions=traj_poses
+                        )
+                        pg_action_loss = (pred_pg - noise).square()
+                        mask = loss_mask.flatten(0, 1)[:, None, None]
+                        masked_loss = pg_action_loss * mask
+                        loss = masked_loss.sum() / mask.sum() / (pg_action_loss.shape[1] * pg_action_loss.shape[2])
+
+                else:
+                    raise NotImplementedError
 
         if not return_dict:
             output = (logits,) + outputs[1:]
