@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 import math
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -332,7 +333,12 @@ class BEVFusion(nn.Module):
         Returns:
             tokens: [B, n_tokens, token_dim] or None if depth is invalid.
         """
-        if depth is None or depth.numel() == 0:
+        if depth is None:
+            return None
+        # Accept both numpy arrays and torch tensors
+        if isinstance(depth, np.ndarray):
+            depth = torch.from_numpy(depth)
+        if depth.numel() == 0:
             return None
 
         single = depth.dim() == 2
@@ -385,6 +391,8 @@ class BEVFusion(nn.Module):
             ctx: string like "Spatial context: 72% free ahead. Obstacle ~18° right."
         """
         if depth is not None:
+            if isinstance(depth, np.ndarray):
+                depth = torch.from_numpy(depth)
             single = depth.dim() == 2
             if single:
                 depth = depth.unsqueeze(0)
