@@ -91,7 +91,7 @@ docker run --rm \
      --bf16 \
      --num_history ${NUM_HIST} --data_augmentation True \
      --resize_h 256 --resize_w 256 \
-     --sample_step 4 --num_future_steps 2 --predict_step_num 16 \   # mini-calibration: halved from 4/32 for 12GB stability; restore to 4/32 for Naver full run
+     --sample_step 4 --num_future_steps 2 --predict_step_num 16 \
      --pixel_goal_only False --system1 none \
      --output_dir /workspace/InternNav/data/checkpoints/${OUT} \
      --num_train_epochs ${EPOCHS} --max_steps ${MAX_STEPS} \

@@ -49,6 +49,9 @@ class NexusNavModelConfig(PretrainedConfig):
         action_vocab_size: int = 256,
         action_token_loss_weight: float = 0.1,
         thought_consistency_loss_weight: float = 0.05,
+        lacp_enabled: bool = True,
+        lacp_latent_dim: int = 256,
+        lacp_aux_loss_weight: float = 0.02,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -61,6 +64,9 @@ class NexusNavModelConfig(PretrainedConfig):
         self.action_vocab_size = action_vocab_size
         self.action_token_loss_weight = action_token_loss_weight
         self.thought_consistency_loss_weight = thought_consistency_loss_weight
+        self.lacp_enabled = lacp_enabled
+        self.lacp_latent_dim = lacp_latent_dim
+        self.lacp_aux_loss_weight = lacp_aux_loss_weight
 
 
 class NexusNavS2Heads(nn.Module):
@@ -150,6 +156,9 @@ class NexusNavNet(PreTrainedModel):
         # Will be set after base model load
         self.action_token_loss_weight = config.action_token_loss_weight
         self.thought_consistency_loss_weight = config.thought_consistency_loss_weight
+        # C11 LACP (lazy-init in from_pretrained when enabled)
+        self._lacp = None
+        self.lacp_aux_loss_weight = getattr(config, 'lacp_aux_loss_weight', 0.02)
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: str, *args, **kwargs) -> "NexusNavNet":
@@ -284,6 +293,19 @@ class NexusNavNet(PreTrainedModel):
                 result["action_token_loss"] = act_loss
 
         result["loss"] = total_loss
+
+        # C11 LACP auxiliary loss (self-supervised latent prediction, weight=0.02)
+        lacp_h_pred = kwargs.get("lacp_h_pred", None)
+        lacp_h_actual = kwargs.get("lacp_h_actual", None)
+        if self._lacp is not None and lacp_h_pred is not None and lacp_h_actual is not None:
+            try:
+                lacp_loss = self._lacp.aux_loss(lacp_h_actual, lacp_h_pred)
+                total_loss = total_loss + self.lacp_aux_loss_weight * lacp_loss
+                result["lacp_loss"] = lacp_loss
+                result["loss"] = total_loss
+            except Exception:
+                pass
+
         return result
 
     def generate(self, *args, **kwargs):

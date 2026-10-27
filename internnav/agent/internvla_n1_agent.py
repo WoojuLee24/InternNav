@@ -13,25 +13,6 @@ from PIL import Image
 
 from internnav.agent.base import Agent
 from internnav.agent.latent_reasoning import LatentReasoner, S2ThoughtCache
-
-# C10-C12 NexusNav contributions (graceful degradation if modules unavailable)
-try:
-    from internnav.agent.navcot import NavCoT, NavCoTConfig
-    _NAVCOT_AVAILABLE = True
-except ImportError:
-    _NAVCOT_AVAILABLE = False
-
-try:
-    from internnav.agent.lacp import LACP, LACPConfig
-    _LACP_AVAILABLE = True
-except ImportError:
-    _LACP_AVAILABLE = False
-
-try:
-    from internnav.agent.bev_fusion import BEVFusion, BEVConfig
-    _BEV_AVAILABLE = True
-except ImportError:
-    _BEV_AVAILABLE = False
 from internnav.agent.memory.body_memory import BodyMemory
 from internnav.agent.memory.task_memory import TaskMemory
 from internnav.agent.memory.world_memory import WorldMemory
@@ -143,22 +124,15 @@ class InternVLAN1Agent(Agent):
         self.navcot_builder = NavCoTBuilder(NavCoTConfig()) if _HAS_NAVCOT else None
         self._action_history: list = []
 
+        # C10 NavCoT simple mode (navcot.py) — active when nav_cot.py is unavailable
+        try:
+            from internnav.agent.navcot import NavCoT as _NavCoTSimple
+            self._navcot_simple = _NavCoTSimple()
+        except Exception:
+            self._navcot_simple = None
+
         # Recovery counter: non-zero forces backtrack actions in S1 loop
         self._recovery_steps_remaining = 0
-
-        # C10 NavCoT: chain-of-thought S2 reasoning
-        self.navcot = NavCoT() if _NAVCOT_AVAILABLE else None
-
-        # C11 LACP: latent anticipatory predictor (anticipatory KERV gate)
-        if _LACP_AVAILABLE:
-            self.lacp = LACP()
-            self.lacp.eval()
-        else:
-            self.lacp = None
-        self._lacp_h_actual = None  # last observed S2 output latent
-
-        # C12 BEV Fusion: depth → BEV occupancy → 4 context tokens for S2
-        self.bev_fusion = BEVFusion() if _BEV_AVAILABLE else None
 
         # Start S2 thread
         self._start_s2_thread()
@@ -292,16 +266,22 @@ class InternVLAN1Agent(Agent):
 
                 # C10 NavCoT: rebuild memory context via structured CoT prompt
                 _memory_context = " ".join(_mem_ctx_parts)
+                # Augment instruction with CoT reasoning prompt for S2
+                _instruction = self.s2_input.instruction
                 try:
-                    if self.navcot_builder is not None and self.s2_input.instruction:
+                    if self.navcot_builder is not None and _instruction:
                         _cot_prompt = self.navcot_builder.build(
-                            instruction=self.s2_input.instruction,
+                            instruction=_instruction,
                             step_idx=self.episode_step,
                             memory_context=" ".join(_mem_ctx_parts),
                             bev_context=_bev_context,
                             action_history=self._action_history,
                         )
                         _memory_context = _cot_prompt.user
+                    elif self._navcot_simple is not None and _instruction:
+                        _instruction = self._navcot_simple.augment_instruction(
+                            _instruction, step=self.episode_step
+                        )
                 except Exception:
                     pass
 
@@ -313,7 +293,7 @@ class InternVLAN1Agent(Agent):
                             self.s2_input.rgb,
                             self.s2_input.depth,
                             self.s2_input.pose,
-                            self.s2_input.instruction,
+                            _instruction,
                             self.camera_intrinsic,
                             self.s2_input.look_down,
                             memory_context=_memory_context,
@@ -329,7 +309,7 @@ class InternVLAN1Agent(Agent):
                             self.s2_input.rgb,
                             self.s2_input.depth,
                             self.s2_input.pose,
-                            self.s2_input.instruction,
+                            _instruction,
                             self.camera_intrinsic,
                             False,
                             memory_context=_memory_context,
