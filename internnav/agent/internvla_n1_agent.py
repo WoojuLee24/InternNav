@@ -13,10 +13,44 @@ from PIL import Image
 
 from internnav.agent.base import Agent
 from internnav.agent.latent_reasoning import LatentReasoner, S2ThoughtCache
+
+# C10-C12 NexusNav contributions (graceful degradation if modules unavailable)
+try:
+    from internnav.agent.navcot import NavCoT, NavCoTConfig
+    _NAVCOT_AVAILABLE = True
+except ImportError:
+    _NAVCOT_AVAILABLE = False
+
+try:
+    from internnav.agent.lacp import LACP, LACPConfig
+    _LACP_AVAILABLE = True
+except ImportError:
+    _LACP_AVAILABLE = False
+
+try:
+    from internnav.agent.bev_fusion import BEVFusion, BEVConfig
+    _BEV_AVAILABLE = True
+except ImportError:
+    _BEV_AVAILABLE = False
 from internnav.agent.memory.body_memory import BodyMemory
 from internnav.agent.memory.task_memory import TaskMemory
 from internnav.agent.memory.world_memory import WorldMemory
 from internnav.agent.world_predictor import WorldPredictor
+try:
+    from internnav.agent.lacp import LACP, LACPConfig
+    _HAS_LACP = True
+except Exception:
+    _HAS_LACP = False
+try:
+    from internnav.agent.bev_fusion import BEVFusion, BEVConfig
+    _HAS_BEV = True
+except Exception:
+    _HAS_BEV = False
+try:
+    from internnav.agent.nav_cot import NavCoTBuilder, NavCoTParser, NavCoTConfig
+    _HAS_NAVCOT = True
+except Exception:
+    _HAS_NAVCOT = False
 from internnav.configs.agent import AgentCfg
 from internnav.configs.model.base_encoders import ModelCfg
 from internnav.model import get_config, get_policy
@@ -94,8 +128,37 @@ class InternVLAN1Agent(Agent):
         # WorldPredictor: online BCE reachability (Prophet-style), generates training signal
         self.world_predictor = WorldPredictor(feature_dim=256, device=str(self.device))
 
+        # C11 LACP: anticipatory KERV gate — predicts latent K steps ahead
+        self.lacp = LACP(LACPConfig()).to(self.device) if _HAS_LACP else None
+        if self.lacp is not None:
+            self.lacp.eval()
+        self._lacp_h_pred = None  # pending prediction to compare K steps later
+
+        # C12 BEVFusion: depth → BEV occupancy → 4 CLIP tokens for S2 context
+        self.bev_fusion = BEVFusion(BEVConfig()).to(self.device) if _HAS_BEV else None
+        if self.bev_fusion is not None:
+            self.bev_fusion.eval()
+
+        # C10 NavCoT: chain-of-thought prompt builder + parser for S2
+        self.navcot_builder = NavCoTBuilder(NavCoTConfig()) if _HAS_NAVCOT else None
+        self._action_history: list = []
+
         # Recovery counter: non-zero forces backtrack actions in S1 loop
         self._recovery_steps_remaining = 0
+
+        # C10 NavCoT: chain-of-thought S2 reasoning
+        self.navcot = NavCoT() if _NAVCOT_AVAILABLE else None
+
+        # C11 LACP: latent anticipatory predictor (anticipatory KERV gate)
+        if _LACP_AVAILABLE:
+            self.lacp = LACP()
+            self.lacp.eval()
+        else:
+            self.lacp = None
+        self._lacp_h_actual = None  # last observed S2 output latent
+
+        # C12 BEV Fusion: depth → BEV occupancy → 4 context tokens for S2
+        self.bev_fusion = BEVFusion() if _BEV_AVAILABLE else None
 
         # Start S2 thread
         self._start_s2_thread()
@@ -146,6 +209,14 @@ class InternVLAN1Agent(Agent):
         self.world_memory.reset()
         self.body_memory.reset()
         self._recovery_steps_remaining = 0
+
+        # Reset C10/C11/C12 per-episode state
+        if self.lacp is not None:
+            self.lacp.reset()
+        self._lacp_h_pred = None
+        if self.bev_fusion is not None:
+            self.bev_fusion.reset()
+        self._action_history = []
 
         if self.vis_debug:
             self.fps_writer = imageio.get_writer(f"{self.debug_path}/fps_{self.episode_idx}.mp4", fps=5)
@@ -203,7 +274,36 @@ class InternVLAN1Agent(Agent):
                             _mem_ctx_parts.append(f"Current instruction step: {_seg}")
                 except Exception:
                     pass
+
+                # C12 BEVFusion: prepend spatial context from depth → BEV
+                _bev_context = ""
+                try:
+                    if self.bev_fusion is not None and self.s2_input.depth is not None:
+                        _depth_t = torch.from_numpy(
+                            np.array(self.s2_input.depth, dtype=np.float32)
+                        ).to(self.device)
+                        if _depth_t.dim() == 3:
+                            _depth_t = _depth_t[:, :, 0]
+                        _bev_context = self.bev_fusion.get_context_string(_depth_t)
+                        if _bev_context:
+                            _mem_ctx_parts.insert(0, _bev_context)
+                except Exception:
+                    pass
+
+                # C10 NavCoT: rebuild memory context via structured CoT prompt
                 _memory_context = " ".join(_mem_ctx_parts)
+                try:
+                    if self.navcot_builder is not None and self.s2_input.instruction:
+                        _cot_prompt = self.navcot_builder.build(
+                            instruction=self.s2_input.instruction,
+                            step_idx=self.episode_step,
+                            memory_context=" ".join(_mem_ctx_parts),
+                            bev_context=_bev_context,
+                            action_history=self._action_history,
+                        )
+                        _memory_context = _cot_prompt.user
+                except Exception:
+                    pass
 
                 # Execute inference
                 success = True
@@ -288,6 +388,24 @@ class InternVLAN1Agent(Agent):
                 except Exception:
                     pass  # world predictor updates are best-effort
 
+                # C11 LACP: update K-step ahead prediction from current S2 latent
+                try:
+                    if self.lacp is not None:
+                        _out_lat = getattr(current_s2_output, 'output_latent', None)
+                        _out_act = getattr(current_s2_output, 'output_action', None)
+                        if _out_lat is not None and _out_lat.numel() >= 256:
+                            _h_now = _out_lat.detach().reshape(1, -1)[:, :256].float().to(self.device)
+                            if _out_act is not None and len(_out_act) > 0:
+                                _traj_k = torch.tensor(
+                                    _out_act[:self.lacp.cfg.K], dtype=torch.float32
+                                ).unsqueeze(0).to(self.device)
+                            else:
+                                _traj_k = torch.zeros(1, self.lacp.cfg.K, 2, device=self.device)
+                            with torch.no_grad():
+                                self._lacp_h_pred = self.lacp(_h_now, _traj_k)
+                except Exception:
+                    pass
+
                 # Update output state
                 with self.s2_output_lock:
                     print("get s2 output lock")
@@ -336,6 +454,20 @@ class InternVLAN1Agent(Agent):
             ):
                 # This normally only occurs when output is discrete action and discrete action has been fully executed
                 return True
+
+            # C11 LACP anticipatory gate: trigger S2 early when predicted latent diverges
+            try:
+                if (self.lacp is not None and self._lacp_h_pred is not None
+                        and self.s2_output.output_latent is not None):
+                    _lat = self.s2_output.output_latent.detach()
+                    if _lat.numel() >= 256:
+                        _h_actual = _lat.reshape(1, -1)[:, :256].float()
+                        if self.lacp.should_trigger_s2(_h_actual, self._lacp_h_pred):
+                            self._lacp_h_pred = None
+                            return True
+            except Exception:
+                pass
+
             return False
         raise ValueError("Invalid mode: {}".format(mode))
 
@@ -510,6 +642,17 @@ class InternVLAN1Agent(Agent):
                     os.path.join("./vis_debug_pix/", f"ttttt_{self.episode_step}.png")
                 )
                 self.fps_writer2.append_data(self.s1_output.vis_image)
+
+        # C10 NavCoT: track action history for future CoT context
+        try:
+            if 'action' in output and output['action']:
+                _act_id = output['action'][0]
+                _act_names = {0:"STOP",1:"MOVE_FORWARD",2:"TURN_LEFT",3:"TURN_RIGHT",4:"LOOK_UP",5:"LOOK_DOWN"}
+                self._action_history.append(_act_names.get(_act_id, str(_act_id)))
+                if len(self._action_history) > 12:
+                    self._action_history = self._action_history[-12:]
+        except Exception:
+            pass
 
         self.episode_step += 1
         if 'action' in output:
