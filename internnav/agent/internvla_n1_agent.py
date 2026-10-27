@@ -12,6 +12,7 @@ from gym import spaces
 from PIL import Image
 
 from internnav.agent.base import Agent
+from internnav.agent.navcot import NavCoTWrapper
 from internnav.agent.latent_reasoning import LatentReasoner, S2ThoughtCache
 from internnav.agent.memory.body_memory import BodyMemory
 from internnav.agent.memory.task_memory import TaskMemory
@@ -94,6 +95,9 @@ class InternVLAN1Agent(Agent):
         # WorldPredictor: online BCE reachability (Prophet-style), generates training signal
         self.world_predictor = WorldPredictor(feature_dim=256, device=str(self.device))
 
+        # NavCoT (C10): structured chain-of-thought elicitation before each S2 step
+        self.navcot = NavCoTWrapper(enabled=True, max_think_tokens=128)
+
         # Recovery counter: non-zero forces backtrack actions in S1 loop
         self._recovery_steps_remaining = 0
 
@@ -146,6 +150,7 @@ class InternVLAN1Agent(Agent):
         self.world_memory.reset()
         self.body_memory.reset()
         self._recovery_steps_remaining = 0
+        self.navcot.reset()
 
         if self.vis_debug:
             self.fps_writer = imageio.get_writer(f"{self.debug_path}/fps_{self.episode_idx}.mp4", fps=5)
@@ -204,6 +209,22 @@ class InternVLAN1Agent(Agent):
                 except Exception:
                     pass
                 _memory_context = " ".join(_mem_ctx_parts)
+
+                # NavCoT (C10): prepend structured CoT elicitation to memory context
+                try:
+                    _pose_for_cot = self.s2_input.pose
+                    _heading = float(_pose_for_cot[2]) * 57.3 if _pose_for_cot is not None and len(_pose_for_cot) > 2 else 0.0
+                    _landmarks = NavCoTWrapper.extract_landmarks_from_memory(_memory_context)
+                    _memory_context = self.navcot.build_cot_context_prefix(
+                        instruction=self.s2_input.instruction or "",
+                        steps_done=self.episode_step,
+                        heading=_heading,
+                        memory_context=_memory_context,
+                        landmarks=_landmarks,
+                    )
+                    self.navcot.increment_step()
+                except Exception:
+                    pass  # CoT prefix is best-effort
 
                 # Execute inference
                 success = True
