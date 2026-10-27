@@ -5,19 +5,21 @@
 > Keep entries short — this is a coordination surface, not documentation.
 
 _Format: update the `_last_updated` line and the relevant row. Do NOT rewrite the whole file._
-_last_updated: 2026-10-26 (a351125 — memory→S2 prompt + loop break + max_hold=15) by session_01ARwduxfwfZ4FyxfSkDxPoN_
+_last_updated: 2026-10-27 (9a3d7bc — ZeRO-Infinity recipe + MAX_STEPS=600 cap; DualVLN TRAINING step-0 clear) by session_01ARwduxfwfZ4FyxfSkDxPoN_
 
 ---
 
 ## Worktree Map (ISOLATED — use these for parallel sessions)
 
-| Worktree path | Branch | Purpose | Session |
+| Worktree path | Branch | Purpose | **LIVE SESSION** |
 |---------------|--------|---------|---------|
-| `/home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev` | `dev` | Main integration (MERGE TARGET) | coordinator |
-| `/mnt/nvme0/worktrees/vln-ce` | `wt/vln-ce` | VLN-CE eval, training configs, eval monitoring | session A |
-| `/mnt/nvme0/worktrees/nexusnav-s2` | `wt/nexusnav-s2` | S2 module wiring into agent inference path | session B |
-| `/mnt/nvme0/worktrees/paper` | `wt/paper` | NexusNav + ChronoNav paper writing | session C |
-| `/mnt/nvme0/worktrees/wiring` | `wt/wiring` | VisionEmbeddingCache evaluator wiring | session D |
+| `/home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev` | `dev` | Main integration + eval fixes (MERGE TARGET) | **model-2e** (this session) |
+| `/mnt/nvme0/worktrees/vln-ce` | `wt/vln-ce` | Mini training (dualvln→chrononav→nexusnav) + eval | **debug-duilvn-metrics-validation** |
+| `/mnt/nvme0/worktrees/nexusnav-s2` | `wt/nexusnav-s2` | NexusNav SOTA architecture + S2 module wiring | **NexusNav and ChronoNav SOTA coordination** |
+| `/mnt/nvme0/worktrees/paper` | `wt/paper` | Paper writing (NexusNav + ChronoNav) | FREE |
+| `/mnt/nvme0/worktrees/wiring` | `wt/wiring` | Future module wiring | FREE |
+
+**All worktree branches are at db0cc9b (rebased 2026-10-27). All include: OSCI fix, LOOKDOWN crash fix, t_s_pos LM-loss fix.**
 
 **How to use:**
 1. New session: pick a worktree that matches your work. Edit files ONLY in that worktree's directory.
@@ -59,7 +61,7 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 
 | Container | Model | GPU | Status | Log |
 |-----------|-------|-----|--------|-----|
-| `vln_ce_chrononav_80pct` | ChronoNav a351125 (use_kv_cache=False) | GPU 0 | ▶ RUNNING 2026-10-26 | `/mnt/nvme0/vln_habitat/logs/vln_ce_full/run_chrononav_80pct.log` |
+| `vlnav_train_dualvln` | DualVLN S2 (7B) · MAX_STEPS=600 | GPU 0 | ▶ TRAINING step-0 clear, loss~0.3-0.6, ~76s/it (2026-10-27) | `/mnt/nvme0/vln_habitat/logs/train_dualvln_mini.log` |
 
 **Completed containers (results):**
 | Container | Model | Result |
@@ -110,17 +112,20 @@ A file is "owned" until its session pushes to `dev`. Claim before touching.
 **Training pipeline status per model:**
 | Model | Script | Blocker | Status |
 |-------|--------|---------|--------|
-| DualVLN S2 (7B) | `start_mini_dualsystem_1gpu.sh` | ZeRO-3 CPU offload, needs ~56GB RAM (available: 81GB) | **READY TO LAUNCH** |
-| ChronoNav | Same as DualVLN (inference-time τ=0.92 only) | None — use DualVLN checkpoint at eval | Ready |
-| NexusNav-V3 | `nexusnav_vln_ce_mini.py` | model_name='nexusnav_v3' not in train.py | Blocked: needs nexusnav trainer |
-| NavDP | `navdp_vln_ce_mini.py` | pointcloud.ply missing + wrong video dir format | Blocked: needs data restructure |
+| DualVLN S2 (7B) | `run_mini_docker_train.sh dualvln` | ✅ RESOLVED — ZeRO-Infinity (param→CPU, optimizer→NVMe) | ▶ **TRAINING** step-0 clear, ~76s/it, 600 steps ≈ 12.7h |
+| ChronoNav | `run_mini_docker_train.sh chrononav` | None | ⏳ Queued after DualVLN |
+| NexusNav-V3 | `run_mini_docker_train.sh nexusnav` | None (will run same script) | ⏳ Queued after ChronoNav |
+| NavDP | — | VLN-CE incompatible (continuous actions) | ⛔ Skip |
 
-**Launch DualVLN mini training (1-GPU, 12GB):**
+**ZeRO config clarification (9a3d7bc):**
+- `zero3_nvme_offload.json`: optimizer → NVMe `/ds_offload`, param → **CPU** (not NVMe)
+- NVMe param-swapper threw "Not enough buffers 0 for swapping 1" — param must stay CPU
+- MAX_STEPS=600 cap: full 8-10 day/model run blows Nov-1 freeze; 600 steps ≈ 12.7h is calibration
+
+**Launch** (already running via debug-duilvn session, `wt/vln-ce` worktree):
 ```bash
-cd /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev
-bash scripts/train/qwenvl_train/start_mini_dualsystem_1gpu.sh
+bash scripts/train/run_mini_docker_train.sh dualvln   # then chrononav, then nexusnav
 ```
-> GPU: 476 MiB/12288 MiB free. RAM: 81GB available. ZeRO-3+CPU offload should fit.
 
 ### NEXT (sequential, GPU blocked until ChronoNav caps ~7.5h)
 - [ ] **USER ACTION**: Launch DualVLN mini training — `bash scripts/train/qwenvl_train/start_mini_dualsystem_1gpu.sh`
@@ -134,6 +139,10 @@ bash scripts/train/qwenvl_train/start_mini_dualsystem_1gpu.sh
 - [ ] NexusNav: wire remaining modules (S2KVCache in evaluator, WorldPredictor in inference)
 - [ ] OmniNav architecture diagram — update with NexusNav-V3 modules ✅ done (artifact updated)
 - [ ] Naver Cloud NavDP training (requires local smoke test to pass first)
+- [x] C10 NavCoT implemented (navcot.py + agent wiring in internvla_n1_agent.py) — wt/nexusnav-s2
+- [x] C8 GRPO-GQRM stub implemented (grpo_nav.py, commented activation block) — awaiting Naver A100x8
+- [x] C9 NavPRM stub implemented (nav_prm.py, commented activation block) — awaiting Naver A100x4
+- [x] C11 LACP + C12 BEV Fusion — stubs pending (see NEXUSNAV_TOP_CONTRIBUTION_2026.md)
 
 ---
 

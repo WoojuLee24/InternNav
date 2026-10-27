@@ -1,92 +1,197 @@
 # docker-compose.mini-train.yml
 # Sequential mini-model training for VLN-CE comparison table
-# Models run ONE AT A TIME to share the single RTX 3080 Ti (12GB)
-# Usage:  docker compose -f scripts/train/docker-compose.mini-train.yml run --rm navdp
+# Models run ONE AT A TIME on RTX 3080 Ti (12GB) via ZeRO-3 + CPU offload
 #
-# All services share the same image: vlnav/nexusnav-train:local
-# Build first:  docker build -f scripts/cloud/Dockerfile.nexusnav -t vlnav/nexusnav-train:local .
+# Image:  vlnav/nexusnav-train:local (pre-built)
+# Data:   /mnt/nvme0/vln_habitat/habitat_data/interndata_n1_mini_new/v4/vln_ce
+# Ckpt:   /home/kemal/VLNav/VLNav/checkpoints/InternVLA-N1-DualVLN
+#
+# Usage (sequential):
+#   docker compose -f scripts/train/docker-compose.mini-train.yml run --rm navdp
+#   docker compose -f scripts/train/docker-compose.mini-train.yml run --rm dualvln
+#   docker compose -f scripts/train/docker-compose.mini-train.yml run --rm chrononav
+#   docker compose -f scripts/train/docker-compose.mini-train.yml run --rm nexusnav
 
 version: "3.8"
 
+# ── Shared base config ────────────────────────────────────────────────────────
 x-common: &common
   image: vlnav/nexusnav-train:local
+  # Use runtime: nvidia WITHOUT deploy.resources to avoid nvidia-persistenced socket
+  # (matches thor_gd_vln working pattern — CUDA_VISIBLE_DEVICES controls GPU selection)
   runtime: nvidia
   environment:
     NVIDIA_VISIBLE_DEVICES: "0"
     NVIDIA_DRIVER_CAPABILITIES: "compute,utility"
     CUDA_VISIBLE_DEVICES: "0"
-    PYTHONPATH: "/workspace/InternNav-dev:/workspace/InternNav:/workspace/InternNav/src/diffusion-policy"
-    BITSANDBYTES_NOWELCOME: "1"
+    PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+    PYTHONUNBUFFERED: "1"
     TOKENIZERS_PARALLELISM: "false"
+    BITSANDBYTES_NOWELCOME: "1"
+    PYTHONPATH: "/workspace/InternNav-dev:/workspace/InternNav:/workspace/InternNav/src/diffusion-policy"
+    MINI_DATA_ROOT: "/workspace/InternNav/data/habitat_data/interndata_n1_mini_new/v4/vln_ce"
+    CKPT_DUALSYSTEM: "/checkpoints/InternVLA-N1-DualVLN"
+    CKPT_NAVDP: "/checkpoints/InternVLA-N1"
+    DS_OFFLOAD_DIR: "/ds_offload"
   volumes:
     - /home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev:/workspace/InternNav-dev:rw
     - /home/kemal/VLNav/VLNav/workspaces/model/InternNav:/workspace/InternNav:ro
     - /home/kemal/VLNav/VLNav/checkpoints:/checkpoints:ro
+    # Also mount as relative 'checkpoints' from working dir (MODEL_PATH_TO="checkpoints")
+    - /home/kemal/VLNav/VLNav/checkpoints:/workspace/InternNav-dev/checkpoints:ro
     - /mnt/nvme0/vln_habitat:/workspace/InternNav/data:rw
     - /mnt/nvme0/vln_habitat/logs:/workspace/InternNav/logs:rw
+    - /mnt/nvme0/ds_offload:/ds_offload:rw
   working_dir: /workspace/InternNav-dev
-  deploy:
-    resources:
-      reservations:
-        devices:
-          - driver: nvidia
-            device_ids: ["0"]
-            capabilities: [gpu]
 
 services:
-  # ── Model 1: NavDP baseline ─────────────────────────────────────────────────
+  # ── Model 1: NavDP baseline (base_train.py, navdp_1gpu config) ──────────────
   navdp:
     <<: *common
     container_name: vlnav_train_navdp
     command: >
       bash -c "
-        pip install bitsandbytes -q &&
-        echo '[navdp] Starting training...' &&
+        mkdir -p /ds_offload /workspace/InternNav/logs &&
+        echo '[navdp] Starting NavDP training on VLN-CE mini data...' &&
         python scripts/train/base_train/train.py \
-          --exp-cfg scripts/train/base_train/configs/navdp_vln_ce_mini.py \
-          2>&1 | tee /workspace/InternNav/logs/train_navdp_mini.log &&
-        echo '[navdp] DONE' &&
-        cp checkpoints/navdp_vln_ce_mini/ckpts/last.ckpt /checkpoints/navdp_vln_ce_mini_final.ckpt 2>/dev/null || true
+          --exp-cfg scripts/train/base_train/configs/navdp_1gpu.py \
+          --name navdp_vln_ce_mini \
+          --root-dir /workspace/InternNav/data/habitat_data/interndata_n1_mini_new/v4/vln_ce/traj_data \
+          --dataset-navdp '' \
+          2>&1 | tee /workspace/InternNav/logs/train_navdp_mini.log
+        EXIT=$$?
+        echo '[navdp] Training finished with exit code: '$$EXIT
+        exit $$EXIT
       "
 
-  # ── Model 2: DualVLN baseline ───────────────────────────────────────────────
+  # ── Model 2: DualVLN (InternVLA-N1 S2 fine-tune on VLN-CE mini) ────────────
   dualvln:
     <<: *common
     container_name: vlnav_train_dualvln
     command: >
       bash -c "
-        pip install bitsandbytes -q &&
-        echo '[dualvln] Starting training...' &&
-        python scripts/train/base_train/train.py \
-          --exp-cfg scripts/train/base_train/configs/dualsystem_vln_ce_mini.py \
-          2>&1 | tee /workspace/InternNav/logs/train_dualvln_mini.log &&
-        echo '[dualvln] DONE'
+        mkdir -p /ds_offload /workspace/InternNav/logs /workspace/InternNav/data/checkpoints/dualsystem_vln_ce_mini &&
+        echo '[dualvln] Starting DualVLN S2 training (ZeRO-3 CPU offload)...' &&
+        python -m torch.distributed.run \
+          --nproc_per_node=1 --nnodes=1 --node_rank=0 \
+          --master_addr=localhost --master_port=29501 \
+          internnav/trainer/internvla_n1_trainer.py \
+          --deepspeed scripts/train/qwenvl_train/zero3_offload.json \
+          --model_name_or_path /checkpoints/InternVLA-N1-DualVLN \
+          --vln_dataset_use r2r_125cm_0_30,r2r_125cm_0_45,r2r_60cm_15_15,r2r_60cm_30_30 \
+          --data_root /workspace/InternNav/data/habitat_data/interndata_n1_mini_new/v4/vln_ce \
+          --data_flatten False \
+          --tune_mm_vision True --tune_mm_mlp True --tune_mm_llm True \
+          --bf16 \
+          --num_history 4 --data_augmentation True \
+          --resize_h 256 --resize_w 256 \
+          --sample_step 4 --num_future_steps 4 --predict_step_num 32 \
+          --pixel_goal_only False --system1 none \
+          --output_dir /workspace/InternNav/data/checkpoints/dualsystem_vln_ce_mini \
+          --num_train_epochs 5 \
+          --per_device_train_batch_size 1 \
+          --per_device_eval_batch_size 2 \
+          --gradient_accumulation_steps 4 \
+          --max_pixels 65536 --min_pixels 3136 \
+          --val_ratio 0.1 --eval_strategy no \
+          --save_strategy epoch --save_total_limit 2 \
+          --learning_rate 2e-5 --vision_tower_lr 5e-6 \
+          --weight_decay 0 --warmup_ratio 0.05 --max_grad_norm 1 \
+          --lr_scheduler_type cosine --logging_steps 1 \
+          --model_max_length 4096 --gradient_checkpointing True \
+          --dataloader_num_workers 2 \
+          --run_name dualsystem_vln_ce_mini \
+          --report_to none \
+          2>&1 | tee /workspace/InternNav/logs/train_dualvln_mini.log
+        EXIT=$$?
+        echo '[dualvln] Training finished with exit code: '$$EXIT
+        exit $$EXIT
       "
 
-  # ── Model 3: ChronoNav ──────────────────────────────────────────────────────
+  # ── Model 3: ChronoNav (same IL as DualVLN; temporal cache is inference-only)
   chrononav:
     <<: *common
     container_name: vlnav_train_chrononav
     command: >
       bash -c "
-        pip install bitsandbytes -q &&
-        echo '[chrononav] Starting training...' &&
-        python scripts/train/base_train/train.py \
-          --exp-cfg scripts/train/base_train/configs/chrononav_vln_ce_mini.py \
-          2>&1 | tee /workspace/InternNav/logs/train_chrononav_mini.log &&
-        echo '[chrononav] DONE'
+        mkdir -p /ds_offload /workspace/InternNav/logs /workspace/InternNav/data/checkpoints/chrononav_vln_ce_mini &&
+        echo '[chrononav] Starting ChronoNav training (same as DualVLN IL; τ=0.92 cache wired at eval)...' &&
+        python -m torch.distributed.run \
+          --nproc_per_node=1 --nnodes=1 --node_rank=0 \
+          --master_addr=localhost --master_port=29502 \
+          internnav/trainer/internvla_n1_trainer.py \
+          --deepspeed scripts/train/qwenvl_train/zero3_offload.json \
+          --model_name_or_path /checkpoints/InternVLA-N1-DualVLN \
+          --vln_dataset_use r2r_125cm_0_30,r2r_125cm_0_45,r2r_60cm_15_15,r2r_60cm_30_30 \
+          --data_root /workspace/InternNav/data/habitat_data/interndata_n1_mini_new/v4/vln_ce \
+          --data_flatten False \
+          --tune_mm_vision True --tune_mm_mlp True --tune_mm_llm True \
+          --bf16 \
+          --num_history 4 --data_augmentation True \
+          --resize_h 256 --resize_w 256 \
+          --sample_step 4 --num_future_steps 4 --predict_step_num 32 \
+          --pixel_goal_only False --system1 none \
+          --output_dir /workspace/InternNav/data/checkpoints/chrononav_vln_ce_mini \
+          --num_train_epochs 5 \
+          --per_device_train_batch_size 1 \
+          --per_device_eval_batch_size 2 \
+          --gradient_accumulation_steps 4 \
+          --max_pixels 65536 --min_pixels 3136 \
+          --val_ratio 0.1 --eval_strategy no \
+          --save_strategy epoch --save_total_limit 2 \
+          --learning_rate 2e-5 --vision_tower_lr 5e-6 \
+          --weight_decay 0 --warmup_ratio 0.05 --max_grad_norm 1 \
+          --lr_scheduler_type cosine --logging_steps 1 \
+          --model_max_length 4096 --gradient_checkpointing True \
+          --dataloader_num_workers 2 \
+          --run_name chrononav_vln_ce_mini \
+          --report_to none \
+          2>&1 | tee /workspace/InternNav/logs/train_chrononav_mini.log
+        EXIT=$$?
+        echo '[chrononav] Training finished with exit code: '$$EXIT
+        exit $$EXIT
       "
 
-  # ── Model 4: NexusNav-V3 ────────────────────────────────────────────────────
+  # ── Model 4: NexusNav-V3 (DualVLN IL base; GQRM RL / arch modules at eval) ─
   nexusnav:
     <<: *common
     container_name: vlnav_train_nexusnav
     command: >
       bash -c "
-        pip install bitsandbytes -q &&
-        echo '[nexusnav] Starting training...' &&
-        python scripts/train/base_train/train.py \
-          --exp-cfg scripts/train/base_train/configs/nexusnav_vln_ce_mini.py \
-          2>&1 | tee /workspace/InternNav/logs/train_nexusnav_mini.log &&
-        echo '[nexusnav] DONE'
+        mkdir -p /ds_offload /workspace/InternNav/logs /workspace/InternNav/data/checkpoints/nexusnav_vln_ce_mini &&
+        echo '[nexusnav] Starting NexusNav-V3 training (DualVLN IL; ActionTokenVocab/WorldPredictor at eval)...' &&
+        python -m torch.distributed.run \
+          --nproc_per_node=1 --nnodes=1 --node_rank=0 \
+          --master_addr=localhost --master_port=29503 \
+          internnav/trainer/internvla_n1_trainer.py \
+          --deepspeed scripts/train/qwenvl_train/zero3_offload.json \
+          --model_name_or_path /checkpoints/InternVLA-N1-DualVLN \
+          --vln_dataset_use r2r_125cm_0_30,r2r_125cm_0_45,r2r_60cm_15_15,r2r_60cm_30_30 \
+          --data_root /workspace/InternNav/data/habitat_data/interndata_n1_mini_new/v4/vln_ce \
+          --data_flatten False \
+          --tune_mm_vision True --tune_mm_mlp True --tune_mm_llm True \
+          --bf16 \
+          --num_history 8 --data_augmentation True \
+          --resize_h 256 --resize_w 256 \
+          --sample_step 4 --num_future_steps 4 --predict_step_num 32 \
+          --pixel_goal_only False --system1 none \
+          --output_dir /workspace/InternNav/data/checkpoints/nexusnav_vln_ce_mini \
+          --num_train_epochs 3 \
+          --per_device_train_batch_size 1 \
+          --per_device_eval_batch_size 2 \
+          --gradient_accumulation_steps 8 \
+          --max_pixels 65536 --min_pixels 3136 \
+          --val_ratio 0.1 --eval_strategy no \
+          --save_strategy epoch --save_total_limit 2 \
+          --learning_rate 1e-5 --vision_tower_lr 2e-6 \
+          --weight_decay 0.01 --warmup_ratio 0.1 --max_grad_norm 1 \
+          --lr_scheduler_type cosine --logging_steps 1 \
+          --model_max_length 4096 --gradient_checkpointing True \
+          --dataloader_num_workers 2 \
+          --run_name nexusnav_vln_ce_mini \
+          --report_to none \
+          2>&1 | tee /workspace/InternNav/logs/train_nexusnav_mini.log
+        EXIT=$$?
+        echo '[nexusnav] Training finished with exit code: '$$EXIT
+        exit $$EXIT
       "

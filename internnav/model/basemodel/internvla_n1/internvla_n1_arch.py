@@ -142,6 +142,8 @@ class InternVLAN1MetaModel:
             elif 'navdp' in config.system1:
                 if 'async' in config.system1:
                     self.navdp = build_navdp(config, memory_size=2)
+            elif config.system1 in ('none', '', 'None'):
+                pass  # S2-only training: skip all S1 components
             else:
                 raise NotImplementedError
 
@@ -163,13 +165,19 @@ class InternVLAN1MetaModel:
         elif 'navdp' in model_args.system1:
             if 'async' in model_args.system1:
                 self.navdp = build_navdp(model_args, memory_size=2)
+        elif model_args.system1 in ('none', '', 'None'):
+            pass  # S2-only training: no S1 modules needed
         else:
             raise NotImplementedError
 
         self.config.system1 = model_args.system1
         self.config.n_query = model_args.n_query
         existing_lq = getattr(self, 'latent_queries', None)
-        if existing_lq is None or existing_lq.shape[1] != model_args.n_query:
+        try:
+            lq_ok = existing_lq is not None and existing_lq.shape[1] == model_args.n_query
+        except (IndexError, AttributeError):
+            lq_ok = False  # ZeRO-3 may give partitioned tensor with fewer dims
+        if not lq_ok:
             print(f"random initiation the latent_queries !!! (n_query={model_args.n_query})")
             self.latent_queries = nn.Parameter(torch.randn(1, self.config.n_query, self.config.hidden_size))
 

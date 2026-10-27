@@ -156,11 +156,19 @@ def train(attn_implementation="flash_attention_2"):
             ModelClass = InternVLAN1BEVForCausalLM
         else:
             ModelClass = InternVLAN1ForCausalLM
+        # Pre-load config and override system1 to avoid loading S1 components
+        # (e.g. DepthAnythingV2) inside ZeRO-3 context when training S2-only
+        from internnav.model.basemodel.internvla_n1.internvla_n1 import InternVLAN1ModelConfig
+        _cfg = InternVLAN1ModelConfig.from_pretrained(model_args.model_name_or_path)
+        if hasattr(model_args, 'system1') and model_args.system1 in ('none', '', 'None'):
+            _cfg.system1 = 'none'
         model = ModelClass.from_pretrained(
             model_args.model_name_or_path,
+            config=_cfg,
             cache_dir=training_args.cache_dir,
             attn_implementation=attn_implementation,
             torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+            low_cpu_mem_usage=True,  # load to CPU first, ZeRO-3 handles GPU placement
         )
         model.config.bev_mode = model_args.bev_mode
         model.config.dav2_max_depth = model_args.dav2_max_depth
@@ -228,13 +236,21 @@ def train(attn_implementation="flash_attention_2"):
     else:
         data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args, n_query=model_args.n_query)
     trainer = Trainer(model=model, processing_class=tokenizer, args=training_args, **data_module)
-    from tabulate import tabulate
+    try:
+        from tabulate import tabulate
+        _has_tabulate = True
+    except ImportError:
+        _has_tabulate = False
 
     if trainer.is_world_process_zero():
         stat = []
         for i, (n, p) in enumerate(trainer.model.named_parameters()):
             stat.append([i, n, p.shape, p.requires_grad])
-        print(tabulate(stat, headers=["idx", "name", "shape", "trainable"]))
+        if _has_tabulate:
+            print(tabulate(stat, headers=["idx", "name", "shape", "trainable"]))
+        else:
+            for row in stat:
+                print(row)
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
         logging.info("checkpoint found, resume training")
         trainer.train(resume_from_checkpoint=True)
