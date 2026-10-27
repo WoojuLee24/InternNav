@@ -5,19 +5,25 @@
 > Keep entries short — this is a coordination surface, not documentation.
 
 _Format: update the `_last_updated` line and the relevant row. Do NOT rewrite the whole file._
-_last_updated: 2026-10-26 (a351125 — memory→S2 prompt + loop break + max_hold=15) by session_01ARwduxfwfZ4FyxfSkDxPoN_
+_last_updated: 2026-10-27 (nexusnav-s2: C1-C12 all committed 7e7ab56; A/B/C queued) by session_01ARwduxfwfZ4FyxfSkDxPoN_
 
 ---
 
 ## Worktree Map (ISOLATED — use these for parallel sessions)
 
-| Worktree path | Branch | Purpose | Session |
+| Worktree path | Branch | Purpose | **LIVE SESSION** |
 |---------------|--------|---------|---------|
-| `/home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev` | `dev` | Main integration (MERGE TARGET) | coordinator |
-| `/mnt/nvme0/worktrees/vln-ce` | `wt/vln-ce` | VLN-CE eval, training configs, eval monitoring | session A |
-| `/mnt/nvme0/worktrees/nexusnav-s2` | `wt/nexusnav-s2` | S2 module wiring into agent inference path | session B |
-| `/mnt/nvme0/worktrees/paper` | `wt/paper` | NexusNav + ChronoNav paper writing | session C |
-| `/mnt/nvme0/worktrees/wiring` | `wt/wiring` | VisionEmbeddingCache evaluator wiring | session D |
+| `/home/kemal/VLNav/VLNav/workspaces/model/InternNav-dev` | `dev` | Main integration + C8-C12 agent wiring (MERGE TARGET) | **vlnav-9d** |
+| `/mnt/nvme0/worktrees/vln-ce` | `wt/vln-ce` | Mini training launch + eval watchdog | **debug-duilvn-metrics-validation** |
+| `/mnt/nvme0/worktrees/nexusnav-s2` | `wt/nexusnav-s2` | NexusNav model arch: C1-C12 WM/LACP/BEV/NavCoT + A/B/C aux heads | **model-2e (this session)** |
+| `/mnt/nvme0/worktrees/paper` | `wt/paper` | NexusNav + ChronoNav paper writing | FREE |
+| `/mnt/nvme0/worktrees/wiring` | `wt/wiring` | Future module wiring | FREE |
+
+**Branch divergence point: `718d05d`** — both `dev` and `wt/nexusnav-s2` branched here.
+**Known merge conflicts (resolve at PR time):**
+- `internnav/agent/navcot.py` — created by BOTH branches. **Resolution: use wt/nexusnav-s2 content** (more complete wrapper).
+- `internnav/agent/internvla_n1_agent.py` — modified by BOTH. **Resolution: 3-way merge**, keep vlnav-9d's LACP gate wiring + keep nexusnav-s2's NavCoT prefix; deduplicate BEV init.
+**No conflict (different paths):** `agent/lacp.py` vs arch `LACPModule`; `agent/bev_fusion.py` vs `model/basemodel/nexusnav/bev_fusion.py`; `scripts/train/gqrm/` vs `model/basemodel/nexusnav/grpo_nav.py`.
 
 **How to use:**
 1. New session: pick a worktree that matches your work. Edit files ONLY in that worktree's directory.
@@ -208,4 +214,4 @@ When finishing a session:
 | VLN-CE action space | STOP=0, FORWARD=1, LEFT=2, RIGHT=3 |
 | Hardstop: SR<62% at ≥200 eps | kill + result.json |
 | Hardstop: SR≥62% at ≥500 eps | cap at 500 eps |
-| GPU rule (this machine) | single GPU → `--gpus all` |
+| GPU rule (this machine) | `--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all` — NOT `--gpus all` (/run/nvidia-persistenced/socket absent) |
