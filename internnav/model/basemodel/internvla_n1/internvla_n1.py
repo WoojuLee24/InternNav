@@ -292,6 +292,32 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
                     mask = loss_mask.flatten(0, 1)[:, None, None]
                     masked_loss = loss * mask
                     loss = masked_loss.sum() / mask.sum() / (loss.shape[1] * loss.shape[2])
+
+                    # WM auxiliary loss (NavForesee-style): predict future visual latents
+                    if (
+                        hasattr(self.get_model(), 'wm_head')
+                        and 'async' in self.get_system1_type()
+                        and traj_images is not None
+                        and traj_images.size(1) >= 3
+                    ):
+                        B_traj = traj_images.size(0)
+                        T_traj = traj_images.size(1)
+                        # images_dp_feat: (B*T, 2, 256, 384); index 1 = current frame
+                        cur_frame_feats = images_dp_feat[:, 1].view(B_traj, T_traj, 256, 384).detach()
+                        wm_loss = torch.tensor(0.0, device=loss.device, dtype=torch.float32)
+                        wm_count = 0
+                        wm_dtype = next(self.get_model().wm_head.parameters()).dtype
+                        for h_i, horizon in enumerate(self.get_model().wm_head.horizons):
+                            if T_traj > horizon:
+                                src = cur_frame_feats[:, :T_traj - horizon].reshape(-1, 256, 384).to(wm_dtype)
+                                tgt = cur_frame_feats[:, horizon:].reshape(-1, 256, 384).to(wm_dtype).detach()
+                                preds = self.get_model().wm_head(src)  # (B*(T-h), len(horizons), 256, 384)
+                                wm_loss = wm_loss + F.mse_loss(preds[:, h_i].float(), tgt.float())
+                                wm_count += 1
+                        if wm_count > 0:
+                            wm_lambda = getattr(self.config, 'wm_lambda', 0.1)
+                            loss = loss + wm_lambda * (wm_loss / wm_count)
+
                 elif 'navdp' in self.get_system1_type():
                     if 'async' in self.get_system1_type():
                         cur_images = traj_images.flatten(0, 1)
@@ -385,7 +411,17 @@ class InternVLAN1ForCausalLM(Qwen2_5_VLForConditionalGeneration, InternVLAN1Meta
                     )  # [bs*select_size,512,384]
                     memory_feat = torch.cat([images_dp_feat.flatten(1, 2), memory_feat], dim=-1)
                     memory_tokens = self.get_model().rgb_resampler(memory_feat)
-                hidden_states = torch.cat([memory_tokens, traj_latents], dim=1)
+
+                # Imagination conditioning: inject predicted future latent as extra DiT token
+                if hasattr(self.get_model(), 'wm_head'):
+                    cur_feat = images_dp_feat[:, 1].mean(dim=0, keepdim=True)  # (1, 256, 384) current frame
+                    with torch.no_grad():
+                        future_preds = self.get_model().wm_head(cur_feat.to(dtype))  # (1, len(h), 256, 384)
+                        long_lat = future_preds[:, -1].mean(dim=1)  # (1, 384) long-horizon, spatial mean
+                        imag_token = self.get_model().imag_token_proj(long_lat).unsqueeze(1)  # (1, 1, 768)
+                    hidden_states = torch.cat([memory_tokens, imag_token, traj_latents], dim=1)
+                else:
+                    hidden_states = torch.cat([memory_tokens, traj_latents], dim=1)
             else:
                 hidden_states = traj_latents
             hidden_states_null = torch.zeros_like(hidden_states, device=device, dtype=dtype)

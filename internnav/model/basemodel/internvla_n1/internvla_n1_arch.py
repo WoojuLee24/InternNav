@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 LatentEmbSize = 768
 MODEL_PATH_TO = "checkpoints"
@@ -119,6 +120,62 @@ class QFormer(nn.Module):
         return out
 
 
+class PredictiveWorldModelHead(nn.Module):
+    """Predicts future visual latents at horizon steps from current features (NavForesee-style).
+
+    Training: auxiliary loss L_pred = MSE(predicted, actual_future.detach())
+    Inference: uncertainty = mean prediction error → S2 firing gate signal.
+
+    Input: current visual features (B, N, feat_dim) from rgb_model intermediate layers
+    Output: predicted latents at each horizon, shape (B, len(horizons), N, feat_dim)
+    """
+
+    def __init__(self, feat_dim=384, hidden_dim=512, horizons=(2, 4)):
+        super().__init__()
+        self.horizons = horizons
+        self.feat_encoder = nn.Sequential(
+            nn.Linear(feat_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        self.horizon_heads = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, feat_dim),
+            )
+            for _ in horizons
+        ])
+
+    def forward(self, visual_feats):
+        # visual_feats: (B, N, feat_dim)
+        encoded = self.feat_encoder(visual_feats)  # (B, N, hidden_dim)
+        predictions = []
+        for head in self.horizon_heads:
+            predictions.append(head(encoded))  # (B, N, feat_dim)
+        return torch.stack(predictions, dim=1)  # (B, len(horizons), N, feat_dim)
+
+    def compute_uncertainty(self, visual_feats_seq):
+        """Compute per-step prediction error for the S2 gate signal.
+
+        visual_feats_seq: list of (B, N, feat_dim) tensors, length >= max(horizons)+1
+        Returns: uncertainty scalar (B,) or None if not enough history.
+        """
+        if len(visual_feats_seq) < max(self.horizons) + 1:
+            return None
+        current = visual_feats_seq[-1]
+        errors = []
+        for i, horizon in enumerate(self.horizons):
+            if len(visual_feats_seq) > horizon:
+                actual_future = visual_feats_seq[-horizon]
+                pred = self.forward(current)[:, i]
+                error = F.mse_loss(pred, actual_future.detach(), reduction='none').mean(dim=(-1, -2))
+                errors.append(error)
+        if not errors:
+            return None
+        return torch.stack(errors, dim=0).mean(dim=0)
+
+
 class InternVLAN1MetaModel:
     def __init__(self, config):
         super(InternVLAN1MetaModel, self).__init__(config)
@@ -138,6 +195,8 @@ class InternVLAN1MetaModel:
                     self.rgb_model = build_depthanythingv2(config)
                     self.memory_encoder = MemoryEncoder()
                     self.rgb_resampler = QFormer()
+                    self.wm_head = PredictiveWorldModelHead(feat_dim=384, hidden_dim=512, horizons=(2, 4))
+                    self.imag_token_proj = nn.Linear(384, LatentEmbSize)
 
             elif 'navdp' in config.system1:
                 if 'async' in config.system1:
@@ -160,6 +219,8 @@ class InternVLAN1MetaModel:
                 self.rgb_model = build_depthanythingv2(model_args)
                 self.memory_encoder = MemoryEncoder()
                 self.rgb_resampler = QFormer()
+                self.wm_head = PredictiveWorldModelHead(feat_dim=384, hidden_dim=512, horizons=(2, 4))
+                self.imag_token_proj = nn.Linear(384, LatentEmbSize)
         elif 'navdp' in model_args.system1:
             if 'async' in model_args.system1:
                 self.navdp = build_navdp(model_args, memory_size=2)

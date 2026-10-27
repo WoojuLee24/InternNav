@@ -110,6 +110,8 @@ def set_model(model_args, model):
             'memory_encoder',
             'rgb_resampler',
             'rgb_model',
+            'wm_head',        # NexusNav: predictive world model head
+            'imag_token_proj', # NexusNav: imagination token projector
         ]
         for n, p in model.model.named_parameters():
             if any(k in n for k in modules):
@@ -166,6 +168,7 @@ def train(attn_implementation="flash_attention_2"):
         model.config.dav2_max_depth = model_args.dav2_max_depth
         model.config.debug_modes = model_args.debug_modes
         model.config.debug_dir = model_args.debug_dir
+        model.config.wm_lambda = model_args.wm_lambda
         data_args.image_processor = AutoProcessor.from_pretrained(
             model_args.model_name_or_path,
         ).image_processor
