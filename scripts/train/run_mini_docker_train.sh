@@ -56,7 +56,7 @@ docker run --rm \
   -e NVIDIA_VISIBLE_DEVICES=0 \
   -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
   -e CUDA_VISIBLE_DEVICES=0 \
-  -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:32 \   # expandable_segments needed on 12GB RTX 3080Ti for ZeRO-Infinity
+  -e PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64 \
   -e PYTHONUNBUFFERED=1 \
   -e TOKENIZERS_PARALLELISM=false \
   -e BITSANDBYTES_NOWELCOME=1 \
@@ -87,7 +87,7 @@ docker run --rm \
      --vln_dataset_use r2r_125cm_0_30,r2r_125cm_0_45,r2r_60cm_15_15,r2r_60cm_30_30 \
      --data_root ${MINI_DATA_ROOT} \
      --data_flatten False \
-     --tune_mm_vision True --tune_mm_mlp True --tune_mm_llm True \
+     --tune_mm_vision False --tune_mm_mlp True --tune_mm_llm False \
      --bf16 \
      --num_history ${NUM_HIST} --data_augmentation True \
      --resize_h 256 --resize_w 256 \
