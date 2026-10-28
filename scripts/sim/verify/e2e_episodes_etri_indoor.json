@@ -1,0 +1,12 @@
+[
+ {"id": "e1_intersection", "instruction": "Walk straight down the hallway and stop at the intersection.",
+  "start": [0.0, 0.0, -90.0], "goal_xy": [0.0, -9.5], "success_radius_m": 1.5, "timeout_s": 150},
+ {"id": "e2_left", "instruction": "Walk down the hallway, turn left at the intersection, and stop after a few meters.",
+  "start": [0.0, 0.0, -90.0], "goal_xy": [4.0, -9.6], "success_radius_m": 2.0, "timeout_s": 150},
+ {"id": "e3_right", "instruction": "Walk down the hallway, turn right at the intersection, and stop after a few meters.",
+  "start": [0.0, 0.0, -90.0], "goal_xy": [-4.5, -9.2], "success_radius_m": 2.0, "timeout_s": 150},
+ {"id": "e4_turnaround", "instruction": "Turn around and walk to the end of the hallway, then stop.",
+  "start": [0.0, 0.0, -90.0], "goal_xy": [0.0, 4.5], "success_radius_m": 1.5, "timeout_s": 150},
+ {"id": "e5_long", "instruction": "Walk straight down the long hallway, go past the intersection, and stop at the far end of the hallway.",
+  "start": [0.0, 0.0, -90.0], "goal_xy": [0.0, -19.0], "success_radius_m": 2.0, "timeout_s": 180}
+]

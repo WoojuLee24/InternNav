@@ -1,0 +1,8 @@
+{
+ "x0": -10.511647,
+ "y0": -26.529934,
+ "res": 0.05,
+ "width": 414,
+ "height": 768,
+ "note": "pixel (u, v) = ((x - x0) / res, height - 1 - (y - y0) / res)"
+}

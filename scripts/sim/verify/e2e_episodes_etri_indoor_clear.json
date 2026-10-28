@@ -1,0 +1,14 @@
+[
+ {"id": "c1_printer", "instruction": "Walk forward and stop in front of the printer on your right.",
+  "start": [0.0, 0.0, -90.0], "goal_xy": [-0.3, -4.0], "success_radius_m": 1.0, "timeout_s": 120,
+  "note": "printer base measured at (-0.9,-4.1) from depth (out/live/probe_origin.jpg)"},
+ {"id": "c2_marker", "instruction": "Walk forward a few steps and stop next to the black and white marker on the left wall.",
+  "start": [0.0, 0.0, -90.0], "goal_xy": [0.3, -2.4], "success_radius_m": 1.0, "timeout_s": 120,
+  "note": "aruco marker on left wall at about (0.8,-2.4)"},
+ {"id": "c3_intersection", "instruction": "Walk straight down the hallway and stop at the intersection.",
+  "start": [0.0, 0.0, -90.0], "goal_xy": [0.0, -9.5], "success_radius_m": 1.5, "timeout_s": 150},
+ {"id": "c4_past_printer", "instruction": "Walk past the printer and stop at the intersection.",
+  "start": [0.0, 0.0, -90.0], "goal_xy": [0.0, -9.5], "success_radius_m": 1.5, "timeout_s": 150},
+ {"id": "c5_mid_start", "instruction": "Walk forward to the intersection and stop there.",
+  "start": [0.0, -4.5, -90.0], "goal_xy": [0.0, -9.5], "success_radius_m": 1.5, "timeout_s": 120}
+]

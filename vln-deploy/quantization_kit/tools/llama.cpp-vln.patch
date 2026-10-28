@@ -1,0 +1,1320 @@
+diff --git a/tools/mtmd/CMakeLists.txt b/tools/mtmd/CMakeLists.txt
+index 21d17dbaa..5b81f9dde 100644
+--- a/tools/mtmd/CMakeLists.txt
++++ b/tools/mtmd/CMakeLists.txt
+@@ -116,8 +116,34 @@ endif()
+ target_link_libraries  (${TARGET} PRIVATE llama-common mtmd Threads::Threads)
+ target_compile_features(${TARGET} PRIVATE cxx_std_17)
+ 
++# s2-runner: persistent InternVLA-N1 System-2 runner (text + traj_latents) over stdin/stdout,
++# and optionally over a ZMQ REP socket (--zmq tcp://*:PORT) when libzmq is available.
++add_executable(llama-s2-runner s2-runner.cpp)
++set_target_properties(llama-s2-runner PROPERTIES OUTPUT_NAME llama-s2-runner)
++target_link_libraries(llama-s2-runner PRIVATE llama-common mtmd Threads::Threads)
++target_compile_features(llama-s2-runner PRIVATE cxx_std_17)
++find_library(ZMQ_LIB zmq)
++if(ZMQ_LIB)
++    message(STATUS "s2-runner: libzmq found (${ZMQ_LIB}) -> enabling --zmq REP server mode")
++    target_compile_definitions(llama-s2-runner PRIVATE S2_RUNNER_ZMQ)
++    target_link_libraries(llama-s2-runner PRIVATE ${ZMQ_LIB})
++else()
++    message(STATUS "s2-runner: libzmq NOT found -> --zmq disabled (stdin/stdout only)")
++endif()
++
+ # mtmd-debug tool
+ add_executable(llama-mtmd-debug debug/mtmd-debug.cpp)
+ set_target_properties(llama-mtmd-debug PROPERTIES OUTPUT_NAME llama-mtmd-debug)
+ target_link_libraries(llama-mtmd-debug PRIVATE llama-common mtmd Threads::Threads)
+ target_compile_features(llama-mtmd-debug PRIVATE cxx_std_17)
++
++# guidedog ZMQ server (on-device-guidedog): mtmd + ZMQ image/TTS bridge
++find_library(ZMQ_LIBRARY NAMES zmq libzmq)
++if (ZMQ_LIBRARY)
++    add_executable(llama-guidedog-cli guidedog-cli.cpp)
++    set_target_properties(llama-guidedog-cli PROPERTIES OUTPUT_NAME llama-guidedog-cli)
++    target_link_libraries(llama-guidedog-cli PRIVATE llama-common mtmd Threads::Threads ${ZMQ_LIBRARY})
++    target_compile_features(llama-guidedog-cli PRIVATE cxx_std_17)
++else()
++    message(WARNING "libzmq not found; skipping llama-guidedog-cli")
++endif()
+diff --git a/tools/mtmd/clip-model.h b/tools/mtmd/clip-model.h
+index 48f8b1a19..9d35ef6c9 100644
+--- a/tools/mtmd/clip-model.h
++++ b/tools/mtmd/clip-model.h
+@@ -81,6 +81,7 @@ struct clip_hparams {
+     float rope_theta = 0.0;
+     std::unordered_set<int32_t> vision_feature_layer;
+     int32_t attn_window_size = 0;
++    bool qwen25vl_hf_align = false; // MTMD_QWEN25VL_HF_ALIGN=1: HF smart_resize (28 px) + masked edge windows
+     int32_t n_wa_pattern = 0;
+     std::unordered_set<int32_t> wa_layer_indexes; // explicit layer indexes that use full attention (for irregular patterns like YoutuVL)
+ 
+diff --git a/tools/mtmd/clip.cpp b/tools/mtmd/clip.cpp
+index 513b94f2a..87e8a144a 100644
+--- a/tools/mtmd/clip.cpp
++++ b/tools/mtmd/clip.cpp
+@@ -1381,7 +1381,22 @@ struct clip_model_loader {
+                         get_u32(KEY_WIN_ATTN_PATTERN, hparams.n_wa_pattern, model.proj_type == PROJECTOR_TYPE_QWEN25VL); // only 2.5 requires it
+                         // ref: https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct/blob/main/preprocessor_config.json
+                         hparams.set_limit_image_tokens(8, 4096);
+-                        hparams.set_warmup_n_tokens(46*46); // avoid OOM on warmup
++                        if (hparams.n_wa_pattern > 0) {
++                            // Qwen2.5-VL window attention: window is 112 px (= patch * merge * 4).
++                            // Set attn_window_size explicitly so preprocessing aligns the image to it,
++                            // which guarantees uniform windows in the batched attention path.
++                            if (hparams.attn_window_size <= 0) {
++                                hparams.attn_window_size = 112;
++                            }
++                            {   // opt-in HF parity: images aligned to 28 px (HF smart_resize), edge windows masked
++                                const char * e = getenv("MTMD_QWEN25VL_HF_ALIGN");
++                                hparams.qwen25vl_hf_align = e != nullptr && std::string(e) == "1";
++                            }
++                            // 44 * 14 * 2 = 1232 = 11 * 112 (window-aligned warmup)
++                            hparams.set_warmup_n_tokens(44*44);
++                        } else {
++                            hparams.set_warmup_n_tokens(46*46); // avoid OOM on warmup
++                        }
+                         const int warn_min_pixels = 1024 * hparams.n_merge * hparams.n_merge * hparams.patch_size * hparams.patch_size;
+                         if (hparams.image_min_pixels < warn_min_pixels) {
+                             LOG_WRN("%s: Qwen-VL models require at minimum 1024 image tokens to function correctly on grounding tasks\n", __func__);
+@@ -3292,6 +3307,13 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
+     // build the inference graph
+     ggml_backend_sched_reset(ctx->sched.get());
+     ggml_cgraph * gf = clip_image_build_graph(ctx, imgs);
++    // [debug] CLIP_DUMP_DIR: keep every intermediate activation alive (disable buffer
++    // reuse) so we can dump them layer-by-layer for HF comparison. Local-fork debug only.
++    if (std::getenv("CLIP_DUMP_DIR")) {
++        for (int i = 0; i < ggml_graph_n_nodes(gf); i++) {
++            ggml_set_output(ggml_graph_node(gf, i));
++        }
++    }
+     ggml_backend_sched_alloc_graph(ctx->sched.get(), gf);
+ 
+     // set inputs
+@@ -3616,9 +3638,21 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
+                 if (use_window_attn) {
+                     const int attn_window_size = hparams.attn_window_size > 0 ? hparams.attn_window_size : 112;
+                     const int grid_window = attn_window_size / patch_size / merge_ratio;
++                    // Qwen2.5-VL takes the batched window-attn path which does not consume a mask.
++                    // YouTu-VL still uses the dense N x N mask path.
++                    const bool win_aligned = (ph % grid_window == 0 && pw % grid_window == 0);
++                    const bool need_mask = (ctx->model.proj_type != PROJECTOR_TYPE_QWEN25VL) || !win_aligned;
++                    if (ctx->model.proj_type == PROJECTOR_TYPE_QWEN25VL && !hparams.qwen25vl_hf_align) {
++                        // After alignment to attn_window_size in preprocessing, ph/pw must be
++                        // exact multiples of grid_window -> no edge windows.
++                        GGML_ASSERT(win_aligned && "Qwen2.5-VL image must be aligned to attn_window_size");
++                    }
+                     int dst = 0;
+                     // [num_vision_tokens, num_vision_tokens] attention mask tensor
+-                    std::vector<float> mask(pow(ipw * iph, 2), std::numeric_limits<float>::lowest());
++                    std::vector<float> mask;
++                    if (need_mask) {
++                        mask.assign(pow(ipw * iph, 2), std::numeric_limits<float>::lowest());
++                    }
+                     int mask_row = 0;
+ 
+                     for (int y = 0; y < ph; y += grid_window) {
+@@ -3638,20 +3672,24 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
+                                 }
+                             }
+ 
+-                            for (int r=0; r < win_h * win_w * merge_ratio * merge_ratio; r++) {
+-                                int row_offset = mask_row * (ipw * iph);
+-                                std::fill(
+-                                    mask.begin() + row_offset + (dst_0 * merge_ratio * merge_ratio),
+-                                    mask.begin() + row_offset + (dst   * merge_ratio * merge_ratio),
+-                                    0.0);
+-                                mask_row++;
++                            if (need_mask) {
++                                for (int r=0; r < win_h * win_w * merge_ratio * merge_ratio; r++) {
++                                    int row_offset = mask_row * (ipw * iph);
++                                    std::fill(
++                                        mask.begin() + row_offset + (dst_0 * merge_ratio * merge_ratio),
++                                        mask.begin() + row_offset + (dst   * merge_ratio * merge_ratio),
++                                        0.0);
++                                    mask_row++;
++                                }
+                             }
+                         }
+                     }
+ 
+                     set_input_i32("window_idx",     idx);
+                     set_input_i32("inv_window_idx", inv_idx);
+-                    set_input_f32("window_mask",    mask);
++                    if (need_mask) {
++                        set_input_f32("window_mask", mask);
++                    }
+                 } else {
+                     for (int i = 0; i < ph * pw; i++) {
+                         idx[i] = i;
+@@ -3993,6 +4031,42 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
+         return false;
+     }
+ 
++    // [debug] CLIP_DUMP_DIR: dump inp_raw + every graph node as f32 for layer-by-layer
++    // comparison vs HF transformers. Format: int32 ndim, int64 ne[4], float32 data[].
++    if (const char * dump_dir = std::getenv("CLIP_DUMP_DIR")) {
++        auto dump_tensor = [&](ggml_tensor * t, const std::string & fname) {
++            if (!t) return;
++            const int64_t ne = ggml_nelements(t);
++            std::vector<float> data(ne);
++            if (t->type == GGML_TYPE_F32) {
++                ggml_backend_tensor_get(t, data.data(), 0, ggml_nbytes(t));
++            } else if (t->type == GGML_TYPE_F16) {
++                std::vector<uint16_t> tmp(ne);
++                ggml_backend_tensor_get(t, tmp.data(), 0, ggml_nbytes(t));
++                for (int64_t i = 0; i < ne; i++) data[i] = ggml_fp16_to_fp32(tmp[i]);
++            } else {
++                return; // skip quantized
++            }
++            FILE * f = fopen((std::string(dump_dir) + "/" + fname + ".bin").c_str(), "wb");
++            if (!f) return;
++            int32_t ndim = ggml_n_dims(t);
++            int64_t ne4[4] = { t->ne[0], t->ne[1], t->ne[2], t->ne[3] };
++            fwrite(&ndim, sizeof(int32_t), 1, f);
++            fwrite(ne4, sizeof(int64_t), 4, f);
++            fwrite(data.data(), sizeof(float), ne, f);
++            fclose(f);
++        };
++        dump_tensor(ggml_graph_get_tensor(gf, "inp_raw"), "0000_inp_raw");
++        for (int i = 0; i < ggml_graph_n_nodes(gf); i++) {
++            ggml_tensor * t = ggml_graph_node(gf, i);
++            std::string nm = (t->name[0] ? std::string(t->name) : std::string("node"));
++            for (auto & c : nm) { if (c == '/' || c == ' ' || c == ':') c = '_'; }
++            char idx[16]; snprintf(idx, sizeof(idx), "%04d_", i + 1);
++            dump_tensor(t, std::string(idx) + nm);
++        }
++        LOG_INF("clip: CLIP_DUMP_DIR dumped %d nodes to %s\n", ggml_graph_n_nodes(gf), dump_dir);
++    }
++
+     // the last node is the embedding tensor
+     ggml_tensor * embeddings = ggml_graph_node(gf, -1);
+ 
+diff --git a/tools/mtmd/guidedog-cli.cpp b/tools/mtmd/guidedog-cli.cpp
+new file mode 100755
+index 000000000..024df7b78
+--- /dev/null
++++ b/tools/mtmd/guidedog-cli.cpp
+@@ -0,0 +1,394 @@
++// Guidedog ZMQ server built on the mtmd (multimodal) API.
++//
++// Receives frames from cam_server (ZMQ PUB on tcp://*:5555), runs the
++// Qwen2.5-VL model, parses the model's XML tags from the generated text, and
++// pushes each tagged segment (prefixed with a float speech rate) to the TTS
++// server (ZMQ PULL on tcp://localhost:4070). Generation stops at </recommend>.
++//
++// This is the modern replacement for the old examples/llava/qwen2vl-cli.cpp
++// from the on-device-guidedog fork: same ZMQ wire protocol and tag/rate logic,
++// but using libmtmd so it loads current Qwen2.5-VL mmproj files.
++
++#include "arg.h"
++#include "log.h"
++#include "common.h"
++#include "sampling.h"
++#include "llama.h"
++#include "ggml.h"
++#include "chat.h"
++#include "mtmd.h"
++#include "mtmd-helper.h"
++
++#include <zmq.hpp>
++
++#include <vector>
++#include <string>
++#include <cstring>
++#include <climits>
++#include <clocale>
++
++#if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
++#include <signal.h>
++#include <unistd.h>
++#endif
++
++static volatile bool g_is_generating   = false;
++static volatile bool g_is_interrupted  = false;
++
++#if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
++static void sigint_handler(int signo) {
++    if (signo == SIGINT) {
++        if (g_is_generating) {
++            g_is_generating = false;
++        } else {
++            if (g_is_interrupted) {
++                _exit(1);
++            }
++            g_is_interrupted = true;
++        }
++    }
++}
++#endif
++
++// ---- guidedog-specific options (parsed out of argv before the common parser) ----
++struct guidedog_opts {
++    bool        enabled      = false;                    // --zmq
++    std::string sub_endpoint = "tcp://localhost:5555";   // image source (cam_server)
++    std::string pub_endpoint = "tcp://localhost:4070";   // TTS sink
++
++    // per-tag ZMQ enable + speech rate (defaults match the original fork)
++    bool  en_dest = true, en_left = true, en_right = true, en_path = true, en_rec = true;
++    float r_dest = 2.5f,  r_left = 3.0f,  r_right = 3.0f,  r_path = 2.5f,  r_rec = 2.5f;
++};
++
++// pull our custom flags out of argv; everything else is left for common_params_parse
++static std::vector<char *> extract_guidedog_opts(int argc, char ** argv, guidedog_opts & g) {
++    std::vector<char *> keep;
++    keep.reserve(argc);
++    auto val = [&](int & i) -> const char * { return (i + 1 < argc) ? argv[++i] : nullptr; };
++    for (int i = 0; i < argc; i++) {
++        const std::string a = argv[i];
++        if      (a == "--zmq")               { g.enabled  = true; }
++        else if (a == "--no-zmq-dest-desc")  { g.en_dest  = false; }
++        else if (a == "--no-zmq-left-desc")  { g.en_left  = false; }
++        else if (a == "--no-zmq-right-desc") { g.en_right = false; }
++        else if (a == "--no-zmq-path-desc")  { g.en_path  = false; }
++        else if (a == "--no-zmq-recommend")  { g.en_rec   = false; }
++        else if (a == "--dest-desc-rate")    { if (auto v = val(i)) g.r_dest  = std::stof(v); }
++        else if (a == "--left-desc-rate")    { if (auto v = val(i)) g.r_left  = std::stof(v); }
++        else if (a == "--right-desc-rate")   { if (auto v = val(i)) g.r_right = std::stof(v); }
++        else if (a == "--path-desc-rate")    { if (auto v = val(i)) g.r_path  = std::stof(v); }
++        else if (a == "--recommend-rate")    { if (auto v = val(i)) g.r_rec   = std::stof(v); }
++        else if (a == "--zmq-sub")           { if (auto v = val(i)) g.sub_endpoint = v; }
++        else if (a == "--zmq-pub")           { if (auto v = val(i)) g.pub_endpoint = v; }
++        else { keep.push_back(argv[i]); }
++    }
++    return keep;
++}
++
++struct gd_context {
++    mtmd::context_ptr  ctx_vision;
++    common_init_result_ptr llama_init;
++
++    llama_model       * model;
++    llama_context     * lctx;
++    const llama_vocab * vocab;
++    common_sampler    * smpl;
++    llama_batch         batch;
++    int                 n_batch;
++
++    mtmd::bitmaps bitmaps;
++
++    common_chat_templates_ptr        tmpls;
++    std::vector<common_chat_msg>     chat_history;
++    bool      use_jinja = false;
++    llama_pos n_past    = 0;
++
++    gd_context(common_params & params) : llama_init(common_init_from_params(params)) {
++        model   = llama_init->model();
++        lctx    = llama_init->context();
++        vocab   = llama_model_get_vocab(model);
++        smpl    = common_sampler_init(model, params.sampling);
++        batch   = llama_batch_init(1, 0, 1);
++        n_batch = params.n_batch;
++        if (!model || !lctx) {
++            exit(1);
++        }
++        if (!llama_model_chat_template(model, nullptr) && params.chat_template.empty()) {
++            LOG_ERR("Model does not have a chat template.\n");
++            exit(1);
++        }
++        tmpls     = common_chat_templates_init(model, params.chat_template);
++        use_jinja = params.use_jinja;
++
++        const char * clip_path = params.mmproj.path.c_str();
++        mtmd_context_params mparams = mtmd_context_params_default();
++        mparams.use_gpu         = params.mmproj_use_gpu;
++        mparams.print_timings   = true;
++        mparams.n_threads       = params.cpuparams.n_threads;
++        mparams.flash_attn_type = params.flash_attn_type;
++        mparams.warmup          = params.warmup;
++        mparams.image_min_tokens = params.image_min_tokens;
++        mparams.image_max_tokens = params.image_max_tokens;
++        ctx_vision.reset(mtmd_init_from_file(clip_path, model, mparams));
++        if (!ctx_vision.get()) {
++            LOG_ERR("Failed to load vision model from %s\n", clip_path);
++            exit(1);
++        }
++    }
++
++    ~gd_context() {
++        llama_batch_free(batch);
++        common_sampler_free(smpl);
++    }
++
++    // fresh state for a new image (no model reload)
++    void reset() {
++        n_past = 0;
++        chat_history.clear();
++        bitmaps.entries.clear();
++        common_sampler_reset(smpl);
++        llama_memory_clear(llama_get_memory(lctx), true);
++    }
++
++    // tokenize (image + text) and evaluate the prompt
++    int eval_user(common_chat_msg & msg) {
++        const bool add_bos = chat_history.empty();
++        auto formatted = common_chat_format_single(tmpls.get(), chat_history, msg, true, use_jinja);
++        chat_history.push_back(msg);
++
++        mtmd_input_text text;
++        text.text          = formatted.c_str();
++        text.add_special   = add_bos;
++        text.parse_special = true;
++
++        mtmd::input_chunks chunks(mtmd_input_chunks_init());
++        auto bmp_ptrs = bitmaps.c_ptr();
++        if (mtmd_tokenize(ctx_vision.get(), chunks.ptr.get(), &text, bmp_ptrs.data(), bmp_ptrs.size()) != 0) {
++            LOG_ERR("mtmd_tokenize failed\n");
++            return 1;
++        }
++        bitmaps.entries.clear();
++
++        llama_pos new_n_past;
++        if (mtmd_helper_eval_chunks(ctx_vision.get(), lctx, chunks.ptr.get(),
++                                    n_past, 0, n_batch, true, &new_n_past)) {
++            LOG_ERR("mtmd_helper_eval_chunks failed\n");
++            return 1;
++        }
++        n_past = new_n_past;
++        return 0;
++    }
++};
++
++// receive one multipart frame from cam_server.
++// wire format (cam_server.py: struct.pack('iiidff', ...) with native alignment = 32 bytes):
++//   header[0..3]=h, [4..7]=w, [8..11]=c, [16..23]=timestamp(double), [24..27]=goal_x, [28..31]=goal_y
++//   payload = h*w*c raw bytes, BGR order (OpenCV)
++//   optional 3rd part = custom prompt (utf-8)
++static bool receive_frame(zmq::socket_t & sub, int & w, int & h, float & gx, float & gy,
++                          std::vector<unsigned char> & rgb, std::string & custom_prompt) {
++    zmq::message_t header;
++    if (!sub.recv(header, zmq::recv_flags::none)) return false;
++    if (header.size() < 32) {
++        LOG_ERR("[zmq] header too small (%zu bytes)\n", header.size());
++        return false;
++    }
++    const char * hd = static_cast<const char *>(header.data());
++    int hh = 0, ww = 0, cc = 0;
++    std::memcpy(&hh, hd + 0, sizeof(int));
++    std::memcpy(&ww, hd + 4, sizeof(int));
++    std::memcpy(&cc, hd + 8, sizeof(int));
++    std::memcpy(&gx, hd + 24, sizeof(float));
++    std::memcpy(&gy, hd + 28, sizeof(float));
++    if (hh <= 0 || ww <= 0 || cc < 3) {
++        LOG_ERR("[zmq] bad header h=%d w=%d c=%d\n", hh, ww, cc);
++        return false;
++    }
++    h = hh; w = ww;
++
++    zmq::message_t img;
++    if (!sub.recv(img, zmq::recv_flags::none)) return false;
++    const size_t expect = (size_t) hh * ww * cc;
++    if (img.size() < expect) {
++        LOG_ERR("[zmq] image payload too small (%zu < %zu)\n", img.size(), expect);
++        return false;
++    }
++    const unsigned char * bgr = static_cast<const unsigned char *>(img.data());
++    rgb.resize((size_t) ww * hh * 3);
++    for (size_t p = 0; p < (size_t) ww * hh; p++) {
++        rgb[p * 3 + 0] = bgr[p * cc + 2]; // R <- B
++        rgb[p * 3 + 1] = bgr[p * cc + 1]; // G
++        rgb[p * 3 + 2] = bgr[p * cc + 0]; // B <- R
++    }
++
++    custom_prompt.clear();
++    if (sub.get(zmq::sockopt::rcvmore)) {
++        zmq::message_t pm;
++        if (sub.recv(pm, zmq::recv_flags::none) && pm.size() > 0) {
++            custom_prompt.assign(static_cast<const char *>(pm.data()), pm.size());
++        }
++    }
++    return true;
++}
++
++static void generate_and_publish(gd_context & ctx, const guidedog_opts & g,
++                                 zmq::socket_t & pub, int n_predict) {
++    struct tag_info { std::string open, close; bool enabled; float rate; };
++    const std::vector<tag_info> tags = {
++        {"<dest_desc>",  "</dest_desc>",  g.en_dest,  g.r_dest },
++        {"<left_desc>",  "</left_desc>",  g.en_left,  g.r_left },
++        {"<right_desc>", "</right_desc>", g.en_right, g.r_right},
++        {"<path_desc>",  "</path_desc>",  g.en_path,  g.r_path },
++        {"<recommend>",  "</recommend>",  g.en_rec,   g.r_rec  },
++    };
++    std::vector<bool> sent(tags.size(), false);
++    std::string response;
++
++    for (int i = 0; i < n_predict && g_is_generating && !g_is_interrupted; i++) {
++        llama_token tok = common_sampler_sample(ctx.smpl, ctx.lctx, -1);
++        common_sampler_accept(ctx.smpl, tok, true);
++        if (llama_vocab_is_eog(ctx.vocab, tok)) {
++            break;
++        }
++
++        const std::string piece = common_token_to_piece(ctx.lctx, tok);
++        response += piece;
++        LOG("%s", piece.c_str());
++        fflush(stdout);
++
++        bool stop = false;
++        for (size_t t = 0; t < tags.size(); t++) {
++            if (sent[t]) continue;
++            const size_t cp = response.find(tags[t].close);
++            if (cp == std::string::npos) continue;
++            const size_t op = response.find(tags[t].open);
++            if (op == std::string::npos) continue;
++
++            const size_t cs = op + tags[t].open.size();
++            const std::string content = response.substr(cs, cp - cs);
++            sent[t] = true;
++            LOG_INF("\n[parse] %s -> \"%s\" (rate=%.1f, zmq=%s)\n",
++                    tags[t].open.c_str(), content.c_str(), tags[t].rate,
++                    tags[t].enabled ? "on" : "off");
++
++            if (tags[t].enabled && !content.empty()) {
++                const float rate = tags[t].rate;
++                std::vector<char> buf(sizeof(float) + content.size());
++                std::memcpy(buf.data(), &rate, sizeof(float));
++                std::memcpy(buf.data() + sizeof(float), content.data(), content.size());
++                try {
++                    pub.send(zmq::message_t(buf.data(), buf.size()), zmq::send_flags::none);
++                    LOG_INF("[pub] %s sent (rate=%.1f)\n", tags[t].open.c_str(), rate);
++                } catch (const std::exception & e) {
++                    LOG_ERR("[pub] %s send failed: %s\n", tags[t].open.c_str(), e.what());
++                }
++            }
++            if (tags[t].close == "</recommend>") {
++                LOG_INF("[stop] </recommend> parsed, ending generation\n");
++                stop = true;
++            }
++        }
++        if (stop) break;
++
++        common_batch_clear(ctx.batch);
++        common_batch_add(ctx.batch, tok, ctx.n_past++, {0}, true);
++        if (llama_decode(ctx.lctx, ctx.batch)) {
++            LOG_ERR("llama_decode failed\n");
++            break;
++        }
++    }
++}
++
++int main(int argc, char ** argv) {
++    std::setlocale(LC_NUMERIC, "C");
++    ggml_time_init();
++
++    common_params params;
++    common_init();
++
++    guidedog_opts g;
++    std::vector<char *> fargv = extract_guidedog_opts(argc, argv, g);
++
++    if (!common_params_parse((int) fargv.size(), fargv.data(), params, LLAMA_EXAMPLE_MTMD, nullptr)) {
++        return 1;
++    }
++    mtmd_helper_log_set(common_log_default_callback, nullptr);
++
++    if (params.mmproj.path.empty()) {
++        LOG_ERR("ERR: --mmproj is required\n");
++        return 1;
++    }
++    if (!g.enabled) {
++        LOG_ERR("ERR: this is the guidedog ZMQ server; pass --zmq (sub=%s pub=%s)\n",
++                g.sub_endpoint.c_str(), g.pub_endpoint.c_str());
++        return 1;
++    }
++
++    ggml_backend_load_all();
++
++#if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
++    {
++        struct sigaction sa;
++        sa.sa_handler = sigint_handler;
++        sigemptyset(&sa.sa_mask);
++        sa.sa_flags = 0;
++        sigaction(SIGINT, &sa, nullptr);
++    }
++#endif
++
++    gd_context ctx(params);
++    const int n_predict = params.n_predict < 0 ? 512 : params.n_predict;
++
++    zmq::context_t zctx(1);
++    zmq::socket_t sub(zctx, zmq::socket_type::sub);
++    sub.connect(g.sub_endpoint);
++    sub.set(zmq::sockopt::subscribe, "");
++    zmq::socket_t pub(zctx, zmq::socket_type::push);
++    pub.connect(g.pub_endpoint);
++
++    LOG_INF("guidedog ZMQ server: SUB %s  ->  PUB %s\n", g.sub_endpoint.c_str(), g.pub_endpoint.c_str());
++    LOG_INF("waiting for frames...\n");
++
++    while (!g_is_interrupted) {
++        int w = 0, h = 0;
++        float gx = 0.f, gy = 0.f;
++        std::vector<unsigned char> rgb;
++        std::string custom_prompt;
++
++        if (!receive_frame(sub, w, h, gx, gy, rgb, custom_prompt)) {
++            continue;
++        }
++        LOG_INF("\n[frame] %dx%d  goal=(%.5f, %.5f)\n", w, h, gx, gy);
++
++        // choose prompt: ZMQ custom prompt overrides; otherwise -p with (x, y) substituted
++        std::string prompt = custom_prompt;
++        if (prompt.empty()) {
++            prompt = params.prompt;
++            const size_t s = prompt.find('(');
++            const size_t e = prompt.find(')');
++            if (s != std::string::npos && e != std::string::npos && e > s) {
++                prompt.replace(s + 1, e - s - 1, std::to_string(gx) + ", " + std::to_string(gy));
++            }
++        }
++        LOG_INF("[prompt] %s\n", prompt.c_str());
++
++        ctx.reset();
++        ctx.bitmaps.entries.push_back(mtmd::bitmap((uint32_t) w, (uint32_t) h, rgb.data()));
++
++        common_chat_msg msg;
++        msg.role    = "user";
++        msg.content = std::string(mtmd_default_marker()) + prompt;
++
++        g_is_generating = true;
++        if (ctx.eval_user(msg)) {
++            continue;
++        }
++        generate_and_publish(ctx, g, pub, n_predict);
++        g_is_generating = false;
++        LOG("\n");
++    }
++
++    LOG_INF("guidedog: interrupted, exiting\n");
++    return 0;
++}
+diff --git a/tools/mtmd/models/qwen2vl.cpp b/tools/mtmd/models/qwen2vl.cpp
+index ebf107573..42d681ad6 100644
+--- a/tools/mtmd/models/qwen2vl.cpp
++++ b/tools/mtmd/models/qwen2vl.cpp
+@@ -16,6 +16,25 @@ ggml_cgraph * clip_graph_qwen2vl::build() {
+ 
+     int mrope_sections[4] = {d_head/4, d_head/4, d_head/4, d_head/4};
+ 
++    // Constants for batched window attention. The image is aligned to
++    // attn_window_size by the preprocessor (mtmd-image.cpp), so n_patches is an
++    // exact multiple of W * W and we never have edge windows.
++    int win_tok_side = 0;  // ViT-internal tokens per window side
++    int win_n_tok    = 0;  // tokens per window (= W²)
++    int n_win        = 0;  // number of windows
++    bool win_batched = false;  // false -> dense block-diagonal window mask (edge windows, HF-parity resolution)
++    if (use_window_attn) {
++        const int merge_ratio = 2;
++        const int attn_window_size = hparams.attn_window_size > 0 ? hparams.attn_window_size : 112;
++        const int grid_window = attn_window_size / patch_size / merge_ratio;
++        win_tok_side = grid_window * merge_ratio;  // e.g. 4 * 2 = 8
++        win_n_tok    = win_tok_side * win_tok_side; // e.g. 64
++        win_batched  = (n_patches_x / merge_ratio) % grid_window == 0 && (n_patches_y / merge_ratio) % grid_window == 0;
++        GGML_ASSERT((win_batched || hparams.qwen25vl_hf_align) &&
++                    "Qwen2.5-VL: image must be window-aligned (or set MTMD_QWEN25VL_HF_ALIGN=1)");
++        n_win = win_batched ? n_patches / win_n_tok : 0;
++    }
++
+     ggml_tensor * inp_raw = build_inp_raw();
+     ggml_tensor * inp = ggml_conv_2d(ctx0, model.patch_embeddings_0, inp_raw, patch_size, patch_size, 0, 0, 1, 1);
+ 
+@@ -41,9 +60,9 @@ ggml_cgraph * clip_graph_qwen2vl::build() {
+     }
+ 
+     ggml_tensor * inpL           = inp;
+-    ggml_tensor * window_mask    = nullptr;
+     ggml_tensor * window_idx     = nullptr;
+     ggml_tensor * inv_window_idx = nullptr;
++    ggml_tensor * window_mask    = nullptr;  // dense path only (edge windows)
+ 
+     ggml_tensor * positions = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, num_position_ids);
+     ggml_set_name(positions, "positions");
+@@ -55,18 +74,20 @@ ggml_cgraph * clip_graph_qwen2vl::build() {
+     }
+ 
+     if (use_window_attn) {
+-        // handle window attention inputs
++        // Reorder tokens so each window is contiguous in the sequence dim.
++        // The dense N x N window mask is no longer needed: window-attn layers
++        // below reshape Q/K/V into (d, H, W², n_win) and run a batched
++        // mask-free attention over the n_win batch dimension.
+         inv_window_idx = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_pos / 4);
+         ggml_set_name(inv_window_idx, "inv_window_idx");
+         ggml_set_input(inv_window_idx);
+-        // mask for window attention
+-        window_mask = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_pos, n_pos);
+-        ggml_set_name(window_mask, "window_mask");
+-        ggml_set_input(window_mask);
+-
+-        // if flash attn is used, we need to pad the mask and cast to f16
+-        if (flash_attn_type == CLIP_FLASH_ATTN_TYPE_ENABLED) {
+-            window_mask = ggml_cast(ctx0, window_mask, GGML_TYPE_F16);
++        if (!win_batched) {
++            window_mask = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_pos, n_pos);
++            ggml_set_name(window_mask, "window_mask");
++            ggml_set_input(window_mask);
++            if (flash_attn_type == CLIP_FLASH_ATTN_TYPE_ENABLED) {
++                window_mask = ggml_cast(ctx0, window_mask, GGML_TYPE_F16);
++            }
+         }
+ 
+         // inpL shape: [n_embd, n_patches_x * n_patches_y, batch_size]
+@@ -115,7 +136,17 @@ ggml_cgraph * clip_graph_qwen2vl::build() {
+             cb(Qcur, "Qcur_rope", il);
+             cb(Kcur, "Kcur_rope", il);
+ 
+-            ggml_tensor * attn_mask = full_attn ? nullptr : window_mask;
++            // For window-attention layers we split the sequence dim into
++            // (W², n_win) so each window becomes an independent attention in
++            // the batch dim — mathematically identical to the previous dense
++            // (N, N) block-diagonal mask, but without computing or storing
++            // the masked-out positions.
++            if (use_window_attn && !full_attn && win_batched) {
++                Qcur = ggml_reshape_4d(ctx0, Qcur, d_head, n_head, win_n_tok, n_win);
++                Kcur = ggml_reshape_4d(ctx0, Kcur, d_head, n_head, win_n_tok, n_win);
++                Vcur = ggml_reshape_4d(ctx0, Vcur, d_head, n_head, win_n_tok, n_win);
++            }
++            ggml_tensor * attn_mask = (use_window_attn && !full_attn && !win_batched) ? window_mask : nullptr;
+ 
+             cur = build_attn(layer.o_w, layer.o_b,
+                 Qcur, Kcur, Vcur, attn_mask, kq_scale, il);
+diff --git a/tools/mtmd/mtmd-cli.cpp b/tools/mtmd/mtmd-cli.cpp
+index d6e551618..f2dc396d4 100644
+--- a/tools/mtmd/mtmd-cli.cpp
++++ b/tools/mtmd/mtmd-cli.cpp
+@@ -14,6 +14,9 @@
+ #include <limits.h>
+ #include <cinttypes>
+ #include <clocale>
++#include <algorithm>
++#include <cstdlib>
++#include <cstring>
+ 
+ #if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
+ #include <signal.h>
+@@ -44,7 +47,8 @@ static void show_additional_info(int /*argc*/, char ** argv) {
+         "  -m and --mmproj are required\n"
+         "  -hf user/repo can replace both -m and --mmproj in most cases\n"
+         "  --image, --audio and -p are optional, if NOT provided, the CLI will run in chat mode\n"
+-        "  to disable using GPU for mmproj model, add --no-mmproj-offload\n",
++        "  to disable using GPU for mmproj model, add --no-mmproj-offload\n"
++        "  --bench N        run 1 warmup + N measured iterations on the same input and print stats\n",
+         argv[0]
+     );
+ }
+@@ -283,6 +287,20 @@ int main(int argc, char ** argv) {
+ 
+     common_init();
+ 
++    // pre-parse --bench N (not part of common_params); strip it out before main parser
++    int n_bench = 0;
++    std::vector<char *> filtered_argv;
++    filtered_argv.reserve(argc);
++    for (int i = 0; i < argc; i++) {
++        if (std::strcmp(argv[i], "--bench") == 0 && i + 1 < argc) {
++            n_bench = std::atoi(argv[++i]);
++            continue;
++        }
++        filtered_argv.push_back(argv[i]);
++    }
++    argc = (int) filtered_argv.size();
++    argv = filtered_argv.data();
++
+     if (!common_params_parse(argc, argv, params, LLAMA_EXAMPLE_MTMD, show_additional_info)) {
+         return 1;
+     }
+@@ -340,7 +358,151 @@ int main(int argc, char ** argv) {
+         return 1;
+     }
+ 
+-    if (is_single_turn) {
++    if (is_single_turn && n_bench > 0) {
++        // benchmark mode: 1 warmup + n_bench measured iterations on the same input
++        if (params.prompt.find(mtmd_default_marker()) == std::string::npos) {
++            for (size_t i = 0; i < params.image.size(); i++) {
++                params.prompt = mtmd_default_marker() + params.prompt;
++            }
++        }
++        if (n_predict <= 0 || n_predict == INT_MAX) {
++            n_predict = 128; // sensible default for benchmarking
++        }
++
++        struct iter_stat { double img_ms; double pre_ms; double dec_ms; int n_dec; };
++        std::vector<iter_stat> stats;
++        stats.reserve(n_bench);
++
++        LOG_INF("=== mtmd-cli bench: 1 warmup + %d measured iters, n_predict=%d ===\n", n_bench, n_predict);
++
++        for (int it = -1; it < n_bench; it++) {
++            // reset chat / KV / past for fresh run
++            ctx.n_past = 0;
++            ctx.chat_history.clear();
++            ctx.bitmaps.entries.clear();
++            llama_memory_clear(llama_get_memory(ctx.lctx), true);
++            if (eval_system_prompt_if_present()) {
++                return 1;
++            }
++
++            // reload images each iter (image decode/encode is part of end-to-end latency)
++            for (const auto & image : params.image) {
++                if (!ctx.load_media(image)) {
++                    return 1;
++                }
++            }
++
++            common_chat_msg msg;
++            msg.role = "user";
++            msg.content = params.prompt;
++
++            // tokenize first (cheap; not timed)
++            const bool add_bos = ctx.chat_history.empty();
++            const auto formatted_chat = chat_add_and_format(ctx, msg);
++            mtmd_input_text text;
++            text.text          = formatted_chat.c_str();
++            text.add_special   = add_bos;
++            text.parse_special = true;
++
++            mtmd::input_chunks chunks(mtmd_input_chunks_init());
++            auto bitmaps_c_ptr = ctx.bitmaps.c_ptr();
++            if (mtmd_tokenize(ctx.ctx_vision.get(), chunks.ptr.get(),
++                              &text, bitmaps_c_ptr.data(), bitmaps_c_ptr.size()) != 0) {
++                LOG_ERR("mtmd_tokenize failed\n");
++                return 1;
++            }
++            ctx.bitmaps.entries.clear();
++
++            // walk chunks; time IMAGE chunks and TEXT chunks separately
++            const size_t n_chunks = mtmd_input_chunks_size(chunks.ptr.get());
++            double img_ms = 0.0;
++            double pre_ms = 0.0;
++            for (size_t ci = 0; ci < n_chunks; ci++) {
++                const mtmd_input_chunk * c = mtmd_input_chunks_get(chunks.ptr.get(), ci);
++                const bool is_last = (ci + 1 == n_chunks);
++                const auto ct = mtmd_input_chunk_get_type(c);
++
++                const int64_t cs = ggml_time_us();
++                llama_pos new_n_past = ctx.n_past;
++                if (mtmd_helper_eval_chunk_single(ctx.ctx_vision.get(), ctx.lctx, c,
++                                                  ctx.n_past, 0, ctx.n_batch,
++                                                  is_last, &new_n_past) != 0) {
++                    LOG_ERR("mtmd_helper_eval_chunk_single failed at chunk %zu\n", ci);
++                    return 1;
++                }
++                const double ms = (ggml_time_us() - cs) / 1e3;
++                if (ct == MTMD_INPUT_CHUNK_TYPE_IMAGE || ct == MTMD_INPUT_CHUNK_TYPE_AUDIO) {
++                    img_ms += ms;
++                } else {
++                    pre_ms += ms;
++                }
++                ctx.n_past = new_n_past;
++            }
++            const int64_t t_dec_start = ggml_time_us();
++
++            // time generation
++            g_is_generating = true;
++            int n_dec = 0;
++            llama_tokens generated_tokens;
++            for (int i = 0; i < n_predict && g_is_generating && !g_is_interrupted; i++) {
++                llama_token tok = common_sampler_sample(ctx.smpl, ctx.lctx, -1);
++                generated_tokens.push_back(tok);
++                common_sampler_accept(ctx.smpl, tok, true);
++                if (llama_vocab_is_eog(ctx.vocab, tok) || ctx.check_antiprompt(generated_tokens)) {
++                    break;
++                }
++                common_batch_clear(ctx.batch);
++                common_batch_add(ctx.batch, tok, ctx.n_past++, {0}, true);
++                if (llama_decode(ctx.lctx, ctx.batch)) {
++                    LOG_ERR("failed to decode token\n");
++                    return 1;
++                }
++                n_dec++;
++            }
++            const double dec_ms = (ggml_time_us() - t_dec_start) / 1e3;
++
++            const std::string out_text = common_detokenize(ctx.lctx, generated_tokens);
++            if (it < 0) {
++                LOG_INF("warmup   : image=%8.2f ms  prefill=%8.2f ms  decode=%8.2f ms  (%d tok)\n",
++                        img_ms, pre_ms, dec_ms, n_dec);
++                LOG_INF("  output : %s\n", out_text.c_str());
++            } else {
++                const double tps = n_dec > 0 ? n_dec / (dec_ms / 1e3) : 0.0;
++                LOG_INF("iter %3d : image=%8.2f ms  prefill=%8.2f ms  decode=%8.2f ms  (%d tok, %.2f tok/s)\n",
++                        it, img_ms, pre_ms, dec_ms, n_dec, tps);
++                LOG_INF("  output : %s\n", out_text.c_str());
++                stats.push_back({img_ms, pre_ms, dec_ms, n_dec});
++            }
++            if (g_is_interrupted) break;
++        }
++
++        if (!stats.empty()) {
++            auto reduce = [&](double iter_stat::* m) {
++                double sum = 0.0, mn = stats[0].*m, mx = stats[0].*m;
++                for (const auto & s : stats) {
++                    sum += s.*m;
++                    mn = std::min(mn, s.*m);
++                    mx = std::max(mx, s.*m);
++                }
++                return std::make_tuple(sum / (double) stats.size(), mn, mx, sum);
++            };
++            auto [avg_img, min_img, max_img, sum_img] = reduce(&iter_stat::img_ms);
++            auto [avg_pre, min_pre, max_pre, sum_pre] = reduce(&iter_stat::pre_ms);
++            auto [avg_dec, min_dec, max_dec, sum_dec] = reduce(&iter_stat::dec_ms);
++            int sum_n = 0;
++            for (const auto & s : stats) sum_n += s.n_dec;
++            const int    n       = (int) stats.size();
++            const double avg_tps = sum_n > 0 ? sum_n / (sum_dec / 1e3) : 0.0;
++            (void) sum_img; (void) sum_pre;
++            LOG("\n=== bench summary (warmup excluded, %d iters) ===\n", n);
++            LOG("image   ms : avg %8.2f  min %8.2f  max %8.2f\n", avg_img, min_img, max_img);
++            LOG("prefill ms : avg %8.2f  min %8.2f  max %8.2f\n", avg_pre, min_pre, max_pre);
++            LOG("decode  ms : avg %8.2f  min %8.2f  max %8.2f\n", avg_dec, min_dec, max_dec);
++            LOG("decode tok/s : avg %.2f  (total %d tok over %.2f s)\n", avg_tps, sum_n, sum_dec / 1e3);
++            LOG("total ms/req : avg %.2f  (image + prefill + decode)\n", avg_img + avg_pre + avg_dec);
++        }
++
++    } else if (is_single_turn) {
+         g_is_generating = true;
+         if (params.prompt.find(mtmd_default_marker()) == std::string::npos) {
+             for (size_t i = 0; i < params.image.size(); i++) {
+diff --git a/tools/mtmd/mtmd-image.cpp b/tools/mtmd/mtmd-image.cpp
+index 1b058e026..5d1513f12 100644
+--- a/tools/mtmd/mtmd-image.cpp
++++ b/tools/mtmd/mtmd-image.cpp
+@@ -864,9 +864,16 @@ bool mtmd_image_preprocessor_dyn_size::preprocess(const clip_image_u8 & img, cli
+     const clip_image_size original_size{img.nx, img.ny};
+     // the original pixtral model doesn't have n_merge
+     const int cur_merge = hparams.n_merge == 0 ? 1 : hparams.n_merge;
++    // For Qwen2.5-VL-style window attention (n_wa_pattern > 0), align the
++    // resized image to the window pixel size (attn_window_size). This makes
++    // the patch grid an exact multiple of the window grid so the batched
++    // window-attention path has uniform shape with no edge windows.
++    const int align_size = (hparams.n_wa_pattern > 0 && hparams.attn_window_size > 0 && !hparams.qwen25vl_hf_align)
++                              ? hparams.attn_window_size
++                              : hparams.patch_size * cur_merge;
+     const clip_image_size target_size = img_tool::calc_size_preserved_ratio(
+         original_size,
+-        hparams.patch_size * cur_merge,
++        align_size,
+         hparams.image_min_pixels,
+         hparams.image_max_pixels);
+     img_tool::resize(img, resized_image, target_size,
+diff --git a/tools/mtmd/s2-runner.cpp b/tools/mtmd/s2-runner.cpp
+new file mode 100755
+index 000000000..53e11e1a7
+--- /dev/null
++++ b/tools/mtmd/s2-runner.cpp
+@@ -0,0 +1,412 @@
++// s2-runner: persistent CLI runner for InternVLA-N1 System-2 over llama.cpp (fork w/ windowed-attn).
++// Loads model+mmproj once, serves line requests on stdin, replies on stdout. One process does
++// image (mtmd) + text generation + traj_latents extraction (no HTTP, no embeddings-mode image limit).
++//
++// Protocol (one request per line, tab-separated; \n in prompt encoded as \\n):
++//   RESET                                  -> "OK"            (clear chat history + KV)
++//   TEXT  \t img1,img2,.. \t <prompt>      -> "OK\t<text>"   (images may be empty)
++//   LATENT                                 -> "OK\t<b64>"    (4*n_embd float32, after a TEXT)
++//   ENCODE \t img1,img2,..                 -> "OK\t<hits>,<misses>"  (S2_EMBD_CACHE>0: vision-embedding prefetch)
++//   CACHE_CLEAR                            -> "OK"            (S2_EMBD_CACHE>0: drop cached embeddings)
++//   QUIT                                   -> exits
++// Launch: s2-runner -m text-latent.gguf --mmproj mmproj.gguf -ngl 99 -c 8192 \
++//                   --temp 0 --repeat-penalty 1.05 --repeat-last-n -1
++#include "arg.h"
++#include "common.h"
++#include "sampling.h"
++#include "llama.h"
++#include "ggml.h"
++#include "chat.h"
++#include "mtmd.h"
++#include "mtmd-helper.h"
++
++#include <string>
++#include <vector>
++#include <sstream>
++#include <iostream>
++#include <cstring>
++#include <cstdlib>
++#include <list>
++#include <unordered_map>
++
++#ifdef S2_RUNNER_ZMQ
++#include <zmq.h>   // serve the same line protocol over a ZMQ REP socket (--zmq tcp://*:PORT)
++#endif
++
++static const int N_QUERY = 4;
++static const char * LATENT_STR = "<|latent_0|><|latent_1|><|latent_2|><|latent_3|>";
++
++struct s2_ctx {
++    mtmd::context_ptr ctx_vision;
++    common_init_result_ptr llama_init;
++    llama_model * model; llama_context * lctx; const llama_vocab * vocab;
++    common_sampler * smpl; llama_batch batch; int n_batch;
++    mtmd::bitmaps bitmaps;
++    common_chat_templates_ptr tmpls; std::vector<common_chat_msg> chat_history; bool use_jinja = false;
++    llama_pos n_past = 0;
++    llama_token last_eog = -1;   // EOG token that ended the last answer (-1 if stopped by n_predict)
++    // S2_HF_CHAT=1: HF chat parity (default system message, EOG of each answer kept in the KV)
++    bool hf_chat = false;
++    bool eog_in_kv = false;      // last answer's EOG token was decoded into the KV
++    // S2_EMBD_CACHE=<n>: LRU of vision embeddings keyed by image content (0 = off, original path)
++    size_t embd_cache_cap = 0;
++    std::list<std::string> embd_lru;   // front = most recently used
++    std::unordered_map<std::string, std::pair<std::vector<float>, std::list<std::string>::iterator>> embd_cache;
++    size_t embd_hits = 0, embd_misses = 0;
++
++    s2_ctx(common_params & params) : llama_init(common_init_from_params(params)) {
++        model = llama_init->model(); lctx = llama_init->context();
++        vocab = llama_model_get_vocab(model);
++        smpl  = common_sampler_init(model, params.sampling);
++        batch = llama_batch_init(std::max(1, params.n_batch), 0, 1);
++        n_batch = params.n_batch;
++        tmpls = common_chat_templates_init(model, params.chat_template);
++        use_jinja = params.use_jinja;
++        const char * clip = params.mmproj.path.c_str();
++        mtmd_context_params mp = mtmd_context_params_default();
++        mp.use_gpu = params.mmproj_use_gpu; mp.print_timings = false;
++        mp.n_threads = params.cpuparams.n_threads; mp.flash_attn_type = params.flash_attn_type;
++        mp.warmup = params.warmup; mp.image_min_tokens = params.image_min_tokens; mp.image_max_tokens = params.image_max_tokens;
++        ctx_vision.reset(mtmd_init_from_file(clip, model, mp));
++        if (!model || !lctx || !ctx_vision.get()) { fprintf(stderr, "load failed\n"); exit(1); }
++        llama_set_embeddings(lctx, false);  // default to generation; toggled on only for LATENT
++        const char * hc = getenv("S2_HF_CHAT");
++        hf_chat = hc != nullptr && std::string(hc) == "1";
++        if (hf_chat) fprintf(stderr, "s2-runner: HF chat parity on (system message + EOG in KV)\n");
++        const char * ec = getenv("S2_EMBD_CACHE");
++        embd_cache_cap = ec != nullptr ? (size_t) std::max(0, atoi(ec)) : 0;
++        if (embd_cache_cap > 0) fprintf(stderr, "s2-runner: vision embedding cache on (%zu entries)\n", embd_cache_cap);
++    }
++    ~s2_ctx() { llama_batch_free(batch); common_sampler_free(smpl); }
++
++    bool load_media(const std::string & f) {
++        mtmd::bitmap bmp(mtmd_helper_bitmap_init_from_file(ctx_vision.get(), f.c_str()));
++        if (!bmp.ptr) return false;
++        if (embd_cache_cap > 0) set_content_id(bmp);
++        bitmaps.entries.push_back(std::move(bmp));
++        return true;
++    }
++    static void set_content_id(mtmd::bitmap & bmp) {   // FNV-1a 64 over (nx, ny, pixels)
++        uint64_t h = 1469598103934665603ULL;
++        auto mix = [&h](const unsigned char * d, size_t n) { for (size_t i = 0; i < n; i++) { h ^= d[i]; h *= 1099511628211ULL; } };
++        uint32_t wh[2] = { bmp.nx(), bmp.ny() };
++        mix((const unsigned char *) wh, sizeof(wh));
++        mix(bmp.data(), bmp.n_bytes());
++        char id[32]; snprintf(id, sizeof(id), "h%016llx", (unsigned long long) h);
++        bmp.set_id(id);
++    }
++    // embeddings of an image chunk: cached copy, or encode now (and cache). nullptr on failure.
++    const float * chunk_embd(const mtmd_input_chunk * chunk) {
++        const std::string key = mtmd_input_chunk_get_id(chunk) ? mtmd_input_chunk_get_id(chunk) : "";
++        auto it = key.empty() ? embd_cache.end() : embd_cache.find(key);
++        if (it != embd_cache.end()) {
++            embd_lru.splice(embd_lru.begin(), embd_lru, it->second.second);
++            embd_hits++;
++            return it->second.first.data();
++        }
++        int64_t t0 = ggml_time_ms();
++        if (mtmd_encode_chunk(ctx_vision.get(), chunk) != 0) return nullptr;
++        fprintf(stderr, "image slice encoded in %lld ms (cache miss)\n", (long long) (ggml_time_ms() - t0));
++        embd_misses++;
++        const size_t n = (size_t) llama_model_n_embd_inp(model) * mtmd_input_chunk_get_n_tokens(chunk);
++        const float * e = mtmd_get_output_embd(ctx_vision.get());
++        if (key.empty()) { scratch.assign(e, e + n); return scratch.data(); }
++        while (embd_cache.size() >= embd_cache_cap && !embd_lru.empty()) {   // evict least recently used
++            embd_cache.erase(embd_lru.back()); embd_lru.pop_back();
++        }
++        embd_lru.push_front(key);
++        auto & slot = embd_cache[key];
++        slot.first.assign(e, e + n); slot.second = embd_lru.begin();
++        return slot.first.data();
++    }
++    std::vector<float> scratch;
++    void cache_clear() { embd_cache.clear(); embd_lru.clear(); }
++    void reset() { eog_in_kv = false; chat_history.clear(); n_past = 0; llama_memory_clear(llama_get_memory(lctx), true); common_sampler_reset(smpl); }
++};
++
++static int eval_chunks_cached(s2_ctx & c, const mtmd_input_chunks * chunks);
++static std::string b64(const unsigned char * d, size_t n);
++
++// decode a user message (prompt + the already-loaded images) into the KV
++static int eval_user(s2_ctx & c, const std::string & prompt) {
++    bool add_bos = c.chat_history.empty();
++    common_chat_msg msg; msg.role = "user"; msg.content = prompt;
++    auto formatted = common_chat_format_single(c.tmpls.get(), c.chat_history, msg, true, c.use_jinja);
++    if (c.hf_chat && c.chat_history.empty()) {   // Qwen2-VL template default system message (HF apply_chat_template)
++        formatted = "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n" + formatted;
++    }
++    c.chat_history.push_back(msg);
++    mtmd_input_text text; text.text = formatted.c_str(); text.add_special = add_bos; text.parse_special = true;
++    mtmd::input_chunks chunks(mtmd_input_chunks_init());
++    auto bm = c.bitmaps.c_ptr();
++    if (mtmd_tokenize(c.ctx_vision.get(), chunks.ptr.get(), &text, bm.data(), bm.size())) return 1;
++    c.bitmaps.entries.clear();
++    if (getenv("S2_DEBUG") != nullptr) {   // debug: prompt text-chunk token ids
++        fprintf(stderr, "S2_DEBUG prompt n_past %d:", c.n_past);
++        for (size_t i = 0; i < mtmd_input_chunks_size(chunks.ptr.get()); i++) {
++            const mtmd_input_chunk * ch = mtmd_input_chunks_get(chunks.ptr.get(), i);
++            if (mtmd_input_chunk_get_type(ch) != MTMD_INPUT_CHUNK_TYPE_TEXT) { fprintf(stderr, " [IMG n_pos %d]", (int) mtmd_input_chunk_get_n_pos(ch)); continue; }
++            size_t n = 0; const llama_token * t = mtmd_input_chunk_get_tokens_text(ch, &n);
++            for (size_t j = 0; j < n; j++) fprintf(stderr, " %d", t[j]);
++        }
++        fprintf(stderr, "\n");
++    }
++    if (c.hf_chat) {   // HF repetition penalty covers the whole input_ids: add the prompt text tokens to the history
++        for (size_t i = 0; i < mtmd_input_chunks_size(chunks.ptr.get()); i++) {
++            const mtmd_input_chunk * ch = mtmd_input_chunks_get(chunks.ptr.get(), i);
++            if (mtmd_input_chunk_get_type(ch) != MTMD_INPUT_CHUNK_TYPE_TEXT) continue;
++            size_t n = 0;
++            const llama_token * t = mtmd_input_chunk_get_tokens_text(ch, &n);
++            for (size_t j = 0; j < n; j++) common_sampler_accept(c.smpl, t[j], false);
++        }
++    }
++    if (c.embd_cache_cap > 0) return eval_chunks_cached(c, chunks.ptr.get());
++    llama_pos new_past;
++    if (mtmd_helper_eval_chunks(c.ctx_vision.get(), c.lctx, chunks.ptr.get(), c.n_past, 0, c.n_batch, true, &new_past)) return 1;
++    c.n_past = new_past;
++    return 0;
++}
++
++// same as mtmd_helper_eval_chunks(.., logits_last=true), but image embeddings come from the cache
++static int eval_chunks_cached(s2_ctx & c, const mtmd_input_chunks * chunks) {
++    const size_t n_chunks = mtmd_input_chunks_size(chunks);
++    llama_pos n_past = c.n_past;
++    for (size_t i = 0; i < n_chunks; i++) {
++        const mtmd_input_chunk * chunk = mtmd_input_chunks_get(chunks, i);
++        if (mtmd_input_chunk_get_type(chunk) == MTMD_INPUT_CHUNK_TYPE_IMAGE) {
++            const float * e = c.chunk_embd(chunk);
++            if (e == nullptr) return 1;
++            if (mtmd_helper_decode_image_chunk(c.ctx_vision.get(), c.lctx, chunk, const_cast<float *>(e), n_past, 0, c.n_batch, &n_past)) return 1;
++        } else {
++            if (mtmd_helper_eval_chunk_single(c.ctx_vision.get(), c.lctx, chunk, n_past, 0, c.n_batch, i == n_chunks - 1, &n_past)) return 1;
++        }
++    }
++    c.n_past = n_past;
++    return 0;
++}
++
++// ENCODE: tokenize each image alone and fill the cache (no KV / chat-history change)
++static std::string encode_only(s2_ctx & c, const std::string & imgs) {
++    const size_t h0 = c.embd_hits, m0 = c.embd_misses;
++    std::stringstream is(imgs); std::string f;
++    while (std::getline(is, f, ',')) {
++        if (f.empty()) continue;
++        if (!c.load_media(f)) return "ERR\tload";
++        mtmd_input_text text; text.text = mtmd_default_marker(); text.add_special = false; text.parse_special = true;
++        mtmd::input_chunks chunks(mtmd_input_chunks_init());
++        auto bm = c.bitmaps.c_ptr();
++        int32_t r = mtmd_tokenize(c.ctx_vision.get(), chunks.ptr.get(), &text, bm.data(), bm.size());
++        c.bitmaps.entries.clear();
++        if (r) return "ERR\ttokenize";
++        for (size_t i = 0; i < mtmd_input_chunks_size(chunks.ptr.get()); i++) {
++            const mtmd_input_chunk * ch = mtmd_input_chunks_get(chunks.ptr.get(), i);
++            if (mtmd_input_chunk_get_type(ch) == MTMD_INPUT_CHUNK_TYPE_IMAGE && c.chunk_embd(ch) == nullptr) return "ERR\tencode";
++        }
++    }
++    return "OK\t" + std::to_string(c.embd_hits - h0) + "," + std::to_string(c.embd_misses - m0);
++}
++
++static std::string generate_text(s2_ctx & c, int n_predict) {
++    llama_tokens gen;
++    c.last_eog = -1;
++    c.eog_in_kv = false;
++    for (int i = 0; i < n_predict; i++) {
++        if (getenv("S2_DEBUG") != nullptr) {   // debug: raw top-3 logits before sampling
++            const float * lg = llama_get_logits_ith(c.lctx, -1);
++            const int nv = llama_vocab_n_tokens(c.vocab);
++            int b0 = 0, b1 = 1, b2 = 2;
++            for (int v = 0; v < nv; v++) {
++                if (lg[v] > lg[b0]) { b2 = b1; b1 = b0; b0 = v; }
++                else if (v != b0 && lg[v] > lg[b1]) { b2 = b1; b1 = v; }
++                else if (v != b0 && v != b1 && lg[v] > lg[b2]) { b2 = v; }
++            }
++            fprintf(stderr, "S2_DEBUG top %d:%.3f %d:%.3f %d:%.3f\n", b0, lg[b0], b1, lg[b1], b2, lg[b2]);
++        }
++        llama_token id = common_sampler_sample(c.smpl, c.lctx, -1);
++        common_sampler_accept(c.smpl, id, true);
++        if (llama_vocab_is_eog(c.vocab, id)) {   // don't emit the EOS token
++            c.last_eog = id;
++            if (c.hf_chat) {                       // HF keeps it in the sequence: put it into the KV
++                common_batch_clear(c.batch);
++                common_batch_add(c.batch, id, c.n_past++, {0}, false);
++                c.eog_in_kv = llama_decode(c.lctx, c.batch) == 0;
++            }
++            break;
++        }
++        gen.push_back(id);
++        common_batch_clear(c.batch);
++        common_batch_add(c.batch, id, c.n_past++, {0}, true);
++        if (llama_decode(c.lctx, c.batch)) break;
++    }
++    std::string txt = common_detokenize(c.lctx, gen, false);  // skip special tokens (== HF skip_special_tokens)
++    if (getenv("S2_DEBUG") != nullptr) {   // debug: sampled ids + EOG id
++        fprintf(stderr, "S2_DEBUG gen:");
++        for (auto t : gen) fprintf(stderr, " %d", t);
++        fprintf(stderr, " | eog %d | n_past %d\n", c.last_eog, c.n_past);
++    }
++    common_chat_msg m; m.role = "assistant"; m.content = txt; c.chat_history.push_back(m);
++    return txt;
++}
++
++// after a TEXT, append the 4 latent tokens and read their last-layer hidden states = traj_latents
++static std::vector<float> extract_latent(s2_ctx & c) {
++    llama_tokens lat = common_tokenize(c.lctx, LATENT_STR, false, true);
++    // S2_LATENT_WITH_EOS=1: HF parity -- generate_latents() sees prompt + answer + EOG before the latent queries
++    const char * with_eos = getenv("S2_LATENT_WITH_EOS");
++    if (with_eos != nullptr && std::string(with_eos) == "1" && c.last_eog >= 0 && !c.eog_in_kv) {
++        lat.insert(lat.begin(), c.last_eog);
++    }
++    llama_set_embeddings(c.lctx, true);
++    llama_batch b = llama_batch_init((int) lat.size(), 0, 1);
++    for (size_t i = 0; i < lat.size(); i++) common_batch_add(b, lat[i], c.n_past + (int) i, {0}, true);
++    std::vector<float> out;
++    if (!llama_decode(c.lctx, b)) {
++        const int n_embd = llama_model_n_embd(c.model);
++        const int n = (int) lat.size();
++        for (int i = n - N_QUERY; i < n; i++) {
++            const float * e = llama_get_embeddings_ith(c.lctx, i);
++            out.insert(out.end(), e, e + n_embd);
++        }
++    }
++    llama_batch_free(b);
++    // the 4 latent tokens are ephemeral (read-only probe): drop them from the KV so a subsequent
++    // TEXT turn stays position-consistent (required for multi-turn KV reuse; harmless before RESET).
++    llama_memory_seq_rm(llama_get_memory(c.lctx), 0, c.n_past, -1);
++    llama_set_embeddings(c.lctx, false);
++    return out;  // N_QUERY * n_embd
++}
++
++static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
++static std::string b64(const unsigned char * d, size_t n) {
++    std::string o; o.reserve((n + 2) / 3 * 4);
++    for (size_t i = 0; i < n; i += 3) {
++        unsigned v = d[i] << 16 | (i + 1 < n ? d[i + 1] << 8 : 0) | (i + 2 < n ? d[i + 2] : 0);
++        o += B64[v >> 18 & 63]; o += B64[v >> 12 & 63];
++        o += (i + 1 < n) ? B64[v >> 6 & 63] : '='; o += (i + 2 < n) ? B64[v & 63] : '=';
++    }
++    return o;
++}
++
++// Handle one request line; returns the response string (no trailing newline).
++// Identical semantics to the original stdin/stdout loop, so the stdin and ZMQ paths
++// stay bit-for-bit in sync. Sets *quit on QUIT.
++static std::string handle_request(s2_ctx & c, common_params & params, const std::string & line, bool * quit) {
++    std::stringstream ss(line);
++    std::string cmd; std::getline(ss, cmd, '\t');
++    if (cmd == "QUIT") { *quit = true; return "OK"; }
++    if (cmd == "RESET") { c.reset(); return "OK"; }
++    if (cmd == "CACHE_CLEAR") { c.cache_clear(); return "OK"; }
++    if (cmd == "EMBD") {   // debug: vision embeddings of one image (S2_EMBD_CACHE>0)
++        if (c.embd_cache_cap == 0) return "ERR\tcache_off";
++        std::string img; std::getline(ss, img, '\t');
++        if (!c.load_media(img)) return "ERR\tload";
++        mtmd_input_text text; text.text = mtmd_default_marker(); text.add_special = false; text.parse_special = true;
++        mtmd::input_chunks chunks(mtmd_input_chunks_init());
++        auto bm = c.bitmaps.c_ptr();
++        int32_t r = mtmd_tokenize(c.ctx_vision.get(), chunks.ptr.get(), &text, bm.data(), bm.size());
++        c.bitmaps.entries.clear();
++        if (r) return "ERR\ttokenize";
++        for (size_t i = 0; i < mtmd_input_chunks_size(chunks.ptr.get()); i++) {
++            const mtmd_input_chunk * ch = mtmd_input_chunks_get(chunks.ptr.get(), i);
++            if (mtmd_input_chunk_get_type(ch) != MTMD_INPUT_CHUNK_TYPE_IMAGE) continue;
++            const float * e = c.chunk_embd(ch);
++            if (e == nullptr) return "ERR\tencode";
++            const mtmd_image_tokens * it = mtmd_input_chunk_get_tokens_image(ch);
++            const int n_embd = llama_model_n_embd_inp(c.model);
++            const size_t n = (size_t) n_embd * mtmd_input_chunk_get_n_tokens(ch);
++            return "OK\t" + std::to_string(mtmd_image_tokens_get_nx(it)) + "," + std::to_string(mtmd_image_tokens_get_ny(it)) +
++                   "," + std::to_string(n_embd) + "\t" + b64((const unsigned char *) e, n * sizeof(float));
++        }
++        return "ERR\tno_image";
++    }
++    if (cmd == "ENCODE") {
++        if (c.embd_cache_cap == 0) return "ERR\tcache_off";
++        std::string imgs; std::getline(ss, imgs, '\t');
++        return encode_only(c, imgs);
++    }
++    if (cmd == "LATENT") {
++        auto v = extract_latent(c);
++        return std::string("OK\t") + b64((const unsigned char *) v.data(), v.size() * sizeof(float));
++    }
++    if (cmd == "TEXT") {
++        std::string imgs, prompt;
++        std::getline(ss, imgs, '\t'); std::getline(ss, prompt);
++        // decode escaped newlines
++        std::string p; for (size_t i = 0; i < prompt.size(); i++) {
++            if (prompt[i] == '\\' && i + 1 < prompt.size() && prompt[i + 1] == 'n') { p += '\n'; i++; } else p += prompt[i];
++        }
++        if (!imgs.empty()) { std::stringstream is(imgs); std::string f; while (std::getline(is, f, ',')) if (!f.empty()) c.load_media(f); }
++        if (eval_user(c, p)) return "ERR\teval";
++        std::string txt = generate_text(c, params.n_predict);
++        for (auto & ch : txt) if (ch == '\n' || ch == '\t') ch = ' ';
++        return std::string("OK\t") + txt;
++    }
++    return "ERR\tunknown_cmd";
++}
++
++#ifdef S2_RUNNER_ZMQ
++// Serve the same request/response protocol over a ZMQ REP socket. One request per message
++// (trailing newline optional). Each request gets exactly one reply (REP contract).
++static int run_zmq_server(s2_ctx & c, common_params & params, const std::string & endpoint) {
++    void * ctx  = zmq_ctx_new();
++    void * sock = zmq_socket(ctx, ZMQ_REP);
++    if (zmq_bind(sock, endpoint.c_str()) != 0) {
++        fprintf(stderr, "s2-runner: zmq_bind(%s) failed: %s\n", endpoint.c_str(), zmq_strerror(zmq_errno()));
++        return 1;
++    }
++    fprintf(stderr, "s2-runner: ZMQ REP listening on %s\n", endpoint.c_str()); fflush(stderr);
++    while (true) {
++        zmq_msg_t req; zmq_msg_init(&req);
++        int n = zmq_msg_recv(&req, sock, 0);
++        if (n < 0) { zmq_msg_close(&req); if (zmq_errno() == ETERM) break; continue; }
++        std::string line((const char *) zmq_msg_data(&req), zmq_msg_size(&req));
++        zmq_msg_close(&req);
++        if (!line.empty() && line.back() == '\n') line.pop_back();   // tolerate a trailing newline
++        bool quit = false;
++        std::string resp = handle_request(c, params, line, &quit);
++        zmq_send(sock, resp.data(), resp.size(), 0);                 // REP must always reply
++        if (quit) break;
++    }
++    zmq_close(sock); zmq_ctx_destroy(ctx);
++    return 0;
++}
++#endif
++
++int main(int argc, char ** argv) {
++    // --zmq <endpoint> is OUR flag, not a llama.cpp one: strip it before common_params_parse.
++    std::string zmq_ep;
++    std::vector<char *> av;
++    for (int i = 0; i < argc; i++) {
++        if (std::string(argv[i]) == "--zmq" && i + 1 < argc) { zmq_ep = argv[++i]; }
++        else av.push_back(argv[i]);
++    }
++
++    common_params params;
++    if (!common_params_parse((int) av.size(), av.data(), params, LLAMA_EXAMPLE_MTMD)) return 1;
++    if (params.mmproj.path.empty()) { fprintf(stderr, "ERR: --mmproj required\n"); return 1; }
++    if (params.n_predict < 0) params.n_predict = 128;
++    // allocate the per-token embedding buffer (for LATENT); generation still works (generative model)
++    params.embedding = true;
++    params.pooling_type = LLAMA_POOLING_TYPE_NONE;
++    s2_ctx c(params);
++    fprintf(stderr, "s2-runner: ready\n"); fflush(stderr);
++
++    if (!zmq_ep.empty()) {
++#ifdef S2_RUNNER_ZMQ
++        return run_zmq_server(c, params, zmq_ep);
++#else
++        fprintf(stderr, "s2-runner: --zmq requested but this binary was built without libzmq\n");
++        return 1;
++#endif
++    }
++
++    // default: persistent stdin/stdout line protocol (unchanged)
++    std::string line;
++    while (std::getline(std::cin, line)) {
++        bool quit = false;
++        std::string resp = handle_request(c, params, line, &quit);
++        if (quit) break;
++        std::cout << resp << "\n"; std::cout.flush();
++    }
++    return 0;
++}

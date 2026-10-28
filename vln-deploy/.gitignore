@@ -1,0 +1,42 @@
+# vln-deploy: 코드·문서만 올린다. 아래는 전부 스크립트로 다시 만들거나(docs/command.md) 새로 받는 것.
+
+# checkpoints/ 는 ../checkpoints 를 가리키는 심링크 (상위 .gitignore 의 checkpoints 규칙을 여기서만 푼다)
+!/checkpoints
+
+# 생성 weight (command.md 2장: build_s1_trt.sh, build_s2_gguf.sh)
+quantization_kit/out/
+quantization_kit/out.old-*/
+*.engine
+*.gguf
+*.onnx
+*.safetensors
+
+# 08월 원본 번들 weight (Thor 개발자 배포본, 재생성 대상 아님)
+quantization_kit/onnx/
+quantization_kit/trt_engines/
+quantization_kit/gguf/
+
+# 환경 (command.md 1장)
+quantization_kit/convenv_*/
+quantization_kit/trt_py311/
+# llama.cpp: fetch.sh llama (upstream 389ff61d7 + tools/llama.cpp-vln.patch) 로 다시 받는다
+quantization_kit/llama.cpp/
+
+# 데이터셋에서 뽑은 것 (InternData-N1, CC BY-NC-SA: 재배포 안 함)
+quantization_kit/data/
+verify/rgbd_frames/
+
+# 실행 결과·로그 (재실행으로 생김)
+quantization_kit/verify_s2_gguf_out/
+quantization_kit/verify_trt_repro_out/
+quantization_kit/verify_s2_gguf_repro_out/
+quantization_kit/dbg/
+quantization_kit/*.log
+quantization_kit/gguf_build_log*.txt
+verify/build_out/
+verify/rgbd_out/
+verify/compare_out/
+deploy/logs/
+deploy/run/
+__pycache__/
+*.pyc

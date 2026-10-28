@@ -1,0 +1,8 @@
+# scripts/sim: 코드만 올린다
+# 실행 결과 (sim e2e · dataset 검증 · 로그, 1.1 GB) — 다시 돌리면 생김
+verify/out/
+# vln-deploy·llama.cpp 에 이미 반영한 패치 스크립트와 원본 백업 (llama.cpp 는 vln-deploy/quantization_kit/tools/llama.cpp-vln.patch)
+_staging/
+__pycache__/
+# web_viz 배경 지도 (상위 .gitignore 의 *.png 규칙을 여기서만 푼다)
+!maps/*.png
