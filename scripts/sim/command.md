@@ -5,7 +5,7 @@ InternVLA-N1(gd_vln) ↔ Isaac Sim RBQ10(sim_docker) ↔ gdm(gdm_docker)을 띄�
 - **절 번호는 report.md와 같다.** 이 문서의 §5를 실행한 결과는 report.md §5에 있다.
 - 실행 위치 표기:
   - [호스트]
-  - [gd_vln]: `internnav-gdsim` 컨테이너
+  - [gd_vln]: `internnav-habitat` 컨테이너 (`docker/run-torch2.9.0-cuda13.0-habitat-jazzy-5090.sh`)
   - [gdm]: `gdm_docker-gdm-1` 컨테이너
   - [isaacsim]: isaacsim 이미지 + `vln-deploy/quantization_kit/convenv_x86`
 - 경로는 `gd_vln/workspace/src/InternNav` 기준이다.
@@ -46,7 +46,7 @@ tmux 세션 `VLN-SIM` 하나를 6칸으로 나눠 띄운다. 칸을 닫아도 si
 
 ### 0-1. 이 한 줄이 실행하는 명령
 
-`scripts/sim/run_vln_sim.sh --gdm "<지시>"`(Mode B, ETRI 실내, 기본 구성) 기준이다. `[gd_vln]` 칸은 호스트에서 `docker exec -it -w /ws/src/InternNav internnav-gdsim bash -c '…'`로 감싸서 실행한다.
+`scripts/sim/run_vln_sim.sh --gdm "<지시>"`(Mode B, ETRI 실내, 기본 구성) 기준이다. `[gd_vln]` 칸은 호스트에서 `docker exec -it -w /ws/src/InternNav internnav-habitat bash -c '…'`로 감싸서 실행한다.
 
 | 칸 | 위치 | 실행 명령 |
 |---|---|---|
@@ -114,26 +114,26 @@ cd ~/gd_project/modules/gdm_docker && ./run.sh
 ### 1-3. gd_vln 컨테이너
 ```bash
 # [호스트] 컨테이너가 있으면
-docker start internnav-gdsim
+docker start internnav-habitat
 # [호스트] 셸
-docker exec -it -w /ws/src/InternNav internnav-gdsim bash
+docker exec -it -w /ws/src/InternNav internnav-habitat bash
 ```
-컨테이너가 없을 때(지금 컨테이너와 같은 설정):
+컨테이너가 없을 때 (이미지가 없으면 빌드한다):
 ```bash
-docker run -d --name internnav-gdsim --gpus all --runtime=nvidia --network=host --ipc=host -e PYTHONDONTWRITEBYTECODE=1 -v ~/gd_project/modules/gd_vln/workspace:/ws -v ~/gd_project/modules/gdm_docker/workspace/src/gd_ifc_pkg:/ws/ros_ws/src/gd_ifc_pkg:ro -v /media/LTDataset/checkpoints:/checkpoints:ro -v /media/LTDataset/checkpoints:/ws/src/InternNav/checkpoints:ro -v /media/TrainDataset:/ws/src/InternNav/data:ro -w /ws/src/InternNav --entrypoint bash dnwn24/internnav:torch2.9.1-cuda13.0-habitat-jazzy-5090-gdsim -c "sleep infinity"
+docker/run-torch2.9.0-cuda13.0-habitat-jazzy-5090.sh -d
 ```
 - ROS 메시지(gd_ifc_pkg) 빌드와 환경 설정: [gd_vln] `source scripts/sim/setup_ros_ws.sh`
 
 ### 1-4. isaacsim 셸 (빌드, 검증용)
 ```bash
 # [호스트] vln-deploy는 root 소유라 -u 0으로 들어간다
-docker run --rm -it -u 0 --entrypoint bash --gpus all --runtime=nvidia --network=host --ipc=host -v ~/gd_project/modules/gd_vln/workspace:/ws -v /media/LTDataset/checkpoints:/ws/src/InternNav/checkpoints:ro -v /media/TrainDataset:/ws/src/InternNav/data:ro -w /ws/src/InternNav/vln-deploy dnwn24/internnav:torch2.9.0-cuda13.0-issacsim5.1.0-ros2-jazzy-5090
+docker run --rm -it -u 0 --entrypoint bash --gpus all --runtime=nvidia --network=host --ipc=host -v ~/gd_project/modules/gd_vln/workspace:/ws -v /media/LTDataset/checkpoints:/ws/src/InternNav/checkpoints:ro -v /media/TrainDataset:/ws/src/InternNav/data:ro -w /ws/src/InternNav/vln-deploy dnwn24/internnav:torch2.7.0-cuda12.8-isaacsim5.1.0-jazzy-5090
 ```
 
 ### 1-5. 준비 확인
 ```bash
 # [호스트] 3줄이 나오면 sim이 준비된 것이다
-docker exec internnav-gdsim bash -c 'cd /ws/src/InternNav && source scripts/sim/setup_ros_ws.sh >/dev/null; ros2 topic list | grep -E "^/clock|camera/camera/color/image_raw|gdq_odom"'
+docker exec internnav-habitat bash -c 'cd /ws/src/InternNav && source scripts/sim/setup_ros_ws.sh >/dev/null; ros2 topic list | grep -E "^/clock|camera/camera/color/image_raw|gdq_odom"'
 ```
 
 ---
