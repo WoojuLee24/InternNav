@@ -1,69 +1,44 @@
-# 1. Base Image
+# gd_vln habitat 이미지 (5090): 학습 · habitat 평가(VLN-CE) · HF 기준값 · sim 연동(gdsim).
+#   빌드·실행: docker/run-torch2.9.0-cuda13.0-habitat-jazzy-5090.sh (이미지가 없으면 빌드)
+#   H200 용은 이 이미지 위에 얹는다: Dockerfile-torch2.9.0-cuda13.0-habitat-jazzy-h200
+# 코드(InternNav, habitat-lab)는 이미지에 넣지 않는다. 실행 시 $SRC_ROOT 아래에 마운트되고 .pth 로 import 된다
+# (기존 pip install -e 와 같은 효과). 패키지 버전은 requirements-habitat.txt 에 고정.
 FROM nvcr.io/nvidia/isaac/ros:noble-ros2_jazzy_d3e84470d576702a380478a513fb3fc6-amd64
 
-# 2. 시스템 패키지 설치
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    vim \
-    build-essential \
-    python3-pip \
-    curl \
+ARG SRC_ROOT=/ws/src
+ENV TRITON_OVERRIDE_ARCH=sm100 TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas MAX_JOBS=8 \
+    HABITAT_SIM_EGL_DEVICE_ID=0 ACCEPT_EULA=Y PRIVACY_CONSENT=Y
+
+# yarn apt 저장소 키가 만료돼 apt-get update 가 non-zero 로 끝난다 — 나머지 저장소는 정상이라 무시.
+#   grid-map-msgs: gdm 의 gd_ifc_pkg 의존성, tmux: scripts/sim/run_vln_sim.sh
+RUN (apt-get update || true) && apt-get install -y --no-install-recommends \
+        git vim build-essential python3-pip curl tmux ros-jazzy-grid-map-msgs \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. GPU arch 환경 설정: RTX 3080 Ti (sm_86), RTX 5090 (sm_100)     
-ENV TRITON_OVERRIDE_ARCH="sm100"
-ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
-ENV MAX_JOBS=8
-
-# 4. Constraints 파일 복사
-# 패키지 설치 단계 이전에 복사하여 가이드라인으로 사용합니다.
-COPY constraints-isaac-sim5.txt /tmp/constraints.txt
-
-# 4.5. PyTorch CUDA 13.0 사전 설치 (PyTorch 전용 인덱스 필요)
-# base image의 CUDA toolkit이 13.0이므로 cu130 wheel 사용
 RUN pip install --no-cache-dir --break-system-packages \
-    torch==2.9.0 torchvision==0.24.0 torchaudio==2.9.0 \
-    --index-url https://download.pytorch.org/whl/cu130
+        torch==2.9.0 torchvision==0.24.0 --index-url https://download.pytorch.org/whl/cu130 \
+    && pip install --no-cache-dir --break-system-packages triton==3.5.0
+COPY requirements-habitat.txt /tmp/
+# --no-deps: freeze 전체를 그대로 깔아 5090 에서 쓰던 조합과 똑같이 맞춘다 (resolver 가 버전을 바꾸지 못하게)
+#   blinker 는 debian 패키지라 pip 이 못 지운다 -> 덮어쓰기
+RUN pip install --no-cache-dir --break-system-packages --no-deps --ignore-installed blinker==1.9.0 \
+    && pip install --no-cache-dir --break-system-packages --no-deps -r /tmp/requirements-habitat.txt
+RUN pip install --no-cache-dir --break-system-packages --no-deps \
+        https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.8.3%2Bcu130torch2.9-cp312-cp312-linux_x86_64.whl
 
-# 5. 공통 Python 라이브러리 설치
-# -c 옵션을 통해 이미 설치된 torch/numpy 버전을 강제로 준수하게 합니다.
-RUN pip install --no-cache-dir --break-system-packages -c /tmp/constraints.txt \
-    --extra-index-url https://download.pytorch.org/whl/cu130 \
-    "transformers==4.51.0" \
-    "huggingface-hub>=0.34.0" \
-    "diffusers>=0.34.0" \
-    "accelerate>=1.11.0" \
-    setuptools_scm \
-    opencv-python \
-    "imageio[ffmpeg]" \
-    fastapi \
-    gym \
-    uvicorn \
-    ftfy \
-    "simpy > 1.13.3" \
-    debugpy \
-    wandb
+# habitat-sim: C++ 빌드라 이미지에 넣는다. 5090 에서 쓰던 소스와 같은 커밋 (tag stable)
+RUN git clone https://github.com/facebookresearch/habitat-sim.git /opt/habitat-sim \
+    && cd /opt/habitat-sim && git checkout acbe6f4922e68145e401e55c30f9dfea460a3f24 && git submodule update --init --recursive \
+    && PIP_BREAK_SYSTEM_PACKAGES=1 pip install . --no-deps --no-build-isolation \
+        --config-settings="cmake.args=-DHABITATPHYSICS_BUILD_EXTRA=ON" \
+    && cd / && rm -rf /opt/habitat-sim
 
-RUN pip install flask casadi --break-system-packages --ignore-installed blinker
+# 마운트된 소스를 editable 처럼 import (habitat-lab a9c8df58, InternNav)
+RUN SP=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['purelib'])") \
+    && printf "%s\n" ${SRC_ROOT}/InternNav ${SRC_ROOT}/habitat-lab/habitat-lab ${SRC_ROOT}/habitat-lab/habitat-baselines > $SP/gdvln-src.pth
 
-# 6. 코드 복사 및 내부 프로젝트 설치
-# --no-build-isolation을 사용하여 시스템의 torch/numpy 환경을 빌드 시 참조하게 합니다.
-COPY . .
-RUN pip install -e .[model] --no-build-isolation --break-system-packages -c /tmp/constraints.txt
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && apt-get install -y nodejs && npm install -g @anthropic-ai/claude-code \
+    && rm -rf /var/lib/apt/lists/*
 
-# 7. 버전 민감 패키지 (Triton & Flash Attention)
-# 최하단에 배치하여 빌드 실패 가능성을 최소화하고 캐시 효율을 높입니다.
-RUN pip install --no-cache-dir --break-system-packages triton==3.6.0 -c /tmp/constraints.txt && pip install --no-cache-dir --break-system-packages https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3%2Bcu130torch2.9-cp312-cp312-linux_x86_64.whl --no-build-isolation -c /tmp/constraints.txt
-
+WORKDIR /ws
 CMD ["bash"]
-
-# claude
-RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y nodejs \
-    && npm install -g @anthropic-ai/claude-code
-
-## 9. 작업 디렉토리 설정
-#ARG WORKDIR_PATH=/workspace/InternNav
-#WORKDIR ${WORKDIR_PATH}
-
-

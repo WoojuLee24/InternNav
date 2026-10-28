@@ -1,0 +1,22 @@
+# gd_vln habitat 이미지 (H200, Kubeflow Notebook). 5090 이미지와 패키지가 같고 아래만 다르다:
+#   Triton arch sm90 · 코드 위치 /home/irteam/git · uid 1000 = irteam · Jupyter Lab 으로 시작
+# 빌드 (먼저 5090 이미지가 있어야 한다):
+#   docker build -t dnwn24/internnav:torch2.9.0-cuda13.0-habitat-jazzy-h200 -f docker/Dockerfile-torch2.9.0-cuda13.0-habitat-jazzy-h200 docker
+# 노트북을 처음 만든 뒤 한 번: ln -s /home/irteam/data-vol1 /home/irteam/git/InternNav/data   (옛 install_habitat_h200.sh [0] 단계)
+FROM dnwn24/internnav:torch2.9.0-cuda13.0-habitat-jazzy-5090
+
+ARG NB_USER=irteam
+ARG SRC_ROOT=/home/irteam/git
+ENV TRITON_OVERRIDE_ARCH=sm90
+RUN SP=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['purelib'])") \
+    && printf "%s\n" ${SRC_ROOT}/InternNav ${SRC_ROOT}/habitat-lab/habitat-lab ${SRC_ROOT}/habitat-lab/habitat-baselines > $SP/gdvln-src.pth \
+    && pip install --no-cache-dir --break-system-packages jupyterlab jupyterlab-server \
+    && EXISTING_USER=$(getent passwd 1000 | cut -d: -f1) \
+    && usermod -l $NB_USER $EXISTING_USER && usermod -d /home/$NB_USER -m $NB_USER \
+    && (apt-get update || true) && apt-get install -y --no-install-recommends sudo && rm -rf /var/lib/apt/lists/* \
+    && echo "$NB_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+ENV NB_USER=$NB_USER HOME=/home/$NB_USER NB_PREFIX=/
+USER $NB_USER
+WORKDIR /home/$NB_USER
+EXPOSE 8888
+CMD ["sh", "-c", "jupyter lab --notebook-dir=/home/irteam --ip=0.0.0.0 --no-browser --allow-root --port=8888 --LabApp.token='' --LabApp.password='' --LabApp.allow_origin='*' --LabApp.base_url=${NB_PREFIX}"]

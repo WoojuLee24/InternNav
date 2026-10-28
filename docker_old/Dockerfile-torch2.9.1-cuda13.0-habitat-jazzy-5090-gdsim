@@ -1,0 +1,16 @@
+# gd_vln ↔ sim_docker/gdm_docker 연동용 (scripts/sim/). 기존 habitat-5090 이미지 위에 얹는다.
+#   - ros-jazzy-grid-map-msgs: gdm 의 gd_ifc_pkg(GDGGuidancePoint 등) 빌드/실행 의존성
+#   - tmux: scripts/sim/run_vln_sim.sh
+# 빌드: docker build -t dnwn24/internnav:torch2.9.1-cuda13.0-habitat-jazzy-5090-gdsim -f docker/Dockerfile-torch2.9.1-cuda13.0-habitat-jazzy-5090-gdsim docker
+FROM dnwn24/internnav:torch2.9.1-cuda13.0-habitat-jazzy-5090
+
+# yarn apt 저장소 키가 만료돼 apt-get update 가 non-zero 로 끝난다 — 나머지 저장소는 정상이라 무시.
+RUN (apt-get update || true) \
+    && apt-get install -y --no-install-recommends ros-jazzy-grid-map-msgs tmux \
+    && rm -rf /var/lib/apt/lists/*
+
+# sim_docker / gdm_docker 와 동일한 DDS 설정 (compose.yml)
+# root(이 컨테이너) ↔ uid 1000(sim/gdm) 사이는 Fast DDS SHM 으로 데이터가 안 건너온다 → UDP 강제
+ENV ROS_DOMAIN_ID=42 \
+    RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+    FASTDDS_BUILTIN_TRANSPORTS=UDPv4

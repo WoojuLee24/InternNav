@@ -10,14 +10,14 @@ S2는 Qwen2.5-VL 기반 Vision-Language 모델로, 현재 RGB 프레임·과거 
 
 ## 설치
 
-### option 1: Dockerhub
-docker pull dnwn24/internnav:torch2.9.1-cuda13.0-habitat-jazzy-5090
+### option 1: run 파일 (이미지가 없으면 빌드)
+bash docker/run-torch2.9.0-cuda13.0-habitat-jazzy-5090.sh   # 이미지가 없으면 빌드 (docker/README.md)
 
 ### option 2: build Dockerfile
-docker build -t [image_name] -f docker/Dockerfile-torch2.9.1-cuda13.0-habitat-jazzy-5090 .
+docker build -t dnwn24/internnav:torch2.9.0-cuda13.0-habitat-jazzy-5090 -f docker/Dockerfile-torch2.9.0-cuda13.0-habitat-jazzy-5090 docker
 
 ## 실행
-bash docker/run-torch2.9.1-cuda13.0-habitat-jazzy-5090
+bash docker/run-torch2.9.0-cuda13.0-habitat-jazzy-5090.sh
 
 ## 구성 및 데이터 저장 위치
 

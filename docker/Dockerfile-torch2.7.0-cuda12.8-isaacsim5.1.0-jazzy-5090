@@ -1,0 +1,38 @@
+# gd_vln isaac 이미지 (5090): Isaac Sim 5.1 + Isaac Lab + ROS2 jazzy. VLN-PE(InternUtopia) · nav3d 렌더 · 경량화(vln-deploy) · sim 스택 S1/S2.
+#   빌드·실행: docker/run-torch2.7.0-cuda12.8-isaacsim5.1.0-jazzy-5090.sh (이미지가 없으면 빌드)
+#   H200 용은 이 이미지 위에 얹는다: Dockerfile-torch2.7.0-cuda12.8-isaacsim5.1.0-jazzy-h200
+# 베이스 dnwn24/isaac-lab-ros2:latest 는 docker-isaac/ (Isaac Lab 공식 docker, Dockerfile.base + Dockerfile.ros2-jazzy) 로 만든 것.
+# 코드(InternNav, InternUtopia)는 실행 시 $SRC_ROOT 아래에 마운트되고 .pth 로 import 된다. 경량화 venv(convenv_x86)도 마운트된 작업 폴더에 있다.
+FROM dnwn24/isaac-lab-ros2:latest
+USER root
+
+ARG SRC_ROOT=/ws/src
+ENV ISAAC_PYTHON=/workspace/isaaclab/_isaac_sim/python.sh ISAAC_PIP="/workspace/isaaclab/_isaac_sim/python.sh -m pip" \
+    ACCEPT_EULA=Y PRIVACY_CONSENT=Y OMNI_KIT_ACCEPT_EULA=YES OMNI_KIT_ALLOW_ROOT=1 \
+    TRITON_OVERRIDE_ARCH=sm100 TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas MAX_JOBS=8 \
+    ROS_DISTRO=jazzy RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+#   cuda-toolkit-12-8: nvcc (llama.cpp · flash-attn 빌드), libzmq3-dev: llama-s2-runner --zmq, rviz2: scripts/sim/rviz
+RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates \
+    && wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb \
+    && dpkg -i cuda-keyring_1.1-1_all.deb && rm cuda-keyring_1.1-1_all.deb && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        cuda-toolkit-12-8 vim git git-lfs build-essential sudo tmux python3-dev python3-pip libzmq3-dev ros-jazzy-rviz2 \
+    && rm -rf /var/lib/apt/lists/*
+ENV PATH=/usr/local/cuda-12.8/bin:$PATH LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:/jazzy/lib
+
+# 시스템 python3 (ROS 노드용). 5090 이미지와 같은 조합 — opencv 4.13 은 numpy 2 를 요구하지만 1.26 으로 써 왔다
+RUN pip install --no-cache-dir --break-system-packages --no-deps numpy==1.26.4 opencv-python-headless==4.13.0.92 pyarrow==24.0.0 pyzmq==27.1.0
+
+COPY requirements-isaac.txt /tmp/
+# --no-deps: freeze 전체를 그대로 깔아 5090 에서 쓰던 조합과 똑같이 맞춘다
+RUN $ISAAC_PIP install --no-cache-dir --no-deps -r /tmp/requirements-isaac.txt
+RUN $ISAAC_PIP install --no-cache-dir --no-deps \
+        https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.8.3+cu128torch2.7-cp311-cp311-linux_x86_64.whl
+
+# 마운트된 소스를 editable 처럼 import (InternUtopia, InternNav)
+RUN SP=$($ISAAC_PYTHON -c "import sysconfig; print(sysconfig.get_paths()['purelib'])") \
+    && printf "%s\n" ${SRC_ROOT}/InternUtopia ${SRC_ROOT}/InternNav > $SP/gdvln-src.pth
+
+WORKDIR /ws
+CMD ["bash"]

@@ -1,0 +1,43 @@
+#!/bin/bash
+# gd_vln 컨테이너 (sim 연동용). sim_docker(run_rbq10_etri_sim.sh) / gdm_docker(run.sh) 와 같은 host network,
+# ROS_DOMAIN_ID=42 로 붙는다. 이미 떠 있으면 셸만 하나 더 연다.
+#   /checkpoints, InternNav/checkpoints ← /media/LTDataset/checkpoints (모델 + S1 depth_anything_v2 가중치는 상대경로 checkpoints/ 로 로드됨)
+#   /ws/ros_ws/src/gd_ifc_pkg ← gdm_docker 의 메시지 패키지 (scripts/sim/setup_ros_ws.sh 가 빌드)
+set -e
+IMAGE=dnwn24/internnav:torch2.9.1-cuda13.0-habitat-jazzy-5090-gdsim
+NAME=internnav-gdsim
+HERE="$(cd "$(dirname "$0")" && pwd)"
+GDM_SRC=/home/universe/gd_project/modules/gdm_docker/workspace/src
+
+if docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
+    exec docker exec -it "$NAME" bash
+fi
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    docker build -t "$IMAGE" -f "$HERE/Dockerfile-torch2.9.1-cuda13.0-habitat-jazzy-5090-gdsim" "$HERE"
+fi
+
+xhost +local:root >/dev/null 2>&1 || true
+
+docker run --name "$NAME" \
+    --shm-size 32g \
+    --entrypoint bash \
+    -it --rm \
+    --network=host \
+    --ipc=host \
+    --gpus all \
+    --runtime=nvidia \
+    -e DISPLAY="$DISPLAY" \
+    -e ROS_DOMAIN_ID=42 \
+    -e RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+    -e FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
+    -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+    -v $HOME/.Xauthority:/root/.Xauthority \
+    -v /home/universe/gd_project/modules/gd_vln/workspace:/ws:rw \
+    -v /home/universe/gd_project/modules/gd_vln/workspace:/gd_vln:rw \
+    -v /home/universe/data:/datasets:ro \
+    -v /media/TrainDataset:/ws/src/InternNav/data:rw \
+    -v /media/LTDataset/checkpoints:/checkpoints:ro \
+    -v /media/LTDataset/checkpoints:/ws/src/InternNav/checkpoints:ro \
+    -v $GDM_SRC/gd_ifc_pkg:/ws/ros_ws/src/gd_ifc_pkg:ro \
+    -w /ws/src/InternNav \
+    "$IMAGE"

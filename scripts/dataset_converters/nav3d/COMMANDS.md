@@ -14,7 +14,7 @@
 | 이름 | 이미지 | python | 쓰는 단계 |
 |---|---|---|---|
 | habitat | `dnwn24/internnav:torch2.9.0-cuda13.0-habitat-jazzy-5090` | `/usr/bin/python` | Isaac 이 아닌 단계 전부 (vlnce 51 렌더 포함) |
-| isaac | `dnwn24/internnav:torch2.9.0-cuda13.0-issacsim5.1.0-ros2-jazzy-5090` | `/workspace/isaaclab/_isaac_sim/python.sh` | noeun 걷기 · 렌더, vlnpe 렌더 · H1 걷기 |
+| isaac | `dnwn24/internnav:torch2.7.0-cuda12.8-isaacsim5.1.0-jazzy-5090` | `/workspace/isaaclab/_isaac_sim/python.sh` | noeun 걷기 · 렌더, vlnpe 렌더 · H1 걷기 |
 
 - habitat_sim 은 torch2.9.**0** habitat 이미지에만 있다 (torch2.9.1 · gdsim 이미지에는 없다).
 - isaac 이미지를 새로 띄우면 `scikit-image` 를 먼저 설치한다: `/workspace/isaaclab/_isaac_sim/python.sh -m pip install scikit-image`

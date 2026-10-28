@@ -22,7 +22,7 @@
 | V4 연결 | 층들이 이어지나, 연결부 몇 개·계단인지 | 보고 |
 | V5 층간 경로 | 서로 다른 층의 무작위 두 점(같은 섬) `find_path` | 성공 100 %, 수평으로 navmesh 위 ≥ 99 %. mesh 3D 여유는 보고 |
 
-사용 (internnav-habitat-navmesh 컨테이너, 저장소 루트):
+사용 (internnav-habitat 컨테이너, 저장소 루트):
     /usr/bin/python scripts/dataset_converters/nav3d/noeun/12_build_navmesh.py --scene noeun_station
 """
 

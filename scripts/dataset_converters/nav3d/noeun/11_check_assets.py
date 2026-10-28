@@ -37,7 +37,7 @@ r"""00 — 씬 mesh(충돌·depth 용)와 3DGS(RGB 용)가 **얼마나 잘 겹�
 | G0c | mesh ↔ GS 무게중심 거리 | 보고 | GS 가 mesh 밖까지 퍼져 판정에 못 씀 |
 | B3 | GS 바닥 높이 − mesh 바닥 높이 | \|중앙\| ≤ 0.03 m · p95 \|차\| ≤ 0.10 m | RGB 의 바닥과 로봇 발(충돌)이 같은 높이여야 |
 
-사용 (internnav-habitat-navmesh 컨테이너, 저장소 루트):
+사용 (internnav-habitat 컨테이너, 저장소 루트):
     /usr/bin/python scripts/dataset_converters/nav3d/noeun/11_check_assets.py --scene noeun_station
 """
 

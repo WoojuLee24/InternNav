@@ -55,7 +55,7 @@ python3 scripts/dataset_converters/nav3d/run_pipeline.py noeun --stage 3,4 --ove
 | `--vlm_server auto \| external` | 라벨 단계 VLM 서버 | auto = 안 떠 있으면 띄우고 끝나면 내림 (이미 떠 있던 서버는 그대로) |
 
 컨테이너 (모두 저장소 루트에서): **habitat** = `dnwn24/internnav:torch2.9.0-cuda13.0-habitat-jazzy-5090` 의 `/usr/bin/python`
-(habitat-sim 0.3.3 — torch2.9.1 이미지에는 없다), **isaac** = `dnwn24/internnav:torch2.9.0-cuda13.0-issacsim5.1.0-ros2-jazzy-5090` 의
+(habitat-sim 0.3.3 포함, `docker/run-torch2.9.0-cuda13.0-habitat-jazzy-5090.sh`), **isaac** = `dnwn24/internnav:torch2.7.0-cuda12.8-isaacsim5.1.0-jazzy-5090` 의
 `/workspace/isaaclab/_isaac_sim/python.sh` (scikit-image 필요). 실행기는 다른 컨테이너 단계에 닿으면 멈추고 이어 돌릴 `--from` 명령을 출력한다.
 
 ## 데이터셋별 단계
