@@ -64,3 +64,4 @@
 - [nav3d 05a·05b vln_ce habitat 렌더](261015_nav3d_05_vlnce_render_result.md) — GT 재렌더 4/5(depth 구멍: 릴리스는 채워져 있음), 생성 경로 렌더 5/5, Isaac 은 참고용
 - [nav3d 04·06·06b·06v 노은역 렌더 + vln_pe 검증](261016_nav3d_06_noeun_render_result.md) — navmesh z 가 mesh 바닥과 어긋나 카메라 높이 오차, mesh z 로 고침(06v V2 PASS)
 - [nav3d 07 labeling smoke](261016_nav3d_07_labeling_smoke_result.md) — Qwen3-VL-8B 로컬, 생성 label 이 GT label 만큼 사람 문장에 가까움, 단 곡선 경로의 경로 단어 일치 36 %
+- [노은역 b1·'후' 라벨](261028_noeun_label_b1_post_result.md) — 노은역 rbq v6·hunav_v1 (train+val_seen) 에 rig 60cm_15deg + 구역 noeun-v1 로 b1·post 라벨, 데이터셋 8 개. no_landmark 거짓 경고 20 % (집 물건 목록) → 고온 재시도 문장

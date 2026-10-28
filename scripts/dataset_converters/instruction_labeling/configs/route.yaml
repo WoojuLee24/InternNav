@@ -83,7 +83,36 @@ rooms:                      # route.rooms=<key>: MP3D .house 방 정보로 "지�
       C: classroom
       D: dining booth
       S: spa
-stop_cue:                   # route.stop_cue=<key>: 정지 단서 (label/stop_cues.py). none = b0 (VLM 이 도착 이미지에서 스스로 고름)
+  noeun-v1:                 # 노은역 (.house 없음): house-v2 와 같은 규칙, 방 대신 구역 = 경로 프레임 위치로 나눈 층·계단·층 안 구역 (nav3d/noeun/61_build_zones.py)
+    zones_file: scripts/dataset_converters/nav3d/noeun/zones/noeun_zones_v1.json   # 점마다 가장 가까운 구역 점의 구역 (nav3d/noeun/noeun_rooms.py)
+    max_dist_m: 3.0         # 가장 가까운 구역 점이 이보다 멀면 구역 없음
+    step_m: 0.25
+    min_visit_m: 1.5
+    min_visit_by_label: {C1: 1.0, C2: 1.0, C3: 1.0}   # 계단은 짧아도 말한다 (house-v2 의 s: 1.0 과 같음)
+    form: verbs
+    joiner: ", "
+    leave: "leave the {room}"
+    enter: "enter the {room}"
+    line: "Area changes along the path (from station layout): {changes}. You stop in the {goal}."
+    single_line: "The whole path stays in the {goal} (from station layout)."
+    names:                  # 구역 -> 이름 (2026-10-28 사용자 확인, https://claude.ai/artifact/XcBq1oUwbaG671KHhKiLh7)
+      B2-A: platform
+      B2-B: platform
+      B2-C: platform
+      B2-D: end of the platform
+      C1: stairs
+      C2: stairs
+      C3: exit stairs
+      B1-A: exit passage
+      B1-B: concourse
+      B1-C: concourse
+      B1-D: concourse
+      B1-E: ticket gates
+      B1-F: paid area
+      G-A: street
+      G-B: exit
+      G-C: exit
+stop_cue:                  # route.stop_cue=<key>: 정지 단서 (label/stop_cues.py). none = b0 (VLM 이 도착 이미지에서 스스로 고름)
   A-grounded-v1:            # 정지 지점 근처의, 마지막 프레임에 보이는 annotation 물체 하나를 경로 단어 뒤에 사실로 넣는다
     kind: A
     max_dist_m: 2.0         # 정지 지점(수평)과 물체 bbox 사이 거리
