@@ -36,6 +36,9 @@
 ## 사람 보임 버전 (visible, 사용자 요청 2026-10-29)
 - 65_wait_visibility.py: 사람 궤적(raw_data/r2r/humans_noeun_v3.npz, 0.05 s)을 대기 프레임 카메라에 투영 (발·허리·머리, 6 m, 같은 층; 가림은 모름).
   train 81 중 보임 39 (지난 5 프레임에만 보임 11), val 16 중 9. 12 장 눈 대조에서 판정은 모두 맞음, 단 투영 점 위치는 실제보다 아래로 어긋남 (가까운 사람).
+- **기준 v2 (사용자 결정)**: 보임 = 대기 프레임 t 또는 직전 t-1 에 사람 (S2 지난 프레임 linspace(0, t-1, 8) 중 항상 들어가는 최근 프레임은 t-1 뿐).
+  프레임 간격 = 행동 1 번 = 0.45~0.6 s (info.json 의 fps 30 은 메타값). 화면 아래 200 px 여유 · 10 m (6 m 는 화면에 보이는 먼 사람을 놓침).
+  근거리 규칙(1.5 m 안 + 앞 ±60°)은 시험했지만 카메라 아래·옆 사람까지 보임이 돼 끔. 최종 자동: train 50/81 (t 45 + t-1 만 5), val 14/16. 알려진 놓침: train ep182.
 - 검토 페이지 https://claude.ai/artifact/3piT2wsqNsAQdTkmGZUQFb -> 결과 json -> 66_wait_keep.py -> `nav3d/noeun/wait/wait_keep_v1.json`.
 - 로더 `wait_mode=visible` + `wait_keep`: 목록의 대기 프레임만 WAIT, 나머지 대기 프레임은 exclude 처럼 뺀다 (자동 판정 그대로면 hunav WAIT 585 · 제외 126).
 - 셀 4 개 추가 `s1.noeun-{hunav,both}-{b1,post}_wait-visible.py` (총 14). 큐는 wait_keep_v1.json 이 push 될 때까지 기다린다.

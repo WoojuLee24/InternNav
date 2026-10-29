@@ -5,6 +5,8 @@
    "episode": 2,
    "frame": 21,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": true,
    "n_visible": 0,
    "min_dist_m": null,
@@ -15,6 +17,8 @@
    "episode": 6,
    "frame": 191,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -25,6 +29,8 @@
    "episode": 8,
    "frame": 68,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -34,17 +40,34 @@
    "split": "train",
    "episode": 8,
    "frame": 330,
-   "visible": false,
-   "hist_visible": false,
-   "n_visible": 0,
-   "min_dist_m": null,
-   "points": []
+   "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
+   "hist_visible": true,
+   "n_visible": 1,
+   "min_dist_m": 7.43,
+   "points": [
+    [
+     123.4,
+     148.2
+    ],
+    [
+     118.1,
+     90.1
+    ],
+    [
+     113.1,
+     36.3
+    ]
+   ]
   },
   {
    "split": "train",
    "episode": 9,
    "frame": 24,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -55,6 +78,8 @@
    "episode": 9,
    "frame": 25,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -65,7 +90,9 @@
    "episode": 12,
    "frame": 357,
    "visible": false,
-   "hist_visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
+   "hist_visible": true,
    "n_visible": 0,
    "min_dist_m": null,
    "points": []
@@ -75,7 +102,9 @@
    "episode": 12,
    "frame": 358,
    "visible": true,
-   "hist_visible": false,
+   "visible_cur": true,
+   "visible_prev": false,
+   "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 0.95,
    "points": [
@@ -94,6 +123,8 @@
    "episode": 14,
    "frame": 193,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 0.66,
@@ -109,6 +140,8 @@
    "episode": 19,
    "frame": 38,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 0.92,
@@ -124,6 +157,8 @@
    "episode": 20,
    "frame": 111,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -133,24 +168,53 @@
    "split": "train",
    "episode": 21,
    "frame": 38,
-   "visible": false,
+   "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
-   "n_visible": 0,
-   "min_dist_m": null,
-   "points": []
+   "n_visible": 1,
+   "min_dist_m": 6.58,
+   "points": [
+    [
+     478.2,
+     143.7
+    ],
+    [
+     484.8,
+     79.2
+    ],
+    [
+     491.0,
+     18.7
+    ]
+   ]
   },
   {
    "split": "train",
    "episode": 27,
    "frame": 31,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
-   "n_visible": 1,
+   "n_visible": 2,
    "min_dist_m": 0.9,
    "points": [
     [
      495.8,
      393.2
+    ],
+    [
+     294.6,
+     136.5
+    ],
+    [
+     294.3,
+     90.1
+    ],
+    [
+     294.0,
+     47.4
     ]
    ]
   },
@@ -159,6 +223,8 @@
    "episode": 29,
    "frame": 276,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.05,
@@ -174,6 +240,8 @@
    "episode": 29,
    "frame": 277,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 0.92,
@@ -189,6 +257,8 @@
    "episode": 34,
    "frame": 261,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": true,
    "n_visible": 0,
    "min_dist_m": null,
@@ -199,6 +269,8 @@
    "episode": 34,
    "frame": 262,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": true,
    "n_visible": 0,
    "min_dist_m": null,
@@ -209,6 +281,8 @@
    "episode": 36,
    "frame": 28,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 3.19,
@@ -228,6 +302,8 @@
    "episode": 38,
    "frame": 25,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -238,6 +314,8 @@
    "episode": 38,
    "frame": 26,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -248,6 +326,8 @@
    "episode": 46,
    "frame": 260,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -257,17 +337,42 @@
    "split": "train",
    "episode": 48,
    "frame": 16,
-   "visible": false,
+   "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
-   "n_visible": 0,
-   "min_dist_m": null,
-   "points": []
+   "n_visible": 2,
+   "min_dist_m": 6.08,
+   "points": [
+    [
+     359.4,
+     150.5
+    ],
+    [
+     360.1,
+     107.9
+    ],
+    [
+     360.7,
+     69.0
+    ],
+    [
+     621.1,
+     173.7
+    ],
+    [
+     633.4,
+     97.0
+    ]
+   ]
   },
   {
    "split": "train",
    "episode": 50,
    "frame": 12,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 3,
    "min_dist_m": 0.85,
@@ -299,6 +404,8 @@
    "episode": 50,
    "frame": 13,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 3,
    "min_dist_m": 0.68,
@@ -330,6 +437,8 @@
    "episode": 55,
    "frame": 58,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -340,6 +449,8 @@
    "episode": 55,
    "frame": 66,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.9,
@@ -359,6 +470,8 @@
    "episode": 62,
    "frame": 28,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 1,
    "min_dist_m": 4.55,
@@ -378,6 +491,8 @@
    "episode": 65,
    "frame": 29,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -388,6 +503,8 @@
    "episode": 67,
    "frame": 35,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -398,10 +515,24 @@
    "episode": 71,
    "frame": 19,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
-   "n_visible": 2,
+   "n_visible": 3,
    "min_dist_m": 1.05,
    "points": [
+    [
+     254.7,
+     131.2
+    ],
+    [
+     252.7,
+     82.9
+    ],
+    [
+     250.9,
+     38.3
+    ],
     [
      216.6,
      169.4
@@ -421,6 +552,8 @@
    "episode": 73,
    "frame": 109,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -431,6 +564,8 @@
    "episode": 73,
    "frame": 110,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -441,6 +576,8 @@
    "episode": 73,
    "frame": 111,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -451,6 +588,8 @@
    "episode": 75,
    "frame": 41,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 4.01,
@@ -469,7 +608,9 @@
    "split": "train",
    "episode": 76,
    "frame": 66,
-   "visible": false,
+   "visible": true,
+   "visible_cur": false,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 0,
    "min_dist_m": null,
@@ -480,6 +621,8 @@
    "episode": 76,
    "frame": 67,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": false,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.05,
@@ -495,6 +638,8 @@
    "episode": 77,
    "frame": 29,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.79,
@@ -514,10 +659,24 @@
    "episode": 77,
    "frame": 30,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
-   "n_visible": 1,
+   "n_visible": 2,
    "min_dist_m": 1.39,
    "points": [
+    [
+     609.2,
+     132.4
+    ],
+    [
+     619.3,
+     79.7
+    ],
+    [
+     628.6,
+     30.6
+    ],
     [
      552.1,
      299.7
@@ -528,7 +687,9 @@
    "split": "train",
    "episode": 79,
    "frame": 16,
-   "visible": false,
+   "visible": true,
+   "visible_cur": false,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 0,
    "min_dist_m": null,
@@ -539,6 +700,8 @@
    "episode": 83,
    "frame": 72,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.81,
@@ -557,17 +720,26 @@
    "split": "train",
    "episode": 85,
    "frame": 14,
-   "visible": false,
+   "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
-   "n_visible": 0,
-   "min_dist_m": null,
-   "points": []
+   "n_visible": 1,
+   "min_dist_m": 0.48,
+   "points": [
+    [
+     230.1,
+     604.9
+    ]
+   ]
   },
   {
    "split": "train",
    "episode": 97,
    "frame": 158,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 2,
    "min_dist_m": 1.06,
@@ -591,6 +763,8 @@
    "episode": 111,
    "frame": 56,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.91,
@@ -610,6 +784,8 @@
    "episode": 111,
    "frame": 57,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.46,
@@ -628,7 +804,9 @@
    "split": "train",
    "episode": 111,
    "frame": 58,
-   "visible": false,
+   "visible": true,
+   "visible_cur": false,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 0,
    "min_dist_m": null,
@@ -639,6 +817,8 @@
    "episode": 112,
    "frame": 75,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -649,6 +829,8 @@
    "episode": 122,
    "frame": 53,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.52,
@@ -668,6 +850,8 @@
    "episode": 122,
    "frame": 54,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.09,
@@ -683,6 +867,8 @@
    "episode": 122,
    "frame": 55,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.52,
@@ -698,6 +884,8 @@
    "episode": 122,
    "frame": 303,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.33,
@@ -717,6 +905,8 @@
    "episode": 123,
    "frame": 99,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -727,6 +917,8 @@
    "episode": 125,
    "frame": 17,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.25,
@@ -746,6 +938,8 @@
    "episode": 125,
    "frame": 18,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.14,
@@ -764,27 +958,59 @@
    "split": "train",
    "episode": 127,
    "frame": 8,
-   "visible": false,
-   "hist_visible": false,
-   "n_visible": 0,
-   "min_dist_m": null,
-   "points": []
+   "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
+   "hist_visible": true,
+   "n_visible": 1,
+   "min_dist_m": 7.65,
+   "points": [
+    [
+     404.5,
+     175.1
+    ],
+    [
+     407.4,
+     123.5
+    ],
+    [
+     410.1,
+     76.2
+    ]
+   ]
   },
   {
    "split": "train",
    "episode": 127,
    "frame": 9,
-   "visible": false,
-   "hist_visible": false,
-   "n_visible": 0,
-   "min_dist_m": null,
-   "points": []
+   "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
+   "hist_visible": true,
+   "n_visible": 1,
+   "min_dist_m": 7.21,
+   "points": [
+    [
+     404.2,
+     173.6
+    ],
+    [
+     408.6,
+     118.9
+    ],
+    [
+     412.6,
+     68.4
+    ]
+   ]
   },
   {
    "split": "train",
    "episode": 129,
    "frame": 292,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 1,
    "min_dist_m": 4.49,
@@ -804,6 +1030,8 @@
    "episode": 137,
    "frame": 33,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 3.23,
@@ -823,6 +1051,8 @@
    "episode": 138,
    "frame": 259,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 4.38,
@@ -842,6 +1072,8 @@
    "episode": 138,
    "frame": 260,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 4.99,
@@ -865,6 +1097,8 @@
    "episode": 139,
    "frame": 28,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.35,
@@ -884,10 +1118,24 @@
    "episode": 141,
    "frame": 235,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
-   "n_visible": 1,
+   "n_visible": 2,
    "min_dist_m": 1.16,
    "points": [
+    [
+     370.8,
+     152.4
+    ],
+    [
+     372.3,
+     105.3
+    ],
+    [
+     373.6,
+     62.3
+    ],
     [
      453.2,
      359.8
@@ -903,6 +1151,8 @@
    "episode": 141,
    "frame": 256,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 0.89,
@@ -917,7 +1167,9 @@
    "split": "train",
    "episode": 141,
    "frame": 257,
-   "visible": false,
+   "visible": true,
+   "visible_cur": false,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 0,
    "min_dist_m": null,
@@ -928,6 +1180,8 @@
    "episode": 149,
    "frame": 12,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 2,
    "min_dist_m": 1.29,
@@ -951,6 +1205,8 @@
    "episode": 149,
    "frame": 22,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -961,6 +1217,8 @@
    "episode": 149,
    "frame": 23,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -971,6 +1229,8 @@
    "episode": 164,
    "frame": 39,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -981,6 +1241,8 @@
    "episode": 164,
    "frame": 40,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -991,6 +1253,8 @@
    "episode": 164,
    "frame": 41,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 1,
    "min_dist_m": 0.61,
@@ -1006,6 +1270,8 @@
    "episode": 167,
    "frame": 14,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -1016,6 +1282,8 @@
    "episode": 167,
    "frame": 15,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -1026,6 +1294,8 @@
    "episode": 180,
    "frame": 148,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -1036,6 +1306,8 @@
    "episode": 180,
    "frame": 149,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -1046,6 +1318,8 @@
    "episode": 182,
    "frame": 53,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -1056,6 +1330,8 @@
    "episode": 182,
    "frame": 54,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -1066,6 +1342,8 @@
    "episode": 182,
    "frame": 100,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.13,
@@ -1081,6 +1359,8 @@
    "episode": 182,
    "frame": 101,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 0.95,
@@ -1095,7 +1375,9 @@
    "split": "train",
    "episode": 182,
    "frame": 102,
-   "visible": false,
+   "visible": true,
+   "visible_cur": false,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 0,
    "min_dist_m": null,
@@ -1106,6 +1388,8 @@
    "episode": 183,
    "frame": 26,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.46,
@@ -1125,6 +1409,8 @@
    "episode": 183,
    "frame": 76,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 2,
    "min_dist_m": 0.99,
@@ -1148,6 +1434,8 @@
    "episode": 184,
    "frame": 85,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -1158,6 +1446,8 @@
    "episode": 3,
    "frame": 243,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 2.38,
@@ -1177,6 +1467,8 @@
    "episode": 3,
    "frame": 244,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 2.91,
@@ -1196,6 +1488,8 @@
    "episode": 3,
    "frame": 245,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 3.47,
@@ -1215,6 +1509,8 @@
    "episode": 6,
    "frame": 169,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 4.68,
@@ -1234,6 +1530,8 @@
    "episode": 8,
    "frame": 353,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 1.07,
@@ -1249,6 +1547,8 @@
    "episode": 8,
    "frame": 354,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 0.93,
@@ -1264,6 +1564,8 @@
    "episode": 12,
    "frame": 103,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": false,
    "n_visible": 0,
    "min_dist_m": null,
@@ -1273,17 +1575,34 @@
    "split": "val_seen",
    "episode": 12,
    "frame": 365,
-   "visible": false,
-   "hist_visible": false,
-   "n_visible": 0,
-   "min_dist_m": null,
-   "points": []
+   "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
+   "hist_visible": true,
+   "n_visible": 1,
+   "min_dist_m": 6.83,
+   "points": [
+    [
+     149.9,
+     154.7
+    ],
+    [
+     146.1,
+     93.0
+    ],
+    [
+     142.6,
+     35.8
+    ]
+   ]
   },
   {
    "split": "val_seen",
    "episode": 24,
    "frame": 106,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
    "n_visible": 1,
    "min_dist_m": 0.77,
@@ -1298,24 +1617,57 @@
    "split": "val_seen",
    "episode": 24,
    "frame": 107,
-   "visible": false,
+   "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
-   "n_visible": 0,
-   "min_dist_m": null,
-   "points": []
+   "n_visible": 1,
+   "min_dist_m": 0.68,
+   "points": [
+    [
+     124.9,
+     506.7
+    ]
+   ]
   },
   {
    "split": "val_seen",
    "episode": 30,
    "frame": 77,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
-   "n_visible": 1,
+   "n_visible": 3,
    "min_dist_m": 1.18,
    "points": [
     [
      262.1,
      318.1
+    ],
+    [
+     329.8,
+     137.0
+    ],
+    [
+     329.6,
+     80.8
+    ],
+    [
+     329.4,
+     28.5
+    ],
+    [
+     206.5,
+     127.3
+    ],
+    [
+     202.9,
+     80.1
+    ],
+    [
+     199.5,
+     36.7
     ]
    ]
   },
@@ -1324,13 +1676,39 @@
    "episode": 30,
    "frame": 78,
    "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
-   "n_visible": 1,
+   "n_visible": 3,
    "min_dist_m": 0.93,
    "points": [
     [
      397.1,
      394.7
+    ],
+    [
+     345.1,
+     148.5
+    ],
+    [
+     345.3,
+     97.4
+    ],
+    [
+     345.5,
+     50.3
+    ],
+    [
+     213.7,
+     139.5
+    ],
+    [
+     210.9,
+     96.8
+    ],
+    [
+     208.3,
+     57.7
     ]
    ]
   },
@@ -1338,37 +1716,132 @@
    "split": "val_seen",
    "episode": 30,
    "frame": 79,
-   "visible": false,
+   "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
-   "n_visible": 0,
-   "min_dist_m": null,
-   "points": []
+   "n_visible": 1,
+   "min_dist_m": 8.33,
+   "points": [
+    [
+     356.5,
+     133.9
+    ],
+    [
+     357.2,
+     85.4
+    ],
+    [
+     357.9,
+     40.6
+    ]
+   ]
   },
   {
    "split": "val_seen",
    "episode": 32,
    "frame": 39,
-   "visible": false,
+   "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
-   "n_visible": 0,
-   "min_dist_m": null,
-   "points": []
+   "n_visible": 3,
+   "min_dist_m": 6.39,
+   "points": [
+    [
+     381.1,
+     137.1
+    ],
+    [
+     384.2,
+     91.6
+    ],
+    [
+     387.2,
+     49.7
+    ],
+    [
+     397.3,
+     152.2
+    ],
+    [
+     402.4,
+     89.1
+    ],
+    [
+     407.2,
+     29.7
+    ],
+    [
+     414.0,
+     139.1
+    ],
+    [
+     417.8,
+     97.1
+    ],
+    [
+     421.3,
+     58.4
+    ]
+   ]
   },
   {
    "split": "val_seen",
    "episode": 32,
    "frame": 40,
-   "visible": false,
+   "visible": true,
+   "visible_cur": true,
+   "visible_prev": true,
    "hist_visible": true,
-   "n_visible": 0,
-   "min_dist_m": null,
-   "points": []
+   "n_visible": 3,
+   "min_dist_m": 6.8,
+   "points": [
+    [
+     368.8,
+     122.2
+    ],
+    [
+     370.7,
+     73.5
+    ],
+    [
+     372.5,
+     28.3
+    ],
+    [
+     412.0,
+     133.1
+    ],
+    [
+     416.2,
+     72.3
+    ],
+    [
+     420.2,
+     14.9
+    ],
+    [
+     400.3,
+     118.8
+    ],
+    [
+     403.1,
+     74.3
+    ],
+    [
+     405.6,
+     33.0
+    ]
+   ]
   },
   {
    "split": "val_seen",
    "episode": 36,
    "frame": 47,
    "visible": false,
+   "visible_cur": false,
+   "visible_prev": false,
    "hist_visible": true,
    "n_visible": 0,
    "min_dist_m": null,
@@ -1378,19 +1851,26 @@
  "summary": {
   "train": {
    "wait_frames": 81,
-   "visible": 39,
-   "hist_only": 11
+   "visible": 50,
+   "visible_cur": 45,
+   "prev_only": 5
   },
   "val_seen": {
    "wait_frames": 16,
-   "visible": 9,
-   "hist_only": 5
+   "visible": 14,
+   "visible_cur": 14,
+   "prev_only": 0
   }
  },
  "params": {
-  "max_dist_m": 6.0,
+  "max_dist_m": 10.0,
+  "v_margin": 200,
+  "near_m": 0.0,
+  "near_deg": 60.0,
+  "prev": 1,
   "hist": 5,
   "hfov": 68.7,
+  "rule": "visible = \ud604\uc7ac \ub610\ub294 \uc9c1\uc804 prev \ud504\ub808\uc784\uc5d0 \uc0ac\ub78c\uc774 \ud654\uba74 \uc548",
   "body_z": [
    0.1,
    0.9,
