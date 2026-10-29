@@ -5,7 +5,7 @@
   2. ``vln_datasets`` : R2R 카메라 4 종 -> ``r2r_60cm_15_15`` 하나 (노은역은 60cm_15deg 만 렌더). sampling 100 %.
   3. ``train_label`` = ``noeun-<paths>-<label>`` -> ``<mini>/vln_ce_noeun-<paths>-<label>`` (nav3d/noeun/64_build_train.py).
   4. ``wait_mode`` : wait | exclude | visible (default_config.Params.wait_mode; internvla_n1_wait_trainer.py).
-     visible = 사진에 사람이 보이는 대기 프레임만 WAIT (``WAIT_KEEP`` = nav3d/noeun/66_wait_keep.py 출력).
+     visible = 사람과 충돌 가능한 대기 프레임만 WAIT (``WAIT_KEEP`` = nav3d/noeun/66_wait_keep.py 출력, 자동 판정 + 사람 검토).
   5. 평가 없음: 노은역 평가는 다른 노드(Isaac). 셀은 ``--no-eval`` 로 돌린다 (eval_cfg 는 runner 가 import 만 한다).
 1 epoch · 하이퍼파라미터는 그대로 (relabel_half stage1).
 """

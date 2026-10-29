@@ -40,6 +40,8 @@
   프레임 간격 = 행동 1 번 = 0.45~0.6 s (info.json 의 fps 30 은 메타값). 화면 아래 200 px 여유 · 10 m (6 m 는 화면에 보이는 먼 사람을 놓침).
   근거리 규칙(1.5 m 안 + 앞 ±60°)은 시험했지만 카메라 아래·옆 사람까지 보임이 돼 끔. 최종 자동: train 50/81 (t 45 + t-1 만 5), val 14/16. 알려진 놓침: train ep182.
 - 검토 페이지 https://claude.ai/artifact/3piT2wsqNsAQdTkmGZUQFb -> 결과 json -> 66_wait_keep.py -> `nav3d/noeun/wait/wait_keep_v1.json`.
+- **최종 기준 (사용자 2026-10-29): 보임/안 보임이 아니라 사람과 충돌 가능/불가능.** 보여도 부딪힐 가능성이 없으면 제외, 일부만 보여도 가능성이 있으면 WAIT.
+  검토로 고친 것 14 (`nav3d/noeun/wait/wait_review_v1.json`) -> `wait_keep_v1.json`: train 52/81 · val 12/16 (합 64).
 - 로더 `wait_mode=visible` + `wait_keep`: 목록의 대기 프레임만 WAIT, 나머지 대기 프레임은 exclude 처럼 뺀다 (자동 판정 그대로면 hunav WAIT 585 · 제외 126).
 - 셀 4 개 추가 `s1.noeun-{hunav,both}-{b1,post}_wait-visible.py` (총 14). 큐는 wait_keep_v1.json 이 push 될 때까지 기다린다.
 

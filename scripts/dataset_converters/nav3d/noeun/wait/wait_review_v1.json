@@ -1,0 +1,21 @@
+{
+ "version": "wait_visibility_v1_review",
+ "n": 97,
+ "visible": 64,
+ "changed": [
+  {"key": "train/8/330", "auto": true, "human": false},
+  {"key": "train/12/357", "auto": false, "human": true},
+  {"key": "train/34/261", "auto": false, "human": true},
+  {"key": "train/34/262", "auto": false, "human": true},
+  {"key": "train/73/111", "auto": false, "human": true},
+  {"key": "train/76/66", "auto": true, "human": false},
+  {"key": "train/127/8", "auto": true, "human": false},
+  {"key": "train/129/292", "auto": true, "human": false},
+  {"key": "train/138/259", "auto": true, "human": false},
+  {"key": "train/164/40", "auto": false, "human": true},
+  {"key": "train/167/15", "auto": false, "human": true},
+  {"key": "train/184/85", "auto": false, "human": true},
+  {"key": "val_seen/32/39", "auto": true, "human": false},
+  {"key": "val_seen/32/40", "auto": true, "human": false}
+ ]
+}

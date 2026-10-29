@@ -9,7 +9,7 @@
 wait_mode
   wait    : 대기 프레임마다 정답 텍스트 `WAIT` 인 샘플을 wait_weight 번 넣는다 (STOP 의 stop_weight 와 같은 방식).
   exclude : WAIT 샘플을 넣지 않는다 (같은 데이터에서 WAIT 만 없는 대조군).
-  visible : wait 와 같되 `wait_keep` 파일에 있는 대기 프레임(사진에 사람이 보이는 것)만 WAIT, 나머지 대기 프레임은 exclude 처럼 뺀다.
+  visible : wait 와 같되 `wait_keep` 파일에 있는 대기 프레임(사람과 충돌 가능 — 사진 근거가 있는 것)만 WAIT, 나머지 대기 프레임은 exclude 처럼 뺀다.
             wait_keep = {"keep": [[scene, episode_index, frame], ...]} (scene = 형제 번호를 뺀 이름, 예 "hunav"; nav3d/noeun/66_wait_keep.py)
   둘 다   : 시작 프레임이 대기 프레임인 pixel goal / turn 샘플은 뺀다 (사람 앞에서 "저기로 가" 를 배우지 않게),
             turn 목록은 4 에서 자른다 (부모 `idx2actions` 에 4 가 없어 KeyError).

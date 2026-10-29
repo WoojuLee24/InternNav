@@ -3,7 +3,7 @@
 
   본실험 : noeun-{v6,hunav,both}-{b1,post} x wait          (6)
   대조군 : noeun-{hunav,both}-{b1,post}   x exclude        (4, 같은 데이터에서 WAIT 만 없음)
-  보임   : noeun-{hunav,both}-{b1,post}   x visible        (4, 사진에 사람이 보이는 대기 프레임만 WAIT)
+  충돌가능: noeun-{hunav,both}-{b1,post}   x visible        (4, 사람과 충돌 가능한 대기 프레임만 WAIT)
 v6 에는 대기 프레임이 없어 wait 셀이 기본 로더와 샘플 목록까지 같다.
 
     python3 scripts/train_eval/qwenvl_train/relabel_half_noeun/make_cells.py
