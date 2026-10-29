@@ -66,3 +66,4 @@
 - [nav3d 07 labeling smoke](261016_nav3d_07_labeling_smoke_result.md) — Qwen3-VL-8B 로컬, 생성 label 이 GT label 만큼 사람 문장에 가까움, 단 곡선 경로의 경로 단어 일치 36 %
 - [노은역 b1·'후' 라벨](261028_noeun_label_b1_post_result.md) — 노은역 rbq v6·hunav_v1 (train+val_seen) 에 rig 60cm_15deg + 구역 noeun-v1 로 b1·post 라벨, 데이터셋 8 개. no_landmark 거짓 경고 20 % (집 물건 목록) → 고온 재시도 문장
 - [노은역 S2 학습 v01 (WAIT)](261029_noeun_s2_train_result.md) — 공개 System2 출발 10 셀 (경로 3 x 라벨 2, WAIT/exclude 대조군), NavPixelGoalWaitDataset·wait trainer, 열린 루프 WAIT 평가. 대기 프레임 절반은 사람이 시야 밖
+- [nav3d sg 하락 원인 (R2R)](261029_nav3d_sg_cause_result.md) — 재학습 편차 SR ±1 (ep 21~23 % 뒤집힘), sg 경로+사람 41.8 · wp 경로+sg 라벨 35.6 → 하락은 sg 경로 + 자기 b1 라벨 조합에서만. 짧은 경로→조기정지 가설 반증
