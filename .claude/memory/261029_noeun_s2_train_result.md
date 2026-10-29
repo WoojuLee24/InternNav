@@ -33,6 +33,13 @@
 - `__getitem__` (공개 System2 processor): WAIT 샘플 정답 토큰 `WAIT<|im_end|>`, STOP 샘플 `STOP<|im_end|>`.
 - ⚠️ 대기 프레임 20 장 표본 중 약 절반만 사람이 60cm_15deg 정면에 보인다 (나머지는 시야 밖) — 이미지로 근거가 없는 WAIT 정답이 섞여 있다.
 
+## 사람 보임 버전 (visible, 사용자 요청 2026-10-29)
+- 65_wait_visibility.py: 사람 궤적(raw_data/r2r/humans_noeun_v3.npz, 0.05 s)을 대기 프레임 카메라에 투영 (발·허리·머리, 6 m, 같은 층; 가림은 모름).
+  train 81 중 보임 39 (지난 5 프레임에만 보임 11), val 16 중 9. 12 장 눈 대조에서 판정은 모두 맞음, 단 투영 점 위치는 실제보다 아래로 어긋남 (가까운 사람).
+- 검토 페이지 https://claude.ai/artifact/3piT2wsqNsAQdTkmGZUQFb -> 결과 json -> 66_wait_keep.py -> `nav3d/noeun/wait/wait_keep_v1.json`.
+- 로더 `wait_mode=visible` + `wait_keep`: 목록의 대기 프레임만 WAIT, 나머지 대기 프레임은 exclude 처럼 뺀다 (자동 판정 그대로면 hunav WAIT 585 · 제외 126).
+- 셀 4 개 추가 `s1.noeun-{hunav,both}-{b1,post}_wait-visible.py` (총 14). 큐는 wait_keep_v1.json 이 push 될 때까지 기다린다.
+
 ## 남은 것
 - GPU smoke (node1 job 끝난 뒤), 학습 10 개, Drive 업로드, 열린 루프 평가 결과.
 - 나중에: (가) 대기 문장 라벨, vln_pe 로더.

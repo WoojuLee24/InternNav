@@ -92,6 +92,7 @@ class Params:
     # internvla_n1_wait_trainer.py / internnav/dataset/internvla_n1_wait_lerobot_dataset.py
     wait_mode: str = "none"
     wait_weight: int = 5
+    wait_keep: str = ""   # wait_mode='visible' 일 때만: WAIT 로 쓸 대기 프레임 목록 json (nav3d/noeun/66_wait_keep.py)
 
     # ---- BEV visual input (bev=False => plain trainer + fpv eval, unchanged) ----
     bev: bool = False              # master toggle for the BEV pipeline (train + eval)
@@ -327,6 +328,8 @@ class Params:
             argv += ["--patch_embed_impl", self.patch_embed_impl]
         if self.wait_mode != "none":  # 'none' 이면 emit 하지 않아 기존 config argv 바이트 동일
             argv += ["--wait_mode", self.wait_mode, "--wait_weight", str(self.wait_weight)]
+            if self.wait_keep:
+                argv += ["--wait_keep", self.wait_keep]
         if smoke:
             argv += ["--max_steps", str(self.max_steps)]
         return argv

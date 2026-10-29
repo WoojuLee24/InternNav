@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""relabel_half_noeun-v01 셀 생성기 — 노은역 S2 학습 10 개 (공개 System2 출발, 1 epoch, 평가 없음).
+"""relabel_half_noeun-v01 셀 생성기 — 노은역 S2 학습 14 개 (공개 System2 출발, 1 epoch, 평가 없음).
 
   본실험 : noeun-{v6,hunav,both}-{b1,post} x wait          (6)
   대조군 : noeun-{hunav,both}-{b1,post}   x exclude        (4, 같은 데이터에서 WAIT 만 없음)
+  보임   : noeun-{hunav,both}-{b1,post}   x visible        (4, 사진에 사람이 보이는 대기 프레임만 WAIT)
 v6 에는 대기 프레임이 없어 wait 셀이 기본 로더와 샘플 목록까지 같다.
 
     python3 scripts/train_eval/qwenvl_train/relabel_half_noeun/make_cells.py
@@ -33,7 +34,7 @@ eval_cfg = base.make_eval_cfg(PARAMS)
 '''
 
 CELLS = [(f"noeun-{p}-{l}", "wait") for p in ("v6", "hunav", "both") for l in ("b1", "post")] + \
-        [(f"noeun-{p}-{l}", "exclude") for p in ("hunav", "both") for l in ("b1", "post")]
+        [(f"noeun-{p}-{l}", m) for m in ("exclude", "visible") for p in ("hunav", "both") for l in ("b1", "post")]
 
 
 def cell(label, mode):

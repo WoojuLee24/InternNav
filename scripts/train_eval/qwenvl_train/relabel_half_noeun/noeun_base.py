@@ -4,7 +4,8 @@
      trainer 가 InternVLAN1ForCausalLM 으로 읽는다. runner 가 TRAIN_MACHINE 값으로 덮어쓰므로 둘 다 바꾼다.
   2. ``vln_datasets`` : R2R 카메라 4 종 -> ``r2r_60cm_15_15`` 하나 (노은역은 60cm_15deg 만 렌더). sampling 100 %.
   3. ``train_label`` = ``noeun-<paths>-<label>`` -> ``<mini>/vln_ce_noeun-<paths>-<label>`` (nav3d/noeun/64_build_train.py).
-  4. ``wait_mode`` : wait | exclude (default_config.Params.wait_mode; internvla_n1_wait_trainer.py).
+  4. ``wait_mode`` : wait | exclude | visible (default_config.Params.wait_mode; internvla_n1_wait_trainer.py).
+     visible = 사진에 사람이 보이는 대기 프레임만 WAIT (``WAIT_KEEP`` = nav3d/noeun/66_wait_keep.py 출력).
   5. 평가 없음: 노은역 평가는 다른 노드(Isaac). 셀은 ``--no-eval`` 로 돌린다 (eval_cfg 는 runner 가 import 만 한다).
 1 epoch · 하이퍼파라미터는 그대로 (relabel_half stage1).
 """
@@ -24,7 +25,9 @@ import dualvln_mini_half_base as half  # noqa: E402
 VERSION = "relabel_half_noeun-v01"
 PUBLIC_SYSTEM2 = "/home/irteam/data-vol2/checkpoints/InternVLA-N1-System2"
 VLN_DATASETS = "r2r_60cm_15_15"
-WAIT_MODES = ("wait", "exclude")
+WAIT_MODES = ("wait", "exclude", "visible")
+WAIT_KEEP = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(_QWENVL))),
+                         "scripts", "dataset_converters", "nav3d", "noeun", "wait", "wait_keep_v1.json")
 
 
 def exp_name(train_label, wait_mode):
@@ -39,6 +42,6 @@ def stage1(train_label, wait_mode):
     assert "internvla-n1-system2" in PUBLIC_SYSTEM2.lower()
     train_machine = {"h200": {**train_machine["h200"], "system2_ckpt": PUBLIC_SYSTEM2}}
     params = replace(params, system2_ckpt=PUBLIC_SYSTEM2, vln_datasets=VLN_DATASETS, train_label=train_label,
-                     wait_mode=wait_mode, eval_config_path=None)
+                     wait_mode=wait_mode, wait_keep=WAIT_KEEP if wait_mode == "visible" else "", eval_config_path=None)
     assert params.num_train_epochs == half.S1_EPOCHS == 1.0, params.num_train_epochs
     return exp_name(train_label, wait_mode), train_machine, params
