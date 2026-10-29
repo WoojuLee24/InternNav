@@ -9,7 +9,8 @@
 scene 이름 "hunav" = 64_build_train.py 의 hunav_v1 scene 접두사 (형제 hunav_s0~s2 가 같은 프레임을 공유).
 
 사용 (저장소 루트):
-    /usr/bin/python scripts/dataset_converters/nav3d/noeun/66_wait_keep.py --review <검토 결과 json>
+    /usr/bin/python scripts/dataset_converters/nav3d/noeun/66_wait_keep.py --review scripts/dataset_converters/nav3d/noeun/wait/wait_review_v3.json
+(현재 v4 자동 판정 = 사용자 라벨 97/97 이라 review_v3 의 changed 는 비어 있다)
 """
 
 import argparse
@@ -21,7 +22,7 @@ HERE = Path(__file__).resolve().parent
 
 def parse():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--visibility', default=str(HERE / 'wait' / 'wait_visibility_v1.json'))
+    ap.add_argument('--visibility', default=str(HERE / 'wait' / 'wait_collision_v1.json'), help='자동 판정: 67 v4 (충돌 가능, 기본) 또는 65 (보임)')
     ap.add_argument('--review', default='', help='검토 페이지 결과 json (빈값 = 자동 판정 그대로)')
     ap.add_argument('--out', default=str(HERE / 'wait' / 'wait_keep_v1.json'))
     return ap.parse_args()

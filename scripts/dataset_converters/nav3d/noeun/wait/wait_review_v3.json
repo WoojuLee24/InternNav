@@ -1,0 +1,29 @@
+{
+ "version": "wait_collision_v4_review",
+ "basis": "사용자 라벨 = review_v1 + 2026-10-29 5 개 재판단 (127/9·val12/365·62/28 불가, 138/259·76/66 가능). v4 자동 판정과 비교",
+ "n": 97,
+ "visible": 63,
+ "updated_by_user": [
+  {
+   "key": "train/127/9",
+   "human": false
+  },
+  {
+   "key": "val_seen/12/365",
+   "human": false
+  },
+  {
+   "key": "train/62/28",
+   "human": false
+  },
+  {
+   "key": "train/138/259",
+   "human": true
+  },
+  {
+   "key": "train/76/66",
+   "human": true
+  }
+ ],
+ "changed": []
+}

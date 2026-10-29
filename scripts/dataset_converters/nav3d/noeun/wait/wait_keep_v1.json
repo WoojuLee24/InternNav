@@ -57,13 +57,13 @@
   ],
   [
    "hunav",
-   127,
-   9
+   137,
+   33
   ],
   [
    "hunav",
-   137,
-   33
+   138,
+   259
   ],
   [
    "hunav",
@@ -207,11 +207,6 @@
   ],
   [
    "hunav",
-   62,
-   28
-  ],
-  [
-   "hunav",
    71,
    19
   ],
@@ -224,6 +219,11 @@
    "hunav",
    75,
    41
+  ],
+  [
+   "hunav",
+   76,
+   66
   ],
   [
    "hunav",
@@ -262,11 +262,6 @@
   ]
  ],
  "val_seen": [
-  [
-   "hunav",
-   12,
-   365
-  ],
   [
    "hunav",
    24,
@@ -325,9 +320,9 @@
  ],
  "source": {
   "criterion": "\uc0ac\ub78c\uacfc \ucda9\ub3cc \uac00\ub2a5 (\uac80\ud1a0\ub85c \ud655\uc815)",
-  "visibility": "wait_visibility_v1.json",
-  "review": "wait_review_v1.json",
-  "changed": 14,
+  "visibility": "wait_collision_v1.json",
+  "review": "wait_review_v3.json",
+  "changed": 0,
   "train_wait_frames": 81,
   "val_wait_frames": 16
  }

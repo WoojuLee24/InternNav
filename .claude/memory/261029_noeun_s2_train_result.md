@@ -42,6 +42,9 @@
 - 검토 페이지 https://claude.ai/artifact/3piT2wsqNsAQdTkmGZUQFb -> 결과 json -> 66_wait_keep.py -> `nav3d/noeun/wait/wait_keep_v1.json`.
 - **최종 기준 (사용자 2026-10-29): 보임/안 보임이 아니라 사람과 충돌 가능/불가능.** 보여도 부딪힐 가능성이 없으면 제외, 일부만 보여도 가능성이 있으면 WAIT.
   검토로 고친 것 14 (`nav3d/noeun/wait/wait_review_v1.json`) -> `wait_keep_v1.json`: train 52/81 · val 12/16 (합 64).
+- **자동 판정 v4 (67_wait_collision.py, 사용자 라벨과 97/97)**: 충돌 가능 = [oracle: t 또는 t-1 에 같은 층 사람 4 m 안 · 정면 ±45°] 또는 [검출: t 사진 사람 박스 아래 끝 y2 >= 280].
+  검출기 = torchvision Faster R-CNN v2 (COCO) — 다리만 보이는 가까운 사람은 놓친다 (train/167/15) -> oracle 이 주 판정. 비교: v1 투영 85 · v3 검출|투영 90 · oracle 만 89.
+  사용자 재판단 5 개 (127/9 · val12/365 · 62/28 불가, 138/259 · 76/66 가능) 반영 -> `wait_review_v3.json` (changed 0). `wait_keep_v1.json` = train 52 · val 11.
 - 로더 `wait_mode=visible` + `wait_keep`: 목록의 대기 프레임만 WAIT, 나머지 대기 프레임은 exclude 처럼 뺀다 (자동 판정 그대로면 hunav WAIT 585 · 제외 126).
 - 셀 4 개 추가 `s1.noeun-{hunav,both}-{b1,post}_wait-visible.py` (총 14). 큐는 wait_keep_v1.json 이 push 될 때까지 기다린다.
 
