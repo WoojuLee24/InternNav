@@ -7,7 +7,10 @@ WAIT 를 내는가" (recall) 와 "대기가 아닌 프레임에서 WAIT 를 내�
   프롬프트 = 같은 conversation 문구 + '<instruction>.' 치환 + 지난 프레임 linspace(0, t-1, num_history) + 현재 프레임,
   rgb 는 resize_w x resize_h, greedy generate (max_new_tokens 128). 연결 문구(conjunction)는 첫 번째로 고정 (재현성).
 정답 종류(프레임 t, 학습 로더와 같은 시프트 actions = action[1:] + [0]):
-  wait = actions[t] == 4 · stop = 마지막 프레임 · pixel = relative_goal_frame_id >= 0 · turn = 나머지
+  wait = actions[t] == 4 이고 --wait_keep 의 val_seen 목록에 있음 (사람과 충돌 가능, 67 v4 판정 = 사용자 라벨)
+  wait_skip = actions[t] == 4 인데 충돌 불가 -> 집계에서 뺀다 (기록은 남김; 학습 visible 모드도 이 프레임을 뺀다)
+  stop = 마지막 프레임 · pixel = relative_goal_frame_id >= 0 · turn = 나머지
+  --wait_keep '' 이면 이전처럼 기록된 대기 프레임 전부가 wait.
 출력 종류: 'WAIT' 포함 -> wait · 'STOP' -> stop · '↓' 또는 숫자 -> pixel · ←→↑ -> turn · 그 외 other
 
 사용 (저장소 루트, GPU 1 장):
@@ -36,6 +39,7 @@ PROMPT = ("You are an autonomous navigation assistant. Your task is to <instruct
           "Please output the next waypoint\'s coordinates in the image. Please output STOP when you have successfully completed the task.")
 CONJ = 'you can see '   # habitat 평가기 conjunctions[0]
 WAIT_ACTION = 4
+KEEP = Path(__file__).resolve().parents[2] / 'scripts' / 'dataset_converters' / 'nav3d' / 'noeun' / 'wait' / 'wait_keep_v1.json'
 
 
 def parse():
@@ -48,6 +52,8 @@ def parse():
     ap.add_argument('--num_history', type=int, default=8)
     ap.add_argument('--resize', type=int, default=384)
     ap.add_argument('--max_eps', type=int, default=0)
+    ap.add_argument('--wait_keep', default=str(KEEP), help="충돌 가능 대기 프레임 목록 (val_seen 사용). '' = 대기 프레임 전부")
+    ap.add_argument('--dry_run', action='store_true', help='모델 없이 정답 종류 수만 센다')
     ap.add_argument('--out', required=True)
     return ap.parse_args()
 
@@ -68,10 +74,12 @@ def main():
     a = parse()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    processor = AutoProcessor.from_pretrained(a.model_path)
-    processor.tokenizer.padding_side = 'left'
-    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(a.model_path, torch_dtype=torch.bfloat16,
-                                                               attn_implementation='flash_attention_2', device_map={'': 'cuda:0'}).eval()
+    keep = {tuple(k) for k in json.load(open(a.wait_keep))['val_seen']} if a.wait_keep else None
+    if not a.dry_run:
+        processor = AutoProcessor.from_pretrained(a.model_path)
+        processor.tokenizer.padding_side = 'left'
+        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(a.model_path, torch_dtype=torch.bfloat16,
+                                                                   attn_implementation='flash_attention_2', device_map={'': 'cuda:0'}).eval()
     rows, t0 = [], time.time()
     for sc in a.scenes.split(','):
         root = Path(a.data_root) / 'traj_data' / 'r2r' / sc
@@ -85,8 +93,15 @@ def main():
             n = len(acts)
             img = lambda f: Image.open(root / 'videos' / 'chunk-000' / f'observation.images.rgb.{a.rig}' / f'episode_{i:06d}_{f}.jpg').convert('RGB').resize((a.resize, a.resize))
             frames = sorted({f for f in range(n) if acts[f] == WAIT_ACTION} | set(range(0, n - 1, a.every)) | {n - 1})
+            base = re.sub(r'_s\d+$', '', sc)                                      # 형제 scene hunav_s0 -> hunav (wait_keep 키)
             for f in frames:
-                gt = 'wait' if acts[f] == WAIT_ACTION else ('stop' if f == n - 1 else ('pixel' if rel[f] >= 0 else 'turn'))
+                if acts[f] == WAIT_ACTION:
+                    gt = 'wait' if keep is None or (base, i, f) in keep else 'wait_skip'
+                else:
+                    gt = 'stop' if f == n - 1 else ('pixel' if rel[f] >= 0 else 'turn')
+                if a.dry_run:
+                    rows.append({'scene': sc, 'episode': i, 'frame': f, 'gt': gt, 'out': '', 'pred': 'dry'})
+                    continue
                 text = PROMPT.replace('<instruction>.', instr[:-1])
                 hist = [] if f == 0 else sorted(np.unique(np.linspace(0, f - 1, a.num_history, dtype=np.int32)).tolist())
                 if hist:
@@ -107,15 +122,19 @@ def main():
                 o = processor.tokenizer.decode(ids[0][inputs.input_ids.shape[1]:], skip_special_tokens=True).strip()
                 rows.append({'scene': sc, 'episode': i, 'frame': f, 'gt': gt, 'out': o, 'pred': kind_out(o)})
             print(f'  {sc} ep {i}: 프레임 {len(frames)} (대기 {sum(acts[f] == WAIT_ACTION for f in frames)}) {time.time() - t0:.0f}s', flush=True)
+    skipped = [r for r in rows if r['gt'] == 'wait_skip']
+    rows_all, rows = rows, [r for r in rows if r['gt'] != 'wait_skip']   # 충돌 불가 대기 프레임은 집계에서 뺀다
     conf = collections.Counter((r['gt'], r['pred']) for r in rows)
     n_gt_w = sum(r['gt'] == 'wait' for r in rows)
     n_pr_w = sum(r['pred'] == 'wait' for r in rows)
     tp = conf[('wait', 'wait')]
     summary = {'model_path': a.model_path, 'data_root': a.data_root, 'scenes': a.scenes, 'frames': len(rows),
+               'wait_keep': a.wait_keep or None, 'wait_skip_frames': len(skipped), 'wait_skip_pred': dict(collections.Counter(r['pred'] for r in skipped)),
+               'gt_counts': dict(collections.Counter(r['gt'] for r in rows_all)),
                'wait_frames': n_gt_w, 'wait_recall': tp / n_gt_w if n_gt_w else None, 'wait_precision': tp / n_pr_w if n_pr_w else None,
                'false_wait_rate': (n_pr_w - tp) / max(1, len(rows) - n_gt_w),
                'confusion': {f'{g}->{p}': c for (g, p), c in sorted(conf.items())}, 'seconds': round(time.time() - t0)}
-    (out / 'rows.jsonl').write_text('\n'.join(json.dumps(r, ensure_ascii=False) for r in rows) + '\n')
+    (out / 'rows.jsonl').write_text('\n'.join(json.dumps(r, ensure_ascii=False) for r in rows_all) + '\n')
     (out / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=1))
     print(json.dumps(summary, ensure_ascii=False, indent=1))
 
