@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 원본 3DGS PLY + 충돌 mesh → <name>_collision.usdz. 호스트에서 실행한다 (GPU 필요, ply2usdz.py 설명 참고).
 #   run_ply2usdz.sh <gs.ply> <mesh.obj|mesh.ply> <out.usdz> [--nurec-name NAME] [--near-clip 1e-8]
-#   예) run_ply2usdz.sh NoeunStation/point_cloud.ply mesh.ply out/noeun_station_collision.usdz --nurec-name noeun_station
+#   예) run_ply2usdz.sh NoeunStation/point_cloud.ply mesh.ply out/noeun_station_collision.usdz
 # 3DGRUT 환경 = usd2usdz setup_3dgrut_venv.sh 로 만든 venv(기본 ~/git/3dgrut-venv, 컨테이너 안 /opt/3dgrut 고정)
 set -euo pipefail
 [[ $# -ge 3 ]] || { sed -n 2,5p "$0" >&2; exit 2; }

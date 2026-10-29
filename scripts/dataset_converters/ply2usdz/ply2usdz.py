@@ -8,7 +8,7 @@ usd2usdz 의 3DGRUT venv(16b7b19, ply_to_usd 축 패치, setup_3dgrut_venv.sh)�
   ④ 64바이트 정렬 · ZIP32        OpenUSD 는 ZIP64 로컬 헤더를 못 읽는다 (4 GiB 넘으면 중단)
 
 사용 (run_ply2usdz.sh 가 컨테이너·venv 를 준비한다):
-  python ply2usdz.py <gs.ply> <mesh.obj|mesh.ply> <out.usdz> [--nurec-name NAME] [--near-clip 1e-8]
+  python ply2usdz.py <gs.ply> <mesh.obj|mesh.ply> <out.usdz> [--near-clip 1e-8]
 """
 import argparse
 import gzip
@@ -104,11 +104,11 @@ def main():
     ap.add_argument('gs_ply')
     ap.add_argument('mesh', help='GS 와 같은 좌표계의 .obj 또는 삼각형 .ply')
     ap.add_argument('out_usdz')
-    ap.add_argument('--nurec-name', default=None, help='usdz 안 .nurec 이름(확장자 제외). 기본: gs_ply 파일 이름')
+    ap.add_argument('--nurec-name', default=None, help='usdz 안 .nurec 이름(확장자 제외). 기본: out 파일 이름에서 _collision 뺀 것')
     ap.add_argument('--near-clip', type=float, default=1e-8)
     a = ap.parse_args()
     gs, out = Path(a.gs_ply).resolve(), Path(a.out_usdz).resolve()
-    name = a.nurec_name or gs.stem
+    name = a.nurec_name or out.stem.removesuffix('_collision')  # LCC PLY 는 모두 point_cloud.ply 라 장면 이름을 쓴다
 
     with tempfile.TemporaryDirectory(prefix='ply2usdz_') as t:
         tmp = Path(t)
