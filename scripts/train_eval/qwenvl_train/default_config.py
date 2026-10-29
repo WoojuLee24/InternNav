@@ -87,6 +87,11 @@ class Params:
     # -> train/dec_*, eval/dec_* (+ val_metrics/*.jsonl when val_ratio > 0). Runs
     # internvla_n1_metrics_trainer.py; False = the base trainer, unchanged.
     decision_metrics: bool = False
+    # S2 WAIT 행동 (action 4, 노은역 hunav). 'none' = 기본 trainer · 기본 로더 (변경 없음).
+    # 'wait' = 대기 프레임에 정답 WAIT 샘플 (x wait_weight), 'exclude' = 대기 프레임 샘플 제외 (WAIT 없는 대조군).
+    # internvla_n1_wait_trainer.py / internnav/dataset/internvla_n1_wait_lerobot_dataset.py
+    wait_mode: str = "none"
+    wait_weight: int = 5
 
     # ---- BEV visual input (bev=False => plain trainer + fpv eval, unchanged) ----
     bev: bool = False              # master toggle for the BEV pipeline (train + eval)
@@ -185,6 +190,10 @@ class Params:
     def trainer(self) -> str:
         """Trainer entry script. BEV / unified image provider swap in their own
         provider trainer (base file untouched); at most one is active per run."""
+        if self.wait_mode != "none":
+            assert not (self.decision_metrics or self.bev or self.image_provider), \
+                "wait_mode cannot be combined with decision_metrics/bev/image_provider (one trainer entry per run)"
+            return "internnav/trainer/internvla_n1_wait_trainer.py"
         if self.decision_metrics:
             assert not (self.bev or self.image_provider), \
                 "decision_metrics cannot be combined with bev/image_provider (one trainer entry per run)"
@@ -316,6 +325,8 @@ class Params:
         # (verify_params*.py의 upstream argv parity 검사가 수정 없이 통과한다)
         if self.patch_embed_impl != "conv":
             argv += ["--patch_embed_impl", self.patch_embed_impl]
+        if self.wait_mode != "none":  # 'none' 이면 emit 하지 않아 기존 config argv 바이트 동일
+            argv += ["--wait_mode", self.wait_mode, "--wait_weight", str(self.wait_weight)]
         if smoke:
             argv += ["--max_steps", str(self.max_steps)]
         return argv

@@ -1,0 +1,38 @@
+# 노은역 val_seen 평가 정보 (relabel_half_noeun-v01 모델용) — 평가는 다른 노드(Isaac)에서 한다. 이 파일은 평가 코드가 읽을 값의 정본.
+# 학습: scripts/train_eval/qwenvl_train/relabel_half_noeun/ (공개 InternVLA-N1-System2 출발 S2, r2r_60cm_15_15, 1 epoch)
+# 모델 위치: gdrive:InternNav/checkpoints/relabel_half_noeun-v01/<run>/  (run = s1.noeun-<paths>-<label>_wait-<mode>_internvla-n1-system2_<시각>)
+version: relabel_half_noeun-v01
+scene:
+  usd: noeun/noeun_station/noeun_station_collision.usdz      # raw json 의 scene_id (Isaac 5.1, NuRec GS)
+  render: {light: ambient_only, rtx_ambient: 10.0, film_iso: 70.0}   # 데이터 render_provenance.json 과 같게
+camera:
+  rig: 60cm_15deg            # 높이 60 cm, pitch 15 deg (학습 r2r_60cm_15_15: 현재 = 15 deg, look-down = 15 deg 같은 그림)
+  resize: [384, 384]         # S2 입력 rgb (학습 resize_w x resize_h)
+s2_input:
+  num_history: 8             # 지난 프레임 = linspace(0, step-1, 8)
+  prompt_source: internnav/habitat_extensions/vln/habitat_vln_evaluator.py (conversation · conjunctions 같은 문구)
+episodes:                    # val_seen (같은 노은역 scene 안 split). 경로 · 출발 · 도착은 원본, instruction 만 라벨
+  # <root> = data-vol1/nav3d/noeun (node1), 라벨 = 형제 0 (vln_pe tasks 는 형제 0·1·2)
+  v6:    {b1: <root>/vln_pe_noeun_nav3d_rbq_v6_b1/raw_data/r2r/val_seen/val_seen.json.gz,       post: <root>/vln_pe_noeun_nav3d_rbq_v6_post/raw_data/r2r/val_seen/val_seen.json.gz}
+  hunav: {b1: <root>/vln_pe_noeun_nav3d_rbq_hunav_v1_b1/raw_data/r2r/val_seen/val_seen.json.gz, post: <root>/vln_pe_noeun_nav3d_rbq_hunav_v1_post/raw_data/r2r/val_seen/val_seen.json.gz}
+  hunav_humans: scripts/dataset_converters/nav3d/logs/noeun_hunav/p2/humans_noeun_v3.npz   # 사람 움직임 (hunav_sidecar.jsonl 의 humans · t0 · t)
+  success_distance: 3.0
+s2_outputs:                  # S2 텍스트 -> 행동
+  "x y": pixel goal (look-down 뒤 두 번째 턴)
+  "↑": forward 0.25 m
+  "←": turn left 15 deg
+  "→": turn right 15 deg
+  "↓": look down (pixel goal 질의)
+  STOP: 도착 선언
+  WAIT: 제자리 1 step (사람 대기). ⚠️ habitat 은 action 4 = LOOKUP — WAIT 를 번호 4 로 넘기지 말고 텍스트로 따로 처리
+metrics:                     # WAIT 는 닫힌 루프에서 직접 채점하지 않는다
+  - SR, SPL, NE              # success_distance 3.0
+  - CR                       # 사람과 충돌 / step
+  - CFSR                     # 충돌 없는 성공
+  - steps, time_s            # WAIT 남발이면 늘어난다
+  - n_wait                   # 에피소드당 WAIT 수
+compare:                     # WAIT 효과 = 같은 데이터 wait vs exclude
+  - [s1.noeun-hunav-b1_wait-wait, s1.noeun-hunav-b1_wait-exclude]
+  - [s1.noeun-hunav-post_wait-wait, s1.noeun-hunav-post_wait-exclude]
+  - [s1.noeun-both-b1_wait-wait, s1.noeun-both-b1_wait-exclude]
+  - [s1.noeun-both-post_wait-wait, s1.noeun-both-post_wait-exclude]

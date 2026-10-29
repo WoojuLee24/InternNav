@@ -65,3 +65,4 @@
 - [nav3d 04·06·06b·06v 노은역 렌더 + vln_pe 검증](261016_nav3d_06_noeun_render_result.md) — navmesh z 가 mesh 바닥과 어긋나 카메라 높이 오차, mesh z 로 고침(06v V2 PASS)
 - [nav3d 07 labeling smoke](261016_nav3d_07_labeling_smoke_result.md) — Qwen3-VL-8B 로컬, 생성 label 이 GT label 만큼 사람 문장에 가까움, 단 곡선 경로의 경로 단어 일치 36 %
 - [노은역 b1·'후' 라벨](261028_noeun_label_b1_post_result.md) — 노은역 rbq v6·hunav_v1 (train+val_seen) 에 rig 60cm_15deg + 구역 noeun-v1 로 b1·post 라벨, 데이터셋 8 개. no_landmark 거짓 경고 20 % (집 물건 목록) → 고온 재시도 문장
+- [노은역 S2 학습 v01 (WAIT)](261029_noeun_s2_train_result.md) — 공개 System2 출발 10 셀 (경로 3 x 라벨 2, WAIT/exclude 대조군), NavPixelGoalWaitDataset·wait trainer, 열린 루프 WAIT 평가. 대기 프레임 절반은 사람이 시야 밖
