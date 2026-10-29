@@ -66,7 +66,15 @@ def parse_wait_cli_args(argv: list) -> tuple:
 
 class NavPixelGoalWaitDataset(NavPixelGoalDataset):
     def __init__(self, tokenizer, data_args):
-        super().__init__(tokenizer, data_args)
+        # 부모 __init__ 은 `super(NavPixelGoalDataset, self)` 로 모듈 전역 이름을 찾는다. wait trainer 가 그 이름을 이 클래스로
+        # 바꿔 끼우므로(make_supervised_data_module 이 전역 이름으로 데이터셋을 만든다), 부모 초기화 동안만 원래 클래스로 되돌린다.
+        import internnav.dataset.internvla_n1_lerobot_dataset as _d
+        cur = _d.NavPixelGoalDataset
+        _d.NavPixelGoalDataset = NavPixelGoalDataset
+        try:
+            super().__init__(tokenizer, data_args)
+        finally:
+            _d.NavPixelGoalDataset = cur
         self.wait_mode = _PENDING.get("wait_mode", getattr(data_args, "wait_mode", "wait"))
         self.wait_weight = int(_PENDING.get("wait_weight", getattr(data_args, "wait_weight", 5)))
         assert self.wait_mode in WAIT_MODES, f"wait_mode={self.wait_mode!r}"
