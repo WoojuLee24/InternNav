@@ -37,6 +37,33 @@ def exp_name(train_label, wait_mode):
     return f"{VERSION}/s1.{train_label}_wait-{wait_mode}_{half.full.S2_MARKER}"
 
 
+# scratch (2026-10-30 사용자): Qwen2.5-VL-7B-Instruct 에서 출발 (R2R stage1 과 같은 출발점), 1 epoch 와 3 epoch.
+# 3 epoch 는 epoch 1 · 2 · 3 마다 저장 (save_steps = 한 epoch step 수, 아래 표 = 공개 ckpt 1 epoch run 의 max_steps 실측; 데이터·batch·GPU 수가 같으면 같다).
+# optimizer 는 저장하지 않는다 (save_only_model=True, ckpt 약 16 GB; 중간 재개 불가).
+SCRATCH_VERSION = "relabel_half_noeun-v01-scratch"
+SCRATCH_INIT = "Qwen/Qwen2.5-VL-7B-Instruct"     # HF 캐시 (R2R stage1 과 같은 값; baseline/dualvln_stage1_full.STAGE1_INIT)
+STEPS_PER_EPOCH = {("v6", "wait"): 213,
+                   ("hunav", "exclude"): 216, ("hunav", "visible"): 222, ("hunav", "wait"): 226,
+                   ("both", "exclude"): 429, ("both", "visible"): 435, ("both", "wait"): 439}
+
+
+def scratch_exp_name(train_label, wait_mode, epochs):
+    return f"{SCRATCH_VERSION}/s1.{train_label}_wait-{wait_mode}_ep{epochs}_{half.full.S2_MARKER}"
+
+
+def stage1_scratch(train_label, wait_mode, epochs):
+    """Qwen2.5-VL-7B-Instruct 출발 · epochs (1 | 3). 3 이면 매 epoch 저장. 나머지는 stage1 과 같다."""
+    assert epochs in (1, 3), epochs
+    name, train_machine, params = stage1(train_label, wait_mode)
+    assert "qwen2.5" in SCRATCH_INIT.lower() and "internvla-n1-system2" not in SCRATCH_INIT.lower()
+    paths = train_label.split("-")[1]                 # noeun-<paths>-<label>
+    spe = STEPS_PER_EPOCH[(paths, wait_mode)]
+    train_machine = {"h200": {**train_machine["h200"], "system2_ckpt": SCRATCH_INIT}}
+    params = replace(params, system2_ckpt=SCRATCH_INIT, num_train_epochs=float(epochs), save_only_model=True,
+                     save_interval_steps=spe if epochs > 1 else params.save_interval_steps, save_total_limit=max(epochs, 1))
+    return scratch_exp_name(train_label, wait_mode, epochs), train_machine, params
+
+
 def stage1(train_label, wait_mode):
     """(EXP_NAME, TRAIN_MACHINE, PARAMS)."""
     assert train_label.startswith("noeun-") and "." not in train_label, train_label

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""relabel_half_noeun-v01 셀 생성기 — 노은역 S2 학습 14 개 (공개 System2 출발, 1 epoch, 평가 없음).
+"""relabel_half_noeun-v01 셀 생성기 — 노은역 S2 학습 14 개 (공개 System2 출발, 1 epoch, 평가 없음)
++ scratch 28 개 (Qwen2.5-VL-7B-Instruct 출발, 1 epoch · 3 epoch(매 epoch 저장)) -> relabel_half_noeun-v01-scratch.
 
   본실험 : noeun-{v6,hunav,both}-{b1,post} x wait          (6)
   대조군 : noeun-{hunav,both}-{b1,post}   x exclude        (4, 같은 데이터에서 WAIT 만 없음)
@@ -47,5 +48,39 @@ def cell(label, mode):
     print(fname)
 
 
+SCRATCH_TEMPLATE = '''"""노은역 S2 학습 scratch (relabel_half_noeun-v01-scratch) — 데이터 '{label}', wait_mode '{mode}', Qwen2.5-VL-7B-Instruct 출발 {ep} epoch{every}. 학습만.
+
+noeun_base.stage1_scratch 참고. make_cells.py 로 생성됨.
+
+    python scripts/train_eval/qwenvl_train/runner.py --config scripts/train_eval/qwenvl_train/relabel_half_noeun/{fname} --machine h200 --no-eval
+"""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # default_config
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))                   # noeun_base
+
+import default_config as base  # noqa: E402
+import noeun_base  # noqa: E402
+
+EXP_NAME, TRAIN_MACHINE, PARAMS = noeun_base.stage1_scratch("{label}", "{mode}", {ep})
+eval_cfg = base.make_eval_cfg(PARAMS)
+'''
+
+
+def scratch_cell(label, mode, ep):
+    fname = f"s1.{label}_wait-{mode}_scratch-ep{ep}.py"
+    text = SCRATCH_TEMPLATE.format(label=label, mode=mode, ep=ep, fname=fname, every=", 매 epoch 저장" if ep > 1 else "")
+    path = os.path.join(HERE, fname)
+    if os.path.exists(path) and open(path).read() != text:
+        sys.exit(f"{fname} exists with different content")
+    open(path, "w").write(text)
+    print(fname)
+
+
 for label, mode in CELLS:
     cell(label, mode)
+for ep in (1, 3):                      # scratch (2026-10-30): 같은 14 조합
+    for label, mode in CELLS:
+        scratch_cell(label, mode, ep)
