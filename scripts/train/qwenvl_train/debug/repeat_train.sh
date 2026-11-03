@@ -1,5 +1,7 @@
 #!/bin/bash
 # Repeat train without wandb logging and log files
+# 한 번 실행하면 학습 1회 후 종료한다. 반복은 run_queue.sh 가 큐의 마지막 줄을 다시 실행해서 한다
+# (매 회 끝날 때마다 큐 파일을 다시 읽으므로, 그 사이 앞에 추가된 job 이 먼저 돈다).
 # Based on: scripts/train/qwenvl_train/temporal_modeling/num_history_4.sh
 
 # Distributed training configuration
@@ -34,68 +36,66 @@ system1=nextdit_async
 system2_ckpt=checkpoints/InternVLA-N1-System2
 num_history=4
 
-while true; do
-    run_name=debug/repeat_train
-    output_dir=checkpoints/${run_name}
+run_name=debug/repeat_train
+output_dir=checkpoints/${run_name}
 
-    # 기존 checkpoint 삭제 후 시작
-    if ls ${output_dir}/checkpoint-* 2>/dev/null | grep -q .; then
-        echo "[repeat_train] Removing existing checkpoints in ${output_dir}"
-        rm -rf ${output_dir}/checkpoint-*
-    fi
+# 기존 checkpoint 삭제 후 시작
+if ls ${output_dir}/checkpoint-* 2>/dev/null | grep -q .; then
+    echo "[repeat_train] Removing existing checkpoints in ${output_dir}"
+    rm -rf ${output_dir}/checkpoint-*
+fi
 
-    mkdir -p ${output_dir}
+mkdir -p ${output_dir}
 
-    torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
-        --node_rank=${NODE_RANK} \
-        --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} \
-        internnav/trainer/internvla_n1_trainer.py \
-        --deepspeed ${deepspeed} \
-        --model_name_or_path "${system2_ckpt}" \
-        --vln_dataset_use ${vln_datasets} \
-        --data_root ${data_root} \
-        --data_flatten False \
-        --tune_mm_vision False \
-        --tune_mm_mlp False \
-        --tune_mm_llm False \
-        --bf16 \
-        \
-        --num_history ${num_history} \
-        --data_augmentation True \
-        --resize_h 384 \
-        --resize_w 384 \
-        --sample_step 4 \
-        --num_future_steps 4 \
-        --predict_step_num 32 \
-        --pixel_goal_only True \
-        --system1 ${system1} \
-        \
-        --output_dir ${output_dir} \
-        --num_train_epochs 3.0 \
-        --per_device_train_batch_size ${batch_size} \
-        --per_device_eval_batch_size $((batch_size*2)) \
-        --gradient_accumulation_steps ${grad_accum_steps} \
-        --max_pixels ${max_pixels} \
-        --min_pixels ${min_pixels} \
-        --val_ratio ${val_ratio} \
-        --eval_strategy "steps" \
-        --eval_steps ${val_interval_steps} \
-        --save_strategy "steps" \
-        --save_steps ${val_interval_steps} \
-        --save_total_limit 2 \
-        --metric_for_best_model eval_loss \
-        --greater_is_better False \
-        --load_best_model_at_end True \
-        --learning_rate ${lr} \
-        --weight_decay 0 \
-        --warmup_ratio 0.003 \
-        --max_grad_norm 1 \
-        --lr_scheduler_type "cosine_with_min_lr" \
-        --lr_scheduler_kwargs '{"min_lr": 1e-05}' \
-        --logging_steps 1 \
-        --model_max_length 8192 \
-        --gradient_checkpointing True \
-        --dataloader_num_workers 4 \
-        --run_name ${run_name} \
-        --report_to none
-done
+torchrun --nnodes=${NNODES} --nproc_per_node=${NPROC_PER_NODE} \
+    --node_rank=${NODE_RANK} \
+    --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} \
+    internnav/trainer/internvla_n1_trainer.py \
+    --deepspeed ${deepspeed} \
+    --model_name_or_path "${system2_ckpt}" \
+    --vln_dataset_use ${vln_datasets} \
+    --data_root ${data_root} \
+    --data_flatten False \
+    --tune_mm_vision False \
+    --tune_mm_mlp False \
+    --tune_mm_llm False \
+    --bf16 \
+    \
+    --num_history ${num_history} \
+    --data_augmentation True \
+    --resize_h 384 \
+    --resize_w 384 \
+    --sample_step 4 \
+    --num_future_steps 4 \
+    --predict_step_num 32 \
+    --pixel_goal_only True \
+    --system1 ${system1} \
+    \
+    --output_dir ${output_dir} \
+    --num_train_epochs 3.0 \
+    --per_device_train_batch_size ${batch_size} \
+    --per_device_eval_batch_size $((batch_size*2)) \
+    --gradient_accumulation_steps ${grad_accum_steps} \
+    --max_pixels ${max_pixels} \
+    --min_pixels ${min_pixels} \
+    --val_ratio ${val_ratio} \
+    --eval_strategy "steps" \
+    --eval_steps ${val_interval_steps} \
+    --save_strategy "steps" \
+    --save_steps ${val_interval_steps} \
+    --save_total_limit 2 \
+    --metric_for_best_model eval_loss \
+    --greater_is_better False \
+    --load_best_model_at_end True \
+    --learning_rate ${lr} \
+    --weight_decay 0 \
+    --warmup_ratio 0.003 \
+    --max_grad_norm 1 \
+    --lr_scheduler_type "cosine_with_min_lr" \
+    --lr_scheduler_kwargs '{"min_lr": 1e-05}' \
+    --logging_steps 1 \
+    --model_max_length 8192 \
+    --gradient_checkpointing True \
+    --dataloader_num_workers 4 \
+    --run_name ${run_name} \
+    --report_to none
