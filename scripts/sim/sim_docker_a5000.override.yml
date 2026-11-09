@@ -1,0 +1,9 @@
+# sim_docker compose 덮어쓰기 (A5000 서버) — sim_docker/compose.yml 은 고치지 않는다.
+# 이 서버의 docker 는 compose 의 GPU 예약(capabilities [gpu, ..., display, graphics, vulkan])을 받지 못한다
+# ("could not select device driver nvidia"). internnav 컨테이너와 같은 --runtime=nvidia 방식으로 바꾼다.
+# compose 가 privileged 라 GPU 4 장이 다 보인다 — 렌더 GPU 는 실행 때 GUIDEDOG_ACTIVE_GPU 로 정한다 (run_noeun_sim_eval.sh SIM_GPU).
+#   cd sim_docker && GID=$(id -g) USER_NAME=$(id -un) docker compose -f compose.yml -f <이 파일> up -d
+services:
+  sim:
+    runtime: nvidia
+    deploy: !reset {}

@@ -6,3 +6,4 @@ from .stand_still import StandStillController
 from .vln_move_by_flash_with_collision_controller import (
     VlnMoveByFlashCollisionController,
 )
+from .vln_move_by_flash_floor_controller import VlnMoveByFlashFloorController

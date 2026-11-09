@@ -246,9 +246,16 @@ def get_config(evaluator_cfg: EvalCfg):
         )
         if evaluator_cfg.task.robot_platform_size is not None:
             vln_move_by_flash_cfg.robot_platform_size = evaluator_cfg.task.robot_platform_size
-        robot.controllers.append(ControllerCfg(controller_settings=vln_move_by_flash_cfg.model_dump()))
+        if evaluator_cfg.task.flash_controller_type is not None:
+            flash_settings = {**vln_move_by_flash_cfg.model_dump(), 'type': evaluator_cfg.task.flash_controller_type,
+                              **(evaluator_cfg.task.flash_controller_settings or {})}
+            robot.controllers.append(ControllerCfg(controller_settings=flash_settings))
+        else:
+            robot.controllers.append(ControllerCfg(controller_settings=vln_move_by_flash_cfg.model_dump()))
 
-    if evaluator_cfg.task.robot_flash or evaluator_cfg.eval_settings.get('vis_output', True):
+    if evaluator_cfg.task.skip_aux_cameras:
+        pass
+    elif evaluator_cfg.task.robot_flash or evaluator_cfg.eval_settings.get('vis_output', True):
         topdown_camera = SensorCfg(
             sensor_type='VLNCamera',
             sensor_name='topdown_camera_500',
@@ -314,7 +321,7 @@ def get_config(evaluator_cfg: EvalCfg):
         model_settings = rdp_cfg.model_dump()
     elif evaluator_cfg.agent.model_name == 'seq2seq':
         model_settings = seq2seq_cfg.model_dump()
-    elif evaluator_cfg.agent.model_name in ('internvla_n1', 'internvla_n1_bev', 'internvla_n1_unified'):
+    elif evaluator_cfg.agent.model_name in ('internvla_n1', 'internvla_n1_bev', 'internvla_n1_unified', 'internvla_n1_s2', 'internvla_n1_s2_gguf'):
         model_settings = internvla_n1_cfg.model_dump()
 
     model_settings.update(evaluator_cfg.agent.model_settings)

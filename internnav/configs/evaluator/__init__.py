@@ -53,6 +53,9 @@ class TaskCfg(BaseModel):
     one_step_stand_still: Optional[bool] = None
     camera_translation: Optional[tuple] = None
     camera_orientation: Optional[tuple] = None
+    flash_controller_type: Optional[str] = None  # None: robot_flash/flash_collision 로 고른 기본 flash 컨트롤러
+    flash_controller_settings: Optional[Dict[str, Any]] = None  # flash_controller_type 컨트롤러의 추가 설정
+    skip_aux_cameras: Optional[bool] = None  # True: topdown_camera_500 을 붙이지 않음 (렌더 시간 절약; flash_collision 기본 컨트롤러는 이 카메라가 필요)
 
 
 class EvalDatasetCfg(BaseModel):
