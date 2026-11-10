@@ -64,6 +64,23 @@ def stage1_scratch(train_label, wait_mode, epochs):
     return scratch_exp_name(train_label, wait_mode, epochs), train_machine, params
 
 
+# 반경 STOP (2026-11-10): stage1 과 모든 인자가 같고 stop_radius_m 만 다르다 (기준 r=0 = stage1 셀 그대로).
+# internnav/dataset/internvla_n1_lerobot_dataset_stop_radius.py
+STOP_RADII = (0.5, 1.0)
+
+
+def stop_radius_exp_name(train_label, wait_mode, stop_radius_m):
+    return f"{VERSION}/s1.{train_label}_wait-{wait_mode}_stopr{stop_radius_m}_{half.full.S2_MARKER}"
+
+
+def stage1_stop_radius(train_label, wait_mode, stop_radius_m):
+    """stage1 + stop_radius_m (> 0)."""
+    assert stop_radius_m > 0, stop_radius_m
+    _, train_machine, params = stage1(train_label, wait_mode)
+    params = replace(params, stop_radius_m=float(stop_radius_m))
+    return stop_radius_exp_name(train_label, wait_mode, stop_radius_m), train_machine, params
+
+
 def stage1(train_label, wait_mode):
     """(EXP_NAME, TRAIN_MACHINE, PARAMS)."""
     assert train_label.startswith("noeun-") and "." not in train_label, train_label

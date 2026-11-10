@@ -93,6 +93,9 @@ class Params:
     wait_mode: str = "none"
     wait_weight: int = 5
     wait_keep: str = ""   # wait_mode='visible' 일 때만: WAIT 로 쓸 대기 프레임 목록 json (nav3d/noeun/66_wait_keep.py)
+    # 반경 STOP 라벨 (m). 0 = 끔 (기본 trainer/로더, argv 바이트 동일). > 0 이면 마지막 프레임 r m 안 · 남은 행동이 전진뿐인 프레임을
+    # 모두 STOP 샘플로 (x stop_weight). internvla_n1_stop_radius_trainer.py / internvla_n1_lerobot_dataset_stop_radius.py
+    stop_radius_m: float = 0.0
 
     # ---- BEV visual input (bev=False => plain trainer + fpv eval, unchanged) ----
     bev: bool = False              # master toggle for the BEV pipeline (train + eval)
@@ -191,6 +194,10 @@ class Params:
     def trainer(self) -> str:
         """Trainer entry script. BEV / unified image provider swap in their own
         provider trainer (base file untouched); at most one is active per run."""
+        if self.stop_radius_m > 0:  # 반경 STOP (wait_mode 와 함께 쓸 수 있음: 이 trainer 가 WAIT 도 처리)
+            assert not (self.decision_metrics or self.bev or self.image_provider), \
+                "stop_radius_m cannot be combined with decision_metrics/bev/image_provider (one trainer entry per run)"
+            return "internnav/trainer/internvla_n1_stop_radius_trainer.py"
         if self.wait_mode != "none":
             assert not (self.decision_metrics or self.bev or self.image_provider), \
                 "wait_mode cannot be combined with decision_metrics/bev/image_provider (one trainer entry per run)"
@@ -330,6 +337,8 @@ class Params:
             argv += ["--wait_mode", self.wait_mode, "--wait_weight", str(self.wait_weight)]
             if self.wait_keep:
                 argv += ["--wait_keep", self.wait_keep]
+        if self.stop_radius_m > 0:  # 0 이면 emit 하지 않아 기존 config argv 바이트 동일
+            argv += ["--stop_radius_m", _fmt_num(self.stop_radius_m)]
         if smoke:
             argv += ["--max_steps", str(self.max_steps)]
         return argv

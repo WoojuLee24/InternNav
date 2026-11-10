@@ -79,8 +79,46 @@ def scratch_cell(label, mode, ep):
     print(fname)
 
 
+STOPR_TEMPLATE = '''"""노은역 S2 학습 (relabel_half_noeun-v01) — 데이터 '{label}', wait_mode '{mode}', 반경 STOP {r} m. 학습만.
+
+s1.{label}_wait-{mode}.py (기준, r=0) 와 stop_radius_m 만 다르다. noeun_base.stage1_stop_radius 참고. make_cells.py 로 생성됨.
+
+    python scripts/train_eval/qwenvl_train/runner.py --config scripts/train_eval/qwenvl_train/relabel_half_noeun/{fname} --machine h200 --no-eval
+"""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # default_config
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))                   # noeun_base
+
+import default_config as base  # noqa: E402
+import noeun_base  # noqa: E402
+
+EXP_NAME, TRAIN_MACHINE, PARAMS = noeun_base.stage1_stop_radius("{label}", "{mode}", {r})
+eval_cfg = base.make_eval_cfg(PARAMS)
+'''
+STOPR_CELLS = [("noeun-both-b1", "wait")]   # 반경 STOP (2026-11-10): 기준 셀 하나 x noeun_base.STOP_RADII
+
+
+def stopr_cell(label, mode, r):
+    fname = f"s1.{label}_wait-{mode}_stopr{r}.py"
+    text = STOPR_TEMPLATE.format(label=label, mode=mode, r=r, fname=fname)
+    path = os.path.join(HERE, fname)
+    if os.path.exists(path) and open(path).read() != text:
+        sys.exit(f"{fname} exists with different content")
+    open(path, "w").write(text)
+    print(fname)
+
+
+sys.path.insert(0, HERE)
+import noeun_base  # noqa: E402
+
 for label, mode in CELLS:
     cell(label, mode)
 for ep in (1, 3):                      # scratch (2026-10-30): 같은 14 조합
     for label, mode in CELLS:
         scratch_cell(label, mode, ep)
+for label, mode in STOPR_CELLS:
+    for r in noeun_base.STOP_RADII:
+        stopr_cell(label, mode, r)

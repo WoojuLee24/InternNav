@@ -63,6 +63,7 @@ class DataArguments:
     val_max_samples: int = field(default=0, metadata={"help": "Max number of validation samples. 0 = unlimited."})
     train_max_samples: int = field(default=0, metadata={"help": "Max number of training samples. 0 = unlimited."})
     stop_weight: int = field(default=5, metadata={"help": "Oversampling multiplier for stop samples. Only used when pixel_goal_only=False."})
+    stop_radius_m: float = field(default=0.0, metadata={"help": "반경 STOP 라벨 (internvla_n1_lerobot_dataset_stop_radius.py). 0 = 끔 (기본 로더와 같음)."})
 
     # ---- S2 unified image input (independent of S1's bev_*/s1_*; GT depth only) ----
     s2_image_view: str = field(default="fpv", metadata={"help": "fpv|bev"})
