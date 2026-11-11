@@ -66,7 +66,7 @@ def stage1_scratch(train_label, wait_mode, epochs):
 
 # 반경 STOP (2026-11-10): stage1 과 모든 인자가 같고 stop_radius_m 만 다르다 (기준 r=0 = stage1 셀 그대로).
 # internnav/dataset/internvla_n1_lerobot_dataset_stop_radius.py
-STOP_RADII = (0.5, 1.0)
+STOP_RADII = (0.5, 1.0, 2.0, 3.0)   # 2.0 · 3.0 추가 (2026-11-11, r=1.0 결과가 좋아서)
 
 
 def stop_radius_exp_name(train_label, wait_mode, stop_radius_m):

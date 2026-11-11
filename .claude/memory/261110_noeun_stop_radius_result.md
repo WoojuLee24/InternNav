@@ -62,4 +62,54 @@
 | `turn_in_radius_hunav_s0_ep0_r1.0.jpg` | 48 m | 204 (0.80), 205 (0.49), 206 (0.27). 203 (0.78 m) 은 회전이라 (b) 로 제외 |
 
 ## 학습
-(진행 후 기록)
+- 위치: **node4 큐** (8 GPU, v01 기준 셀과 같은 GPU 수 · batch) → 기준 r=0 은 v01 ckpt 그대로 사용 (재학습 안 함).
+  이 머신(internnav-train1-4-0)은 GPU 4 장이라 v01 과 batch 구성이 달라져 쓰지 않았다.
+- 코드: origin/main `f5643d1` (node4 큐 준비 job 이 git pull 로 받는다). 큐 백업 `node4.txt.bak_1110_stopr`.
+- 순서: 준비(git remote update · pull · `vln_ce_noeun-both-b1` rsync · 깨진 링크 0 확인) → r=1.0 → r=0.5 → (repeat_train)
+- 명령 (큐 job 이 실행):
+  `python3 scripts/train_eval/qwenvl_train/runner.py --machine h200 --config scripts/train_eval/qwenvl_train/relabel_half_noeun/s1.noeun-both-b1_wait-wait_stopr1.0.py --no-eval`
+
+| 인자 | 뜻 | 왜 이 값 |
+|---|---|---|
+| `--machine h200` | data_root · system2_ckpt · nproc 8 을 h200 표에서 | v01 과 같은 설정 |
+| `--config …_stopr1.0.py` | 기준 셀 + `stop_radius_m=1.0` | 바꾸는 변수 하나 |
+| `--no-eval` | 학습만 | 노은역 평가는 A5000 노드 |
+
+| 셀 | stop_radius_m | ckpt |
+|---|---|---|
+| 기준 (v01) | 0 | `/home/irteam/data-vol2/checkpoints/relabel_half_noeun-v01/s1.noeun-both-b1_wait-wait_internvla-n1-system2_20261029_104936` |
+| stopr1.0 | 1.0 | `/home/irteam/data-vol2/checkpoints/relabel_half_noeun-v01/s1.noeun-both-b1_wait-wait_stopr1.0_internvla-n1-system2_20261110_112953` |
+| stopr0.5 | 0.5 | `/home/irteam/data-vol2/checkpoints/relabel_half_noeun-v01/s1.noeun-both-b1_wait-wait_stopr0.5_internvla-n1-system2_20261110_130157` |
+
+### 학습 결과 (node4, 2026-11-10 KST)
+| 셀 | 시작 → 끝 (KST) | step | 학습 시간 | train_loss | 마지막 20 step loss | Drive |
+|---|---|---|---|---|---|---|
+| 기준 v01 (r=0, node2) | 10-29 | 439 | 66 분 | 0.629 | 0.458 | 기존 |
+| stopr1.0 | 20:29 → 22:01 | 578 | 86 분 | 0.536 | 0.345 | `gdrive:InternNav/checkpoints/relabel_half_noeun-v01/` 업로드 |
+| stopr0.5 | 22:01 → 23:23 | 493 | 74 분 | 0.585 | 0.404 | 같음 |
+
+- 둘 다 rc=0, model shard 4 개. step 은 샘플 수 ÷ 128 내림 (앞 표의 494 / 579 는 올림으로 적은 것).
+- loss 가 낮은 것은 성능 비교가 아니다: 쉬운 STOP 샘플 비율이 늘어 평균이 내려간 것. 비교는 A5000 노은역 평가로 한다
+  (도착 프레임 STOP 비율 + 끝 12 프레임 밖 조기 STOP 비율, 기준 14/37 · 4/1483).
+
+## 추가 실험 r=2.0 · 3.0 (2026-11-11, A5000 에서 r=1.0 결과가 좋아서)
+- 설계: 기준 셀 + `stop_radius_m` 만 2.0 / 3.0. 나머지(데이터 noeun-both-b1 · init 공개 System2 · 1 epoch · batch 128 · 8 GPU)는 v01 · r=1.0 과 같다.
+  셀 `s1.noeun-both-b1_wait-wait_stopr2.0.py`, `_stopr3.0.py` (`noeun_base.STOP_RADII` 에 2.0 · 3.0 추가 → `make_cells.py`).
+- 샘플 수 (`check_stop_radius.py --radii 0,1.0,2.0,3.0 --out logs/noeun_stop_radius/check_r23`, r=0 튜플 동일 재확인):
+
+| r (m) | turn | pixel | stop (고유) | 학습 샘플 수 | 1 epoch step | STOP 비율 | 뺀 pixel |
+|---|---|---|---|---|---|---|---|
+| 0 | 3,438 | 45,741 | 1,161 | 56,199 | 439 | 10.3 % | 0 |
+| 1.0 | 3,438 | 45,699 | 4,737 | 74,037 | 578 | 32.0 % | 42 |
+| 2.0 | 3,438 | 44,748 | 8,634 | 92,571 | 723 | 46.6 % | 993 |
+| 3.0 | 3,438 | 43,935 | 11,877 | 107,973 | 843 | 55.0 % | 1,806 |
+
+| r (m) | 0-10 m | 10-30 m | 30-60 m | 60+ m |
+|---|---|---|---|---|
+| 에피소드 수 | 174 | 378 | 294 | 315 |
+| 2.0 STOP | 1,365 | 2,928 | 2,178 | 2,163 |
+| 3.0 STOP | 1,875 | 4,056 | 2,997 | 2,949 |
+
+- 주의: r=3.0 은 학습 샘플의 절반 이상이 STOP 이고, 0-10 m 짧은 경로는 에피소드당 STOP 프레임 ≈ 10.8 개 (3 m = 약 12 프레임).
+  A5000 열린 루프의 "끝 12 프레임 밖 조기 STOP" 지표는 12 프레임 ≈ 3 m 라서, r=3.0 에서는 학습한 STOP 구간과 지표 경계가 겹친다 → 경계를 더 바깥(예 20 프레임)으로도 같이 볼 것.
+- 실행: node4 큐 (node2 · node3 은 수정 전 무한 반복 repeat_train 이라 큐를 다시 읽지 않음).

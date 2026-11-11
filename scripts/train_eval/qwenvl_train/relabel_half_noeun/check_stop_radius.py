@@ -138,6 +138,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
     ap.add_argument("--out", default="logs/noeun_stop_radius/check")
+    ap.add_argument("--radii", default=",".join(str(r) for r in RADII), help="쉼표 구분 반경 (m). 0 은 기준")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     D.local_rank = 0   # 데이터셋 모듈의 rank0_print 를 켠다 (학습에서는 trainer 가 이 전역을 안 바꿔 출력이 없다)
@@ -169,7 +170,7 @@ def main():
     ep_bin = {k: SR.length_bin(v) for k, v in ep_len.items()}
     n_ep_bin = Counter(ep_bin.values())
     rows, bins = [], []
-    for r in RADII:
+    for r in [float(x) for x in a.radii.split(",")]:
         ds = base if r == 0 else build(sr_cls, da, r)
         c = counts(ds, da.stop_weight, wait_w)
         c["r"] = r
