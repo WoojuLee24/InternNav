@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>노은역 랜드마크 걸어 보기</title>
+<style>
+:root{--bg:#f3f4f2;--panel:#fff;--fg:#1d2421;--muted:#5d6762;--line:#d5dad6;--accent:#1c6e8c;--robot:#d6336c;--bad:#c92a2a;--ok:#2b8a3e;--warn:#e67700;
+--sans:"Noto Sans KR","Apple SD Gothic Neo",system-ui,sans-serif;--mono:ui-monospace,Menlo,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#151a18;--panel:#1e2522;--fg:#e4e9e6;--muted:#98a39d;--line:#34403b;--accent:#4dabf7;--robot:#f06595;--bad:#ff6b6b;--ok:#69db7c;--warn:#ffa94d;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 var(--sans);padding:12px 16px}
+h1{font-size:1.15rem;margin:0 0 2px}.sub{color:var(--muted);font-size:.82rem;margin:0}
+.wrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 330px;gap:12px;margin-top:8px}
+@media (max-width:1250px){.wrap{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.side{grid-column:span 2}}
+@media (max-width:760px){body{padding:10px 16px}.wrap{grid-template-columns:minmax(0,1fr)}.side{grid-column:auto}.stage,.rgb{height:44vh;min-height:240px}}
+.stage{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;height:min(80vh,860px);min-height:360px;touch-action:none}
+canvas#map{width:100%;height:100%;display:block;cursor:crosshair}
+.rgb{background:#000;border-radius:8px;height:min(80vh,860px);min-height:360px;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.rgb img{max-width:100%;max-height:100%;display:block}
+.rgb canvas{position:absolute;inset:0;width:100%;height:100%;cursor:pointer}
+.rgb .ov{position:absolute;left:8px;top:6px;color:#fff;font:12px var(--mono);text-shadow:0 0 3px #000;pointer-events:none}
+.side{display:grid;gap:10px;align-content:start;max-height:min(80vh,860px);overflow-y:auto}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:grid;gap:7px}
+.label{font-size:.72rem;letter-spacing:.06em;color:var(--muted)}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+button{font:inherit;font-size:.82rem;padding:4px 10px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer}
+button[aria-pressed=true]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+button.danger{color:var(--bad);border-color:var(--bad)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pad{display:grid;grid-template-columns:repeat(3,46px);gap:4px}.pad button{padding:7px 0;touch-action:none;user-select:none}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:.78rem}
+.warn{color:var(--bad);font-weight:600}
+.hint{position:absolute;left:8px;bottom:6px;font-size:.74rem;color:var(--muted);background:color-mix(in srgb,var(--panel) 85%,transparent);padding:2px 6px;border-radius:4px;pointer-events:none}
+.tip{position:fixed;z-index:50;pointer-events:none;background:#111c;color:#fff;font:12px var(--sans);padding:3px 7px;border-radius:4px;display:none;white-space:nowrap}
+.form{display:grid;grid-template-columns:78px 1fr;gap:6px 8px;align-items:center;font-size:.82rem}
+.form label{color:var(--muted)}
+.form select{width:100%;font:12.5px var(--sans);padding:3px 4px;border:1px solid var(--line);border-radius:4px;background:var(--panel);color:var(--fg)}
+.form input{width:100%;font:12.5px var(--mono);padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:var(--panel);color:var(--fg)}
+.trip{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.pill{display:inline-block;font-size:.72rem;padding:1px 7px;border-radius:9px;border:1px solid currentColor}
+.shots{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+.shot{position:relative;aspect-ratio:1;overflow:hidden;border:1px solid var(--line);border-radius:4px;background:#000;cursor:zoom-in}
+.shot img{position:absolute;max-width:none}
+.shot .ring{position:absolute;left:50%;top:50%;width:26px;height:26px;transform:translate(-50%,-50%);border:2px solid #ffd24a;border-radius:50%;box-shadow:0 0 0 1px #000a}
+.shot .cap{position:absolute;left:0;right:0;bottom:0;background:#000a;color:#fff;font:10px var(--mono);padding:0 3px;text-align:right}
+#big{position:fixed;inset:0;background:#000d;display:none;align-items:center;justify-content:center;z-index:60;cursor:zoom-out}
+#big canvas{max-width:92vw;max-height:88vh}
+</style></head><body>
+<h1>노은역 랜드마크 걸어 보기</h1>
+<p class="sub">RBQ10 이 물리로 걷습니다. W/S 전진·후진 · A/D 회전 · Q/E 옆걸음 · R 다시 세우기 · <b>카메라만 옮기기</b>: ↑/↓ 앞뒤 · ←/→ 좌우 0.3 m · PgUp/PgDn 높이 0.2 m · C 되돌리기. 지도·카메라의 랜드마크에 마우스를 올리면 이름, 누르면 .house 정보가 열립니다.
+지도 빈 곳 누르기 = 로봇 놓기(끌면 그 방향 보기) · Shift+끌기 / "로봇 놓기" 버튼 = 랜드마크 위라도 놓기 · 로봇 점 끌기 = 제자리에서 방향만 · 휠 = 확대 · 스페이스+드래그 = 지도 이동.</p>
+<div class="wrap">
+  <div class="stage" id="stage"><canvas id="map"></canvas><div class="hint" id="hint"></div></div>
+  <div class="rgb" id="rgbBox"><img id="rgb" alt="로봇 카메라"><canvas id="ovc"></canvas><div class="ov num" id="ov"></div></div>
+  <div class="side">
+    <div class="box"><span class="label">층</span><div class="row" id="layers"></div>
+      <div class="row"><button id="follow" aria-pressed="true">로봇 따라가기</button><button id="fit">전체 보기</button>
+        <button id="place" aria-pressed="false" title="켜면 지도를 누른 곳에 로봇을 놓습니다 (랜드마크 위라도). 끌면 그 방향을 봅니다. Shift+끌기도 같음">로봇 놓기</button></div>
+      <div class="row">
+        <button id="tOff" aria-pressed="false">뺀 것도 보기</button>
+        <button id="tSpots" aria-pressed="false">목적지 전부</button>
+        <button id="tName" aria-pressed="false">이름 늘 표시</button>
+        <button id="tSelBox" aria-pressed="true" title="고른 물체의 .house 3D 상자(자홍 선)와 그 상자로 돌린 SAM 분할을 카메라 화면에 그립니다">고른 물체 .house 상자·분할</button>
+      </div>
+      <div class="num" id="counts"></div>
+    </div>
+    <div class="box"><span class="label">분할 (SAM) — 카메라 화면을 칠해 보기</span>
+      <div class="row"><button id="sOff" aria-pressed="true">끔</button><button id="sHouse" aria-pressed="false">.house 상자 (실시간)</button><button id="sDet">검출기 (한 번)</button></div>
+      <p class="sub" style="font-size:.76rem">.house 상자: .house 에 적힌 물체 위치·크기를 화면에 투영한 상자로 SAM 만 돌립니다 (약 4~5 장/s). .house 에 빠진 물체는 안 나옵니다.
+        검출기: 69 와 같이 어휘 전체로 찾고 칠합니다 (약 1 초, 누를 때 한 번). 빠진 물체 찾기용.</p>
+      <div class="sub num" id="segMsg"></div>
+    </div>
+    <div class="box" id="addBox"><span class="label" id="aTitle">물체 추가 — 카메라 화면을 눌러 .house 에 없는 물체 넣기</span>
+      <div class="row"><button id="aStart" class="primary">+ 화면 멈추고 추가</button><button id="aCancel" style="display:none">취소 (실시간으로)</button></div>
+      <div id="aPanel" style="display:none;gap:7px">
+        <p class="sub" style="font-size:.76rem">누르기 = 물체 점 · Shift+누르기 = 빼는 점 · 드래그 = 상자 · 되돌리기 = 마지막 점 지우기</p>
+        <div class="form">
+          <label for="aSeg">분할 모델</label><select id="aSeg"><option value="sam2">SAM2.1 (hiera base+)</option><option value="sam1">SAM (vit-base, 69 와 같음)</option></select>
+          <label for="aRec">추천 모델</label><select id="aRec"><option value="dino">GroundingDINO (어휘 100 개)</option><option value="gemma">Gemma-4-31B 4bit (서버 켜져 있을 때)</option></select>
+        </div>
+        <div class="row"><button id="aUndo">되돌리기</button><button id="aClear">점 전부 지우기</button><button id="aSug" class="aName">이름 추천 받기</button></div>
+        <div class="row aName" id="aSugs"></div>
+        <div class="form aName">
+          <label for="aName">대표 이름</label><input id="aName" list="clsName" autocomplete="off" placeholder="직접 입력 · 추천 · 기존 class 목록">
+          <label for="aAlias">다른 이름</label><input id="aAlias" placeholder="쉼표로">
+          <label for="aCommon">공통 class</label><input id="aCommon" list="clsCommon" autocomplete="off" placeholder="비우면 대표 이름">
+        </div>
+        <div class="num" id="a3d"></div>
+        <div class="row"><button class="primary" id="aSave" disabled>추가 저장</button></div>
+        <div class="sub" id="aMsg" style="font-size:.78rem;min-height:1.1em"></div>
+      </div>
+    </div>
+    <div class="box" id="info"><span class="label">고른 랜드마크</span><p class="sub" id="noSel">지도나 카메라에서 랜드마크를 누르세요.</p>
+      <div id="sel" style="display:none;gap:7px" class="box-in">
+        <div class="row"><b id="sName" style="font-size:1rem"></b><span class="pill" id="sState"></span></div>
+        <div class="num" id="sMeta"></div>
+        <div class="form">
+          <label for="fName">대표 이름</label><input id="fName" list="clsName" autocomplete="off" title=".house 의 raw_name — 글자를 넣으면 기존 class 목록">
+          <label for="fAlias">다른 이름</label><input id="fAlias" placeholder="쉼표로 (문장 만들 때 골라 씀)">
+          <label for="fCommon">공통 class</label><input id="fCommon" list="clsCommon" autocomplete="off" placeholder="비우면 대표 이름 (.house 의 mpcat40)">
+          <label>중심 xyz</label><div class="trip"><input id="cx"><input id="cy"><input id="cz"></div>
+          <label>반지름 r</label><div class="trip"><input id="r0"><input id="r1"><input id="r2"></div>
+          <label>층(region)</label><span class="num" id="fRegion"></span>
+        </div>
+        <div class="row"><button class="primary" id="save">저장</button><button id="refit">화면에서 다시 맞추기</button><button id="unov">상자 원래대로</button>
+          <button class="danger" id="drop">빼기</button><button id="go">가 보기</button></div>
+        <div class="sub" id="saveMsg" style="font-size:.78rem;min-height:1.1em"></div>
+        <span class="label">분할 (SAM mask) · 노란 칠 = 이 물체로 잘라낸 모양</span>
+        <div class="shots" id="masks"></div>
+        <span class="label">69 스캔에서 찍힌 사진 · 노란 원 = 검출 위치</span>
+        <div class="shots" id="shots"></div>
+      </div>
+    </div>
+    <div class="box"><span class="label">조종</span>
+      <div class="pad"><button data-k="q">Q 옆</button><button data-k="w">W ↑</button><button data-k="e">E 옆</button>
+        <button data-k="a">A ↺</button><button data-k="s">S ↓</button><button data-k="d">D ↻</button></div>
+      <label class="row" for="spd" style="justify-content:space-between"><span>전진 속도</span><span class="num" id="spdV">0.5 m/s</span></label>
+      <input id="spd" type="range" min="0.2" max="1.5" step="0.1" value="0.5">
+      <div class="row"><button id="reset">R 다시 세우기</button></div>
+      <span class="label">카메라 위치 (로봇은 그대로)</span>
+      <div class="pad"><button data-c="0,0,0.2" title="PgUp">위 ▲</button><button data-c="0.3,0,0" title="↑">앞</button><button data-c="0,0,-0.2" title="PgDn">아래 ▼</button>
+        <button data-c="0,0.3,0" title="←">왼쪽</button><button data-c="-0.3,0,0" title="↓">뒤</button><button data-c="0,-0.3,0" title="→">오른쪽</button></div>
+      <div class="row"><button id="camReset" title="C">카메라 되돌리기</button><span class="num" id="camOff"></span></div>
+      <div id="state" class="num"></div>
+    </div>
+  </div>
+</div>
+<div class="tip" id="tip"></div>
+<datalist id="clsName"></datalist><datalist id="clsCommon"></datalist>
+<div id="big"><canvas id="bigc" width="640" height="480"></canvas></div>
+<script>
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let META, NM, LAY, OBJ = [], pose = null, fallen = false, follow = true, spaceDown = false, sel = null, hover = null;
+let showOff = false, showSpots = false, showName = false;
+const bgs = {};
+const cv = $('map'), ctx = cv.getContext('2d'), stage = $('stage');
+let view = {s: 1, tx: 0, ty: 0};
+const w2p = (x, y) => [(x - LAY.x0) / LAY.res, (LAY.y1 - y) / LAY.res];
+const p2w = (u, v) => [LAY.x0 + u * LAY.res, LAY.y1 - v * LAY.res];
+const s2w = (sx, sy) => p2w((sx - view.tx) / view.s, (sy - view.ty) / view.s);
+const w2s = (x, y) => { const [u, v] = w2p(x, y); return [u * view.s + view.tx, v * view.s + view.ty]; };
+const post = (p, b) => fetch(p, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(b)}).then(r => r.json());
+const ctr = o => o.house ? o.house.center : o.xyz;
+const layerOfZ = z => META.layers.find(l => z >= l.zlo && z < l.zhi) || META.layers[0];
+const onLayer = o => { const z = ctr(o)[2]; return z >= LAY.zlo && z < LAY.zhi; };
+const visible = o => showOff || o.kept;
+function colorOf(o) {
+  if (!o.kept) return '#9aa1a6';
+  if (!o.house.in_house) return css('--warn');
+  let h = 0; for (const ch of o.house.mpcat40) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `hsl(${h} 70% 45%)`;
+}
+
+function fit() { const r = stage.getBoundingClientRect(), s = Math.min(r.width / LAY.w, r.height / LAY.h); view = {s, tx: (r.width - LAY.w * s) / 2, ty: (r.height - LAY.h * s) / 2}; }
+function resize() { const r = stage.getBoundingClientRect(), d = devicePixelRatio || 1; cv.width = r.width * d; cv.height = r.height * d; ctx.setTransform(d, 0, 0, d, 0, 0); draw(); }
+function center() { if (!pose) return; const r = stage.getBoundingClientRect(), [u, v] = w2p(pose.x, pose.y); view.tx = r.width / 2 - u * view.s; view.ty = r.height / 2 - v * view.s; }
+
+let drag = null;
+function draw() {
+  if (!LAY) return;
+  const r = stage.getBoundingClientRect();
+  ctx.save(); ctx.clearRect(0, 0, r.width, r.height); ctx.translate(view.tx, view.ty); ctx.scale(view.s, view.s);
+  ctx.imageSmoothingEnabled = false;
+  if (bgs[LAY.tag]?.complete) ctx.drawImage(bgs[LAY.tag], 0, 0);
+  const px1 = 1 / view.s;
+  // 목적지
+  for (const o of OBJ) {
+    if (!onLayer(o) || !(showSpots || o === sel) || !o.kept) continue;
+    for (const s of o.spots) {
+      const [u, v] = w2p(s.xyz[0], s.xyz[1]);
+      ctx.strokeStyle = ctx.fillStyle = css('--ok'); ctx.lineWidth = 2 * px1;
+      ctx.beginPath(); ctx.arc(u, v, 4 * px1, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(u, v); ctx.lineTo(u + Math.cos(s.yaw) * 0.6 / LAY.res, v - Math.sin(s.yaw) * 0.6 / LAY.res); ctx.stroke();
+      if (o === sel && s.anchor) { const [ua, va] = w2p(s.anchor.xyz[0], s.anchor.xyz[1]); ctx.setLineDash([4 * px1, 3 * px1]); ctx.beginPath(); ctx.moveTo(u, v); ctx.lineTo(ua, va); ctx.stroke(); ctx.setLineDash([]); }
+    }
+  }
+  // 랜드마크: .house 타원 + 점
+  ctx.font = `${12 * px1}px sans-serif`;
+  for (const o of OBJ) {
+    if (!visible(o) || !onLayer(o)) continue;
+    const c = ctr(o), [u, v] = w2p(c[0], c[1]), col = colorOf(o), big = o === sel || o === hover;
+    if (o.house) {
+      const e = o.house.ell;
+      ctx.strokeStyle = col; ctx.lineWidth = (big ? 2.5 : 1.2) * px1; ctx.setLineDash(o.house.in_house ? [] : [3 * px1, 3 * px1]);
+      ctx.beginPath(); ctx.ellipse(u, v, Math.max(e.a / LAY.res, 2 * px1), Math.max(e.b / LAY.res, 2 * px1), -e.ang, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.fillStyle = col; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2 * px1;
+    ctx.beginPath(); ctx.arc(u, v, (big ? 6 : o.kept ? 4 : 2.5) * px1, 0, 7); ctx.fill(); ctx.stroke();
+    if (showName || big) { ctx.fillStyle = css('--fg'); ctx.fillText(o.house ? o.house.raw_name : o.name, u + 7 * px1, v - 5 * px1); }
+  }
+  if (ADD?.prev && ADD.prev.center[2] >= LAY.zlo && ADD.prev.center[2] < LAY.zhi) {   // 추가할 물체 미리보기 (점선 타원 + 3D 점)
+    const e = ADD.prev.ell, [u, v] = w2p(ADD.prev.center[0], ADD.prev.center[1]);
+    ctx.fillStyle = '#ffd24a';
+    for (const q of ADD.prev.points) { const [pu, pv] = w2p(q[0], q[1]); ctx.fillRect(pu - 1.5 * px1, pv - 1.5 * px1, 3 * px1, 3 * px1); }
+    ctx.strokeStyle = '#ffd24a'; ctx.lineWidth = 3 * px1; ctx.setLineDash([6 * px1, 4 * px1]);
+    ctx.beginPath(); ctx.ellipse(u, v, Math.max(e.a / LAY.res, 3 * px1), Math.max(e.b / LAY.res, 3 * px1), -e.ang, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (pose) {   // 시야 부채꼴 (hfov, 반지름 4 m) + 로봇 점
+    const [u, v] = w2p(pose.x, pose.y), R = 4 / LAY.res, hf = META.hfov_deg * Math.PI / 360, a = pose.C ? -Math.atan2(pose.C[1][2], pose.C[0][2]) : -pose.yaw;   // 부채꼴 = 카메라가 보는 방향
+    const rc = fallen ? css('--bad') : css('--robot');
+    const [cu, cv] = pose.C ? w2p(pose.C[0][3], pose.C[1][3]) : [u, v];   // 부채꼴은 카메라 자리에서 (카메라를 옮겼으면 로봇과 다르다)
+    const fan = () => { ctx.beginPath(); ctx.moveTo(cu, cv); ctx.arc(cu, cv, R, a - hf, a + hf); ctx.closePath(); };
+    ctx.globalAlpha = .35; ctx.fillStyle = rc; fan(); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.lineJoin = 'round';   // 테두리: 흰 바깥선 + 색 안쪽선 -> 어떤 배경에서도 보인다
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 5 * px1; fan(); ctx.stroke();
+    ctx.strokeStyle = rc; ctx.lineWidth = 2.5 * px1; fan(); ctx.stroke();
+    // 바라보는 방향 화살표 (부채꼴 끝까지)
+    const ex = u + Math.cos(a) * R, ey = v + Math.sin(a) * R, hs = 12 * px1;
+    const arrow = () => { ctx.beginPath(); ctx.moveTo(u, v); ctx.lineTo(ex, ey);
+      ctx.moveTo(ex - Math.cos(a - .45) * hs, ey - Math.sin(a - .45) * hs); ctx.lineTo(ex, ey); ctx.lineTo(ex - Math.cos(a + .45) * hs, ey - Math.sin(a + .45) * hs); };
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 6 * px1; arrow(); ctx.stroke();
+    ctx.strokeStyle = rc; ctx.lineWidth = 3 * px1; arrow(); ctx.stroke();
+    // 로봇: 검은 테 + 흰 테 + 색 점, 바깥 고리
+    ctx.strokeStyle = rc; ctx.lineWidth = 2.5 * px1; ctx.beginPath(); ctx.arc(u, v, 18 * px1, 0, 7); ctx.stroke();
+    ctx.fillStyle = rc; ctx.strokeStyle = '#000'; ctx.lineWidth = 5 * px1; ctx.beginPath(); ctx.arc(u, v, 10 * px1, 0, 7); ctx.stroke();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 3 * px1; ctx.stroke(); ctx.fill();
+  }
+  if (drag?.tele) {   // 놓을 자리 미리보기: 로봇 고리 + (끌었으면) 시야 부채꼴 + 방향 화살표
+    const [u, v] = w2p(drag.wx, drag.wy), [u2, v2] = w2p(drag.ex, drag.ey), ac = css('--accent');
+    const turned = Math.hypot(drag.ex - drag.wx, drag.ey - drag.wy) > 0.3;
+    const a = turned ? Math.atan2(v2 - v, u2 - u) : -(pose ? pose.yaw : 0), Rf = 4 / LAY.res, hf = META.hfov_deg * Math.PI / 360, hs = 12 * px1;
+    ctx.globalAlpha = .25; ctx.fillStyle = ac; ctx.beginPath(); ctx.moveTo(u, v); ctx.arc(u, v, Rf, a - hf, a + hf); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+    const ex = u + Math.cos(a) * Rf, ey = v + Math.sin(a) * Rf;
+    for (const [w, c] of [[6, '#fff'], [3, ac]]) { ctx.strokeStyle = c; ctx.lineWidth = w * px1; ctx.beginPath();
+      ctx.arc(u, v, 10 * px1, 0, 7); ctx.moveTo(u, v); ctx.lineTo(ex, ey);
+      ctx.moveTo(ex - Math.cos(a - .45) * hs, ey - Math.sin(a - .45) * hs); ctx.lineTo(ex, ey); ctx.lineTo(ex - Math.cos(a + .45) * hs, ey - Math.sin(a + .45) * hs); ctx.stroke(); }
+    ctx.font = `${13 * px1}px sans-serif`; ctx.fillStyle = css('--fg');
+    ctx.fillText(drag.rot ? '방향만 바꾸기' : turned ? `여기로 · ${Math.round(Math.atan2(drag.ey - drag.wy, drag.ex - drag.wx) * 180 / Math.PI)}°` : '여기로 (방향 그대로)', u + 14 * px1, v - 12 * px1);
+  }
+  ctx.restore();
+}
+
+/* 지도: 마우스 아래 랜드마크 (화면 12 px 안) */
+function pickMap(sx, sy) {
+  let best = null, bd = 12;
+  for (const o of OBJ) { if (!visible(o) || !onLayer(o)) continue; const c = ctr(o), [x, y] = w2s(c[0], c[1]), d = Math.hypot(x - sx, y - sy); if (d < bd) { bd = d; best = o; } }
+  return best;
+}
+function tip(o, e) { const t = $('tip'); if (!o) { t.style.display = 'none'; return; }
+  t.textContent = `#${o.id} ${o.house ? o.house.raw_name : o.name}` + (o.kept ? (o.house.in_house ? '' : ' (높이로 .house 밖)') : ` (${o.why})`);
+  t.style.left = e.clientX + 12 + 'px'; t.style.top = e.clientY + 10 + 'px'; t.style.display = 'block'; }
+cv.addEventListener('pointerdown', e => {
+  cv.setPointerCapture(e.pointerId);
+  const b = cv.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top, [wx, wy] = s2w(x, y);
+  if (spaceDown || e.button !== 0) { drag = {pan: true, x, y, tx: view.tx, ty: view.ty}; setFollow(false); return; }
+  if (pose) { const [rx, ry] = w2s(pose.x, pose.y);   // 로봇 점을 잡고 끌기 = 제자리에서 방향만
+    if (Math.hypot(rx - x, ry - y) < 14) { drag = {tele: true, rot: true, wx: pose.x, wy: pose.y, ex: pose.x, ey: pose.y}; return; } }
+  const o = place || e.shiftKey ? null : pickMap(x, y);   // 로봇 놓기 모드 · Shift = 랜드마크 위라도 놓기
+  if (o) { select(o); drag = null; return; }
+  drag = {tele: true, wx, wy, ex: wx, ey: wy};
+});
+cv.addEventListener('pointermove', e => {
+  const b = cv.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top;
+  if (!drag) { const o = pickMap(x, y); if (o !== hover) { hover = o; draw(); } tip(o, e); return; }
+  const [wx, wy] = s2w(x, y);
+  if (drag.pan) { view.tx = drag.tx + x - drag.x; view.ty = drag.ty + y - drag.y; } else { drag.ex = wx; drag.ey = wy; }
+  draw();
+});
+cv.addEventListener('pointerleave', () => { hover = null; tip(null); draw(); });
+function endDrag() {
+  const d = drag; drag = null;
+  if (d?.rot && Math.hypot(d.ex - d.wx, d.ey - d.wy) <= 0.3) { draw(); return; }   // 로봇 점을 눌렀다 뗌 = 아무것도 안 함
+  if (d?.tele) { const b = {x: d.wx, y: d.wy, tag: LAY.tag}; if (Math.hypot(d.ex - d.wx, d.ey - d.wy) > 0.3) b.yaw = Math.atan2(d.ey - d.wy, d.ex - d.wx); post('/teleport', b); setFollow(true); }
+  draw();
+}
+cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag);
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('wheel', e => { e.preventDefault(); const b = cv.getBoundingClientRect(), f = Math.exp(-e.deltaY * .0015), sx = e.clientX - b.left, sy = e.clientY - b.top;
+  view.tx = sx - (sx - view.tx) * f; view.ty = sy - (sy - view.ty) * f; view.s *= f; draw(); }, {passive: false});
+function setFollow(f) { follow = f; $('follow').setAttribute('aria-pressed', f); }
+$('follow').onclick = () => { setFollow(!follow); if (follow) { center(); draw(); } };
+$('fit').onclick = () => { setFollow(false); fit(); draw(); };
+let place = false;
+function setPlace(v) { place = v; $('place').setAttribute('aria-pressed', v); cv.style.cursor = v ? 'cell' : ''; }
+$('place').onclick = () => setPlace(!place);
+const tog = (id, f) => $(id).onclick = () => { const v = f(); $(id).setAttribute('aria-pressed', v); draw(); drawOv(); };
+tog('tOff', () => showOff = !showOff); tog('tSelBox', () => selBox = !selBox); tog('tSpots', () => showSpots = !showSpots); tog('tName', () => showName = !showName);
+
+/* 카메라 위에 랜드마크 되찍기: c2w = [몸 회전 R (없으면 Rz(yaw)), 로봇 위치] · M_cam · OpenCV (x 오른쪽, y 아래, z 앞) */
+const ovc = $('ovc'), octx = ovc.getContext('2d');
+let ovPts = [], VIS = null, visBusy = false, visKey = '';
+async function updVis() {   // 카메라에서 안 가려진 랜드마크 (서버가 메쉬에 광선을 쏜다)
+  if (!pose || visBusy) return;
+  const k = [pose.x, pose.y, pose.z, pose.yaw, ...(pose.cam_off || [])].map(v => v.toFixed(2)).join(); if (k === visKey) return;
+  visBusy = true;
+  try { VIS = new Set(await (await fetch(`/visible?x=${pose.x}&y=${pose.y}&z=${pose.z}&yaw=${pose.yaw}` + (pose.C ? `&cx=${pose.C[0][3]}&cy=${pose.C[1][3]}&cz=${pose.C[2][3]}` : ''))).json()); visKey = k; drawOv(); } catch (e) {}
+  visBusy = false;
+}
+setInterval(updVis, 300);
+function camOf() {
+  if (!pose || !NM) return null;
+  const c = Math.cos(pose.yaw), s = Math.sin(pose.yaw), M = NM.M_cam, Rb = pose.R || [[c, -s, 0], [s, c, 0], [0, 0, 1]];   // R = 몸 기울기까지 (렌더와 같은 자세)
+  const T = [[...Rb[0], pose.x], [...Rb[1], pose.y], [...Rb[2], pose.z], [0, 0, 0, 1]];
+  const W = pose.C || [0, 1, 2].map(i => [0, 1, 2, 3].map(j => T[i].reduce((a, t, k) => a + t * M[k][j], 0)));   // C = 실제로 찍은 카메라 (시점 옮김 포함)
+  const f = NM.cam_w / 2 / Math.tan(META.hfov_deg * Math.PI / 360);
+  return {R: W.map(r => r.slice(0, 3)), t: W.map(r => r[3]), f};
+}
+function project(cam, p) {
+  const d = [p[0] - cam.t[0], p[1] - cam.t[1], p[2] - cam.t[2]];
+  const x = cam.R[0][0] * d[0] + cam.R[1][0] * d[1] + cam.R[2][0] * d[2], y = cam.R[0][1] * d[0] + cam.R[1][1] * d[1] + cam.R[2][1] * d[2], z = cam.R[0][2] * d[0] + cam.R[1][2] * d[1] + cam.R[2][2] * d[2];
+  if (z < 0.3) return null;
+  return [cam.f * x / z + NM.cam_w / 2, cam.f * y / z + NM.cam_h / 2, z];
+}
+function drawOv() {
+  if (seg === 'pick') return;
+  const box = $('rgbBox').getBoundingClientRect(), im = $('rgb'), d = devicePixelRatio || 1;
+  ovc.width = box.width * d; ovc.height = box.height * d; octx.setTransform(d, 0, 0, d, 0, 0); octx.clearRect(0, 0, box.width, box.height);
+  ovPts = [];
+  const cam = camOf(); if (!cam || !im.naturalWidth) return;
+  const ir = im.getBoundingClientRect(), k = ir.width / NM.cam_w, ox = ir.left - box.left, oy = ir.top - box.top;
+  octx.font = '12px sans-serif'; octx.textBaseline = 'bottom';
+  for (const o of OBJ) {
+    if (!visible(o)) continue;
+    const p = project(cam, ctr(o)); if (!p || p[2] > 25) continue;
+    if (p[0] < 0 || p[0] > NM.cam_w || p[1] < 0 || p[1] > NM.cam_h) continue;
+    const x = ox + p[0] * k, y = oy + p[1] * k, col = colorOf(o), big = o === sel || o === hover, rr = Math.max(5, Math.min(18, 30 / p[2]));
+    if (VIS && !VIS.has(o.id)) {   // 벽 뒤 — 흐린 점선만 (고른 것이면 보이게)
+      if (!big) continue;
+      octx.setLineDash([3, 3]); octx.globalAlpha = .6;
+    }
+    octx.lineWidth = big ? 3 : 1.6; octx.strokeStyle = col; octx.beginPath(); octx.arc(x, y, rr, 0, 7); octx.stroke();
+    octx.setLineDash([]); octx.globalAlpha = 1;
+    const label = `${o.house ? o.house.raw_name : o.name} ${p[2].toFixed(1)}m` + (VIS && !VIS.has(o.id) ? ' (가려짐)' : '');
+    if (big || showName || p[2] < 8) { octx.fillStyle = '#000a'; const w = octx.measureText(label).width; octx.fillRect(x + rr, y - rr - 15, w + 8, 16); octx.fillStyle = '#fff'; octx.fillText(label, x + rr + 4, y - rr); }
+    ovPts.push([x, y, o]);
+  }
+}
+function pickOv(e) { const b = ovc.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top; let best = null, bd = 16;
+  for (const [px, py, o] of ovPts) { const d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = o; } } return best; }
+/* 물체 추가: 멈춘 화면 위 점·상자 -> 분할 서버 (SAM2/SAM) -> 3D (페이지 서버 광선) */
+let ADD = null;   // {fid, pose, W, H, points:[[u,v,1|0]], box, pixels, prev}
+function imgXY(e) { const ir = img.getBoundingClientRect(); return [(e.clientX - ir.left) * NM.cam_w / ir.width, (e.clientY - ir.top) * NM.cam_h / ir.height]; }
+const aMsg = t => $('aMsg').textContent = t;
+async function pickStart(refit) {   // refit = 상자를 다시 맞출 랜드마크 (없으면 새 물체 추가)
+  if (refit?.type) refit = ADD?.refit || null;   // 버튼 클릭 이벤트 -> 지금 모드 유지
+  aMsg('화면 멈추는 중…');
+  const r = await post('/seg/pick/start', {}); if (r.error) { aMsg(r.error); return; }
+  ADD = {...r, points: [], box: null, pixels: [], prev: null, refit};
+  document.querySelectorAll('.aName').forEach(e => e.style.display = refit ? 'none' : '');
+  $('aTitle').textContent = refit ? `상자 다시 맞추기 — #${refit.id} ${refit.house ? refit.house.raw_name : refit.name} 를 화면에서 누르세요` : '물체 추가 — 카메라 화면을 눌러 .house 에 없는 물체 넣기';
+  $('aSave').textContent = refit ? '이 모양으로 상자 저장' : '추가 저장';
+  $('addBox').scrollIntoView({block: 'nearest'});
+  seg = 'pick'; ovc.style.display = ''; ovc.style.cursor = 'crosshair'; octx.clearRect(0, 0, ovc.width, ovc.height);
+  img.src = '/seg/pick/frame.jpg?fid=' + r.fid;
+  $('aPanel').style.display = 'grid'; $('aCancel').style.display = ''; $('aStart').textContent = '다시 멈추기 (지금 화면)';
+  $('a3d').textContent = ''; $('aSugs').innerHTML = ''; $('aSave').disabled = true;
+  aMsg(refit ? '청록 선 = 지금 .house 상자. 물체 둘레에 상자를 드래그하면 SAM2 가 자홍색으로 칠합니다.' : '물체를 누르세요. 다른 각도에서 다시 보려면 취소 → 로봇 이동 → 다시 멈추기.');
+  if (refit) { const r2 = await post('/seg/pick/mask', {fid: ADD.fid, points: [], box: null, id: refit.id}); if (r2.jpg) img.src = 'data:image/jpeg;base64,' + r2.jpg; }
+}
+function pickEnd() { ADD = null; $('aTitle').textContent = '물체 추가 — 카메라 화면을 눌러 .house 에 없는 물체 넣기'; $('aSave').textContent = '추가 저장'; document.querySelectorAll('.aName').forEach(e => e.style.display = ''); $('aPanel').style.display = 'none'; $('aCancel').style.display = 'none'; $('aStart').textContent = '+ 화면 멈추고 추가'; ovc.style.cursor = ''; setSeg('off'); draw(); }
+async function pickMask() {
+  aMsg('분할 중…');
+  const r = await post('/seg/pick/mask', {fid: ADD.fid, points: ADD.points, box: ADD.box, model: $('aSeg').value, id: ADD.refit?.id});
+  if (r.error) { aMsg(r.error); return; }
+  img.src = 'data:image/jpeg;base64,' + r.jpg; ADD.pixels = r.pixels; ADD.prev = null; $('aSave').disabled = true; draw();
+  if (!r.n_px) { $('a3d').textContent = ''; aMsg(''); return; }
+  aMsg(`분할 ${r.n_px} px · ${r.ms} ms · 3D 계산 중…`);
+  const q = await post('/add_preview', {pose: ADD.pose, W: ADD.W, H: ADD.H, hfov_deg: META.hfov_deg, pixels: ADD.pixels});
+  if (q.error) { aMsg(q.error); return; }
+  ADD.prev = q;
+  const old = ADD.refit?.house;
+  $('a3d').innerHTML = (old ? `지금 상자: 중심 ${fmt(old.center).join(', ')} · 반지름 ${fmt(old.radii).join(', ')}<br>새 상자: ` : '') + `중심 ${fmt(q.center).join(', ')} · 반지름 ${fmt(q.radii).join(', ')}<br>3D 점 ${q.points.length} (메쉬에 맞음 ${q.n_kept} · 물체 거리로 옮김 ${q.n_moved}) · 카메라에서 ${q.range_m} m · 바닥에서 ${q.dz} m`
+    + (q.in_house ? '' : ` <span class="warn">(높이 허용 밖 — .house 에 안 들어감)</span>`)
+    + (q.near.filter(n => n.id !== ADD.refit?.id).length ? `<br><span class="warn">2 m 안에 이미 있음: ${q.near.filter(n => n.id !== ADD.refit?.id).map(n => `#${n.id} ${n.name} ${n.dist}m${n.kept ? '' : '(뺀 것)'}`).join(', ')}</span>` : '');
+  $('aSave').disabled = false; aMsg(`분할 ${r.n_px} px · ${r.ms} ms`);
+  const L = layerOfZ(q.center[2]); if (L.tag !== LAY.tag) selectLayer(L.tag, false); draw();
+}
+let pdrag = null;
+ovc.addEventListener('pointerdown', e => { if (seg !== 'pick' || !ADD) return; ovc.setPointerCapture(e.pointerId); pdrag = {a: imgXY(e), b: imgXY(e), shift: e.shiftKey}; });
+ovc.addEventListener('pointermove', e => { if (!pdrag) return; pdrag.b = imgXY(e);
+  const ir = img.getBoundingClientRect(), bx = $('rgbBox').getBoundingClientRect(), k = ir.width / NM.cam_w, ox = ir.left - bx.left, oy = ir.top - bx.top;
+  octx.clearRect(0, 0, ovc.width, ovc.height); octx.strokeStyle = '#50aaff'; octx.lineWidth = 2;
+  octx.strokeRect(ox + pdrag.a[0] * k, oy + pdrag.a[1] * k, (pdrag.b[0] - pdrag.a[0]) * k, (pdrag.b[1] - pdrag.a[1]) * k); });
+ovc.addEventListener('pointerup', e => { if (!pdrag) return; const d = pdrag; pdrag = null; octx.clearRect(0, 0, ovc.width, ovc.height);
+  const inside = ([x, y]) => x >= 0 && y >= 0 && x < NM.cam_w && y < NM.cam_h;
+  if (Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]) > 8) {
+    const c = v => Math.max(0, Math.min(v, NM.cam_w - 1)), r = v => Math.max(0, Math.min(v, NM.cam_h - 1));
+    ADD.box = [c(Math.min(d.a[0], d.b[0])), r(Math.min(d.a[1], d.b[1])), c(Math.max(d.a[0], d.b[0])), r(Math.max(d.a[1], d.b[1]))].map(Math.round);
+  } else if (inside(d.a)) ADD.points.push([Math.round(d.a[0]), Math.round(d.a[1]), d.shift ? 0 : 1]);
+  else return;
+  pickMask(); });
+$('aStart').onclick = pickStart;
+$('refit').onclick = () => { if (!sel) return; if (!sel.kept) { $('saveMsg').textContent = '뺀 랜드마크입니다. 먼저 되살리세요.'; return; } pickStart(sel); }; $('aCancel').onclick = pickEnd;
+$('aUndo').onclick = () => { if (!ADD) return; if (ADD.points.length) ADD.points.pop(); else ADD.box = null; pickMask(); };
+$('aClear').onclick = () => { if (!ADD) return; ADD.points = []; ADD.box = null; pickMask(); };
+$('aSeg').onchange = () => { if (ADD && (ADD.points.length || ADD.box)) pickMask(); };
+function useName(n) { $('aName').value = n.name; if (n.aliases?.length) $('aAlias').value = n.aliases.join(', '); if (n.common) $('aCommon').value = n.common; }
+$('aSug').onclick = async () => {
+  if (!ADD?.prev) { aMsg('먼저 물체를 눌러 분할하세요.'); return; }
+  const m = $('aRec').value; aMsg(m === 'gemma' ? 'Gemma 에게 묻는 중… (수십 초 걸릴 수 있음)' : 'GroundingDINO 검출 중…'); $('aSugs').innerHTML = '';
+  const r = await post('/seg/pick/suggest', {fid: ADD.fid, model: m});
+  if (r.error) { aMsg(r.error); return; }
+  if (!r.names.length) { aMsg(`추천 없음 (${r.ms} ms) — 직접 입력하세요.`); return; }
+  for (const n of r.names) { const b = document.createElement('button'); b.textContent = n.name + (n.score != null ? ` ${n.score}` : '');
+    b.title = n.det != null ? `검출 점수 ${n.det} · 마스크와 겹침 ${n.iou}` : (n.aliases.length ? '다른 이름: ' + n.aliases.join(', ') : '') + (n.common ? ` · 공통 ${n.common}` : '');
+    b.onclick = () => useName(n); $('aSugs').appendChild(b); }
+  useName(r.names[0]); aMsg(`${m === 'gemma' ? 'Gemma' : 'GroundingDINO'} 추천 ${r.names.length}개 · ${r.ms} ms — 누르면 이름 칸에 들어갑니다 (고쳐 써도 됩니다).`);
+};
+$('aSave').onclick = async () => {
+  if (ADD.refit) {
+    const o = ADD.refit; aMsg('저장 중…');
+    const r = await post('/edit', {id: o.id, points: ADD.prev.points, source: {pose: ADD.pose, fid: ADD.fid, seg: $('aSeg').value, points: ADD.points, box: ADD.box}});
+    if (r.error) { aMsg('저장 실패: ' + r.error); return; }
+    const i = OBJ.findIndex(x => x.id === r.obj.id); OBJ[i] = r.obj; pickEnd(); select(r.obj);
+    $('saveMsg').textContent = `상자를 화면 모양으로 다시 맞췄습니다 → ${r.path}`; return;
+  }
+  const name = $('aName').value.trim(); if (!name) { aMsg('대표 이름을 넣으세요.'); return; }
+  aMsg('저장 중…');
+  const r = await post('/add', {name, aliases: $('aAlias').value.split(','), common: $('aCommon').value, points: ADD.prev.points,
+    source: {pose: ADD.pose, fid: ADD.fid, seg: $('aSeg').value, rec: $('aRec').value, points: ADD.points, box: ADD.box}});
+  if (r.error) { aMsg('저장 실패: ' + r.error); return; }
+  OBJ.push(r.obj); counts(); pickEnd(); select(r.obj);
+  $('saveMsg').textContent = `추가했습니다 #${r.obj.id} → ${r.path}`;
+};
+
+ovc.addEventListener('pointermove', e => { if (seg === 'pick') return; const o = pickOv(e); if (o !== hover) { hover = o; draw(); drawOv(); } tip(o, e); });
+ovc.addEventListener('pointerleave', () => { if (seg === 'pick') return; hover = null; tip(null); drawOv(); });
+ovc.addEventListener('click', e => { if (seg === 'pick') return; const o = pickOv(e); if (o) select(o); });
+
+/* 고른 랜드마크 */
+const fmt = a => a.map(v => (+v).toFixed(2));
+function select(o) {
+  sel = o; $('noSel').style.display = 'none'; $('sel').style.display = 'grid';
+  $('sName').textContent = `#${o.id} ${o.house ? o.house.raw_name : o.name}`;
+  const st = $('sState');
+  if (!o.kept) { st.textContent = o.why; st.style.color = css('--muted'); }
+  else if (!o.house.in_house) { st.textContent = '.house 밖 · ' + o.house.why; st.style.color = css('--warn'); }
+  else { st.textContent = '.house 에 들어감'; st.style.color = css('--ok'); }
+  $('sMeta').innerHTML = (o.merged_ids ? `<b>한 줄로 합친 물체</b> — 조각 ${o.merged_ids.length}개 (${o.merged_ids.slice(0, 8).map(i => '#' + i).join(' ')}${o.merged_ids.length > 8 ? ' …' : ''})<br>` : '') +
+    (o.stair_end ? `<b>계단 ${o.stair_end === 'top' ? '위' : '아래'} 끝</b> (navmesh 계단에서 계산 · 목적지 = 계단 바로 ${o.stair_end === 'top' ? '위' : '아래'})<br>` : '') +
+    `원래 이름 ${o.orig_name} · 관측 ${o.views}회 · 검출 ${o.n_det}건 · score ${o.score}` +
+    (o.house ? `<br>${o.house.override?.points ? '화면 3D' : '검출'} 점 ${o.house.n_pts}개로 상자 계산` + (o.house.override?.points ? ` · <b>화면 모양으로 다시 맞춤 (${o.house.override.refit_at})</b>` : Object.keys(o.house.override || {}).length ? ' · <b>사람이 고친 값 사용</b>' : '') : '') +
+    `<br>목적지 ${o.spots.length}곳` + (o.spots.some(s => s.anchor) ? ` · 기준점 ${[...new Set(o.spots.filter(s => s.anchor).map(s => s.anchor.key))].join(', ')}` : '');
+  const h = o.house || {raw_name: o.name, aliases: [], common: '', center: o.xyz, radii: [0, 0, 0], region: o.storey};
+  $('fName').value = h.raw_name; $('fAlias').value = (h.aliases || []).join(', '); $('fCommon').value = h.common || '';
+  ['cx', 'cy', 'cz'].forEach((id, i) => $(id).value = (+h.center[i]).toFixed(2));
+  ['r0', 'r1', 'r2'].forEach((id, i) => $(id).value = (+h.radii[i]).toFixed(2));
+  $('fRegion').textContent = `${h.region} (${['지하 2층 승강장', '지하 1층 대합실', '지상 출구'][h.region] || ''})`;
+  $('drop').textContent = o.kept ? '빼기' : '되살리기'; $('drop').className = o.kept ? 'danger' : 'primary';
+  $('saveMsg').textContent = '';
+  shots(o); maskTiles(o);
+  const L = layerOfZ(ctr(o)[2]); if (L.tag !== LAY.tag) selectLayer(L.tag, false);
+  draw(); drawOv();
+}
+function shots(o) {
+  const box = $('shots'); box.innerHTML = '';
+  if (!o.shots.length) { box.innerHTML = '<span class="sub">사진 없음</span>'; return; }
+  for (const s of o.shots) {
+    const d = document.createElement('div'); d.className = 'shot'; const im = new Image(); im.src = '/scan/' + s.rgb; im.loading = 'lazy';
+    const side = Math.min(Math.max(Math.sqrt((s.area_pct || .5) / 100) * 640 * 2.6, 110), 460), B = 96, k = B / side;
+    Object.assign(im.style, {width: 640 * k + 'px', height: 480 * k + 'px', left: B / 2 - s.u * k + 'px', top: B / 2 - s.v * k + 'px'});
+    d.append(im, Object.assign(document.createElement('div'), {className: 'ring'}), Object.assign(document.createElement('div'), {className: 'cap', textContent: `${s.cam_m} m · ${s.score}`}));
+    d.onclick = () => big(s);
+    box.appendChild(d);
+  }
+}
+/* 분할: 스캔 사진 위에 마스크를 반투명 노랑으로 */
+function maskCanvas(m, c, done, crop) {   // crop = 마스크 둘레만 확대 (작은 물체도 보이게)
+  const g = c.getContext('2d'), im = new Image(), mk = new Image(); let n = 0;
+  const go = () => { if (++n < 2) return;
+    const t = document.createElement('canvas'); t.width = 640; t.height = 480; const tg = t.getContext('2d');
+    tg.drawImage(mk, 0, 0, 640, 480); const d = tg.getImageData(0, 0, 640, 480);
+    let x0 = 640, y0 = 480, x1 = 0, y1 = 0;
+    for (let y = 0; y < 480; y++) for (let x = 0; x < 640; x++) { const k = (y * 640 + x) * 4, on = d.data[k] > 127;
+      d.data[k] = 255; d.data[k + 1] = 210; d.data[k + 2] = 74; d.data[k + 3] = on ? 130 : 0;
+      if (on) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); } }
+    tg.putImageData(d, 0, 0);
+    let sx = 0, sy = 0, sw = 640, sh = 480;
+    if (crop && x1 >= x0) { const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, side = Math.min(480, Math.max(80, 1.5 * Math.max(x1 - x0, (y1 - y0) * 4 / 3)));
+      sw = side; sh = side * 3 / 4; sx = Math.max(0, Math.min(640 - sw, cx - sw / 2)); sy = Math.max(0, Math.min(480 - sh, cy - sh / 2)); }
+    g.drawImage(im, sx, sy, sw, sh, 0, 0, c.width, c.height); g.drawImage(t, sx, sy, sw, sh, 0, 0, c.width, c.height);
+    if (!crop && x1 >= x0) { g.strokeStyle = '#ffd24a'; g.lineWidth = 2; g.strokeRect(x0 * c.width / 640, y0 * c.height / 480, (x1 - x0) * c.width / 640, (y1 - y0) * c.height / 480); }
+    done && done(g); };
+  im.onload = mk.onload = go; im.src = '/scan/' + m.rgb; mk.src = '/mask/' + m.mask;
+}
+function maskTiles(o) {
+  const box = $('masks'); box.innerHTML = '';
+  if (!o.masks || !o.masks.length) { box.innerHTML = '<span class="sub">분할 결과 없음 (69 --save_masks 결과가 없거나 이 물체가 다시 검출되지 않음)</span>'; return; }
+  for (const m of o.masks) {
+    const d = document.createElement('div'); d.className = 'shot'; const c = document.createElement('canvas'); c.width = 160; c.height = 120;
+    Object.assign(c.style, {width: '100%', height: '100%', objectFit: 'cover'});
+    d.append(c, Object.assign(document.createElement('div'), {className: 'cap', textContent: `${m.cam_m} m · ${m.score}`}));
+    maskCanvas(m, c, null, true); d.onclick = () => { const bc = $('bigc'); maskCanvas(m, bc, g => { g.fillStyle = '#000a'; g.fillRect(4, 452, 360, 24); g.fillStyle = '#ffd24a'; g.font = '14px monospace';
+      g.fillText(`${sel.house ? sel.house.raw_name : sel.name} · ${m.rgb} · ${m.area_pct}% · ${m.cam_m} m`, 10, 469); $('big').style.display = 'flex'; }); };
+    box.appendChild(d);
+  }
+}
+function big(s) { const c = $('bigc'), g = c.getContext('2d'), im = new Image(); im.onload = () => { g.drawImage(im, 0, 0, 640, 480);
+  g.strokeStyle = '#ffd24a'; g.lineWidth = 3; g.beginPath(); g.arc(s.u, s.v, 26, 0, 7); g.stroke(); g.fillStyle = '#000a'; g.fillRect(4, 452, 330, 24);
+  g.fillStyle = '#ffd24a'; g.font = '14px monospace'; g.fillText(`${sel.house ? sel.house.raw_name : sel.name} · ${s.rgb} · ${s.cam_m} m`, 10, 469); $('big').style.display = 'flex'; }; im.src = '/scan/' + s.rgb; }
+$('big').onclick = () => $('big').style.display = 'none';
+
+async function edit(body, msg) {
+  $('saveMsg').textContent = '저장 중…';
+  try { const r = await post('/edit', {id: sel.id, ...body}); if (r.error) throw new Error(r.error);
+    const i = OBJ.findIndex(o => o.id === r.obj.id); OBJ[i] = r.obj; select(r.obj); counts();
+    $('saveMsg').textContent = `${msg} ${new Date().toLocaleTimeString('ko-KR')} → ${r.path}`;
+  } catch (e) { $('saveMsg').textContent = '저장 실패: ' + e.message; }
+}
+const nums = ids => ids.map(id => +$(id).value);
+$('save').onclick = () => {
+  const h = sel.house, b = {name: $('fName').value, aliases: $('fAlias').value.split(','), common: $('fCommon').value};
+  const c = nums(['cx', 'cy', 'cz']), r = nums(['r0', 'r1', 'r2']);
+  if (c.some(isNaN) || r.some(isNaN)) { $('saveMsg').textContent = '숫자가 아닌 칸이 있습니다.'; return; }
+  if (h && fmt(c).join() !== fmt(h.center).join()) b.center = c;
+  if (h && fmt(r).join() !== fmt(h.radii).join()) b.radii = r;
+  edit(b, '저장했습니다');
+};
+$('unov').onclick = () => edit({center: null, radii: null, points: null}, '상자를 원래대로(검출 점으로 계산) 돌렸습니다');
+$('drop').onclick = () => edit({exclude: sel.kept}, sel.kept ? '뺐습니다' : '되살렸습니다');
+$('go').onclick = () => {
+  const s = sel.spots[0], c = ctr(sel), L = layerOfZ(c[2]);
+  const b = s ? {x: s.xyz[0], y: s.xyz[1], yaw: s.yaw} : {x: c[0] - 1.5, y: c[1], yaw: 0};
+  post('/teleport', {...b, tag: L.tag}); setFollow(true);
+};
+/* 이름 칸 검색 목록: 지금 남긴 랜드마크의 대표 이름 · 공통 class (많은 순, 개수 표시). 고칠 때마다 다시 만든다 */
+function classLists() {
+  const cnt = (f) => { const m = new Map(); for (const o of OBJ) if (o.kept && o.house) { const v = f(o.house); if (v) m.set(v, (m.get(v) || 0) + 1); } return [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])); };
+  const fill = (id, rows) => $(id).replaceChildren(...rows.map(([v, n]) => Object.assign(document.createElement('option'), {value: v, label: typeof n === 'number' ? `${n}개` : n})));
+  const names = cnt(h => h.raw_name), commons = new Map(cnt(h => h.common));
+  fill('clsName', names);
+  fill('clsCommon', [...new Map([...commons, ...names.filter(([v]) => !commons.has(v)).map(([v]) => [v, 0])])].map(([v, n]) => [v, n || '대표 이름']));
+}
+function counts() { classLists(); const k = OBJ.filter(o => o.kept), h = k.filter(o => o.house.in_house);
+  $('counts').textContent = `랜드마크 ${OBJ.length} · 남김 ${k.length} · .house ${h.length} · 높이로 밖 ${k.length - h.length}`; }
+
+/* 조종 (teleop_view.html 과 같음) */
+const held = new Set(); let spd = 0.5;
+$('spd').oninput = () => { spd = +$('spd').value; $('spdV').textContent = spd.toFixed(1) + ' m/s'; };
+function cmd() { const k = c => held.has(c) ? 1 : 0; return {vx: spd * (k('w') - k('s')), vy: 0.3 * (k('q') - k('e')), wz: 0.75 * (k('a') - k('d'))}; }
+setInterval(() => { if (held.size) post('/cmd', cmd()); }, 100);
+const typing = e => ['INPUT', 'TEXTAREA'].includes(e.target.tagName);
+addEventListener('keydown', e => {
+  if (typing(e)) { if (e.key === 'Enter') (e.target.id.startsWith('a') ? $('aSave') : $('save')).click(); return; }
+  if (e.code === 'Space') { spaceDown = true; e.preventDefault(); return; }
+  const k = e.key.toLowerCase();
+  if ('wasdqe'.includes(k) && k.length === 1) { held.add(k); post('/cmd', cmd()); e.preventDefault(); }
+  if (k === 'r' && !e.repeat) post('/reset', {});
+  const CK = {arrowup: [0.3, 0, 0], arrowdown: [-0.3, 0, 0], arrowleft: [0, 0.3, 0], arrowright: [0, -0.3, 0], pageup: [0, 0, 0.2], pagedown: [0, 0, -0.2]};
+  if (CK[k]) { post('/cam', {d: CK[k]}); e.preventDefault(); }   // 카메라만 옮기기 (로봇은 그대로)
+  if (k === 'c' && !e.repeat) post('/cam', {reset: true});
+  if (k === 'escape') { $('big').style.display = 'none'; setPlace(false); }
+});
+addEventListener('keyup', e => { if (e.code === 'Space') spaceDown = false; const k = e.key.toLowerCase(); if (held.delete(k)) post('/cmd', cmd()); });
+addEventListener('blur', () => { held.clear(); post('/cmd', cmd()); });
+document.querySelectorAll('.pad button[data-k]').forEach(b => { const k = b.dataset.k;
+  b.addEventListener('pointerdown', () => { held.add(k); post('/cmd', cmd()); });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => { if (held.delete(k)) post('/cmd', cmd()); }); });
+$('reset').onclick = () => post('/reset', {});
+document.querySelectorAll('[data-c]').forEach(b => b.onclick = () => post('/cam', {d: b.dataset.c.split(',').map(Number)}));
+$('camReset').onclick = () => post('/cam', {reset: true});
+
+/* 층 */
+const LNAME = {B2_platform: '지하 2층 승강장', B1_concourse: '지하 1층 대합실', G_exit: '지상 출구'};
+function selectLayer(tag, tellServer) {
+  LAY = META.layers.find(l => l.tag === tag);
+  document.querySelectorAll('#layers button').forEach(b => b.setAttribute('aria-pressed', b.dataset.tag === tag));
+  if (tellServer) post('/layer', {tag});
+  if (!bgs[tag]) { bgs[tag] = new Image(); bgs[tag].onload = () => { fit(); if (follow) center(); draw(); }; bgs[tag].src = '/bg/' + tag + '.png'; }
+  else { fit(); if (follow) center(); draw(); }
+}
+
+/* 상태 · RGB */
+async function poll() {
+  try {
+    const s = await (await fetch('/state')).json();
+    if (s.error) throw new Error(s.error);
+    pose = s.pose; fallen = s.fallen;
+    if (pose) {
+      const L = layerOfZ(pose.z - 0.5); if (follow && L.tag !== LAY.tag) selectLayer(L.tag, false);
+      $('state').innerHTML = `x ${pose.x.toFixed(2)} · y ${pose.y.toFixed(2)} · z ${pose.z.toFixed(2)}<br>방향 ${(pose.yaw * 180 / Math.PI).toFixed(0)}° · 기울기 ${pose.tilt.toFixed(0)}°<br>렌더 ${s.fps.toFixed(1)} 장/s` + ((pose.cam_off || []).some(v => v) ? '<br><b>카메라 옮김</b> (C = 되돌리기)' : '')
+        + (fallen ? '<br><span class="warn">넘어짐 — R 로 다시 세우기</span>' : '') + (s.msg ? `<br><span class="warn">${s.msg}</span>` : '');
+      $('ov').textContent = `(${pose.x.toFixed(1)}, ${pose.y.toFixed(1)}) ${(pose.yaw * 180 / Math.PI).toFixed(0)}°`;
+      const co = pose.cam_off || [0, 0, 0];
+      $('camOff').textContent = co.some(v => v) ? `앞 ${co[0].toFixed(1)} · 왼쪽 ${co[1].toFixed(1)} · 위 ${co[2].toFixed(1)} m` : '로봇 카메라';
+      if (follow) center();
+      draw();
+    }
+  } catch (e) { $('state').innerHTML = '<span class="warn">걷기 서버(teleop_view)에 연결할 수 없습니다.</span>'; }
+  setTimeout(poll, 150);
+}
+const img = $('rgb');
+let seg = 'off';   // off · house · detect(한 번 찍고 멈춤)
+let selBox = true, selFail = 0;   // 고른 물체의 .house 상자 + SAM 을 카메라에 (분할 서버가 꺼졌으면 5 초 쉬고 맨 화면)
+const selUrl = () => selBox && sel?.kept && sel.house && Date.now() - selFail > 5000 ? `/seg/house.jpg?id=${sel.id}&t=` : null;
+function nextFrame() { if (seg === 'detect' || seg === 'pick') return;
+  img.src = (seg === 'house' ? '/seg/house.jpg?t=' : selUrl() || '/frame.jpg?t=') + Date.now(); }
+function setSeg(m) {
+  seg = m; $('sOff').setAttribute('aria-pressed', m === 'off'); $('sHouse').setAttribute('aria-pressed', m === 'house');
+  ovc.style.display = m === 'off' ? '' : 'none';
+  if (m === 'house' || m === 'detect') { if (ADD) { ADD = null; $('aPanel').style.display = 'none'; $('aCancel').style.display = 'none'; $('aStart').textContent = '+ 화면 멈추고 추가'; } }     // 분할 그림에 이름이 이미 있다
+  $('segMsg').textContent = m === 'detect' ? '검출 중… (끔/.house 를 누르면 실시간 화면으로 돌아갑니다)' : '';
+  if (m === 'detect') { img.src = '/seg/detect.jpg?t=' + Date.now(); } else nextFrame();
+}
+$('sOff').onclick = () => { if (ADD) pickEnd(); else setSeg('off'); }; $('sHouse').onclick = () => setSeg('house'); $('sDet').onclick = () => setSeg('detect');
+img.onload = () => { if (seg === 'pick') return; if (seg === 'detect') $('segMsg').textContent = '검출 결과 (멈춘 화면)'; else { $('segMsg').textContent = ''; drawOv(); setTimeout(nextFrame, 30); } };
+img.onerror = () => { if (seg === 'pick') return; if (seg === 'off' && img.src.includes('/seg/house.jpg?id=')) selFail = Date.now(); if (seg !== 'off') $('segMsg').textContent = '분할 서버에 연결할 수 없습니다 (noeun_seg_server.py)'; setTimeout(nextFrame, 500); };
+
+(async () => {
+  [META, NM, OBJ] = await Promise.all(['/meta', '/nmeta', '/objects'].map(p => fetch(p).then(r => r.json())));
+  const order = ['B2_platform', 'B1_concourse', 'G_exit'];
+  META.layers.sort((a, b) => order.indexOf(a.tag) - order.indexOf(b.tag));
+  for (const l of META.layers) { const b = document.createElement('button'); b.textContent = LNAME[l.tag] || l.tag; b.dataset.tag = l.tag; b.onclick = () => { setFollow(false); selectLayer(l.tag, true); }; $('layers').appendChild(b); }
+  $('hint').textContent = '랜드마크 = 누르기 · 빈 곳 누르고 끌기 = 그 자리·방향으로 로봇 놓기 · Shift = 랜드마크 위라도 · 로봇 점 끌기 = 방향만';
+  counts();
+  selectLayer(META.layers[1]?.tag || META.layers[0].tag, false);
+  new ResizeObserver(resize).observe(stage);
+  new ResizeObserver(drawOv).observe($('rgbBox'));
+  poll(); nextFrame();
+  const h = +location.hash.slice(1); if (location.hash && OBJ[h]) select(OBJ[h]);   // 주소 끝 #번호 = 그 랜드마크를 열고 시작
+})();
+</script>
+</body></html>

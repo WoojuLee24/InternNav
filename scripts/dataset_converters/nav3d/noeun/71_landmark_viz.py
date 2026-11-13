@@ -147,7 +147,7 @@ def main():
                title_fontsize=MID + 1)
     fig.suptitle('③ 랜드마크 지도 — 역 안 어디에 무엇이 있나'
                  if KO else '3) Landmark map', fontsize=BIG + 3)
-    fig.tight_layout(rect=[0, 0, 0.84, 0.97]); fig.savefig(out / 'landmark_map.png', dpi=115); plt.close(fig)
+    fig.tight_layout(rect=[0, 0, 0.84, 0.97]); fig.savefig(out / 'landmark_map.png', dpi=115, bbox_inches='tight')  # 긴 이름이면 범례가 잘린다; plt.close(fig)
     print(f'  저장 {out}/landmark_map.png')
     print(f'[71] 랜드마크 {len(lms)} · 종류 {len(cnt)}')
 

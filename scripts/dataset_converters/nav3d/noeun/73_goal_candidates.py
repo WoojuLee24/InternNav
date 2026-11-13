@@ -71,6 +71,13 @@ def parse():
     ap.add_argument('--corrections', default='',
                     help='리포트의 "고친 내용" 파일(corrections.json). 이름 고치기 + 제외를 한꺼번에 반영한다. '
                          '70_make_house.py 와 **같은 파일**을 줘야 .house 와 목적지가 어긋나지 않는다.')
+    ap.add_argument('--long_m', type=float, default=3.0, help='이보다 긴 물체는 목적지를 양 끝에 둔다 (goal_rules)')
+    ap.add_argument('--link_m', type=float, default=1.5, help='같은 종류 랜드마크를 한 물체로 이을 거리 (69 묶음 거리와 같음)')
+    ap.add_argument('--rep_r', type=float, default=10.0, help='반복 물체 판정 반경')
+    ap.add_argument('--rep_n', type=int, default=3, help='rep_r 안 같은 종류가 이보다 많으면 반복 물체 -> 기준점 필요. 0 이면 끔')
+    ap.add_argument('--anchor_r', type=float, default=5.0, help='기준점을 찾는 반경 (목적지 대상에서)')
+    ap.add_argument('--succ_r', type=float, default=3.0, help='성공 반경 (SR@3m). 이 안의 같은 종류는 헷갈려도 성공이다')
+    ap.add_argument('--allow_stairs_goal', action='store_true', help='주면 계단 한가운데 목적지도 허용 (기본: 금지)')
     ap.add_argument('--keep_json', default='',
                     help='편집기에서 내려받은 landmarks_edited.json. 주면 그 안의 id 만 쓴다.')
     return ap.parse_args()
@@ -87,7 +94,17 @@ def main():
     n_all = len(lms)
 
     if a.corrections:
-        lms = corrections.apply(lms, corrections.load(a.corrections), log=print)
+        C = corrections.load(a.corrections)
+        lms = corrections.apply(lms, C, log=print)
+        import stair_ends
+        lms = stair_ends.inject(lms, C, a.navmesh, log=print)   # "stairs": "ends" 이면 계단 -> 위·아래 끝 (목적지 = 계단 바로 전·후)
+        # 목적지에서만 빼는 종류 (.house 에는 남는다) — 사용자 결정: 화살표는 목적지 X
+        gx = [w.strip().lower() for w in C.get('goal_exclude_types') or [] if str(w).strip()]
+        if gx:
+            pat_g = re.compile(r'\b(' + '|'.join(map(re.escape, gx)) + r')s?\b', re.I)
+            n0 = len(lms)
+            lms = [l for l in lms if not pat_g.search(l['name'])]
+            print(f'[73] 목적지에서만 제외 ({",".join(gx)}): {n0 - len(lms)} 개')
 
     # 사람이 정한 제외 — 종류 이름 부분일치 (단·복수 모두)
     ex = [w.strip().lower() for w in a.exclude_types.split(',') if w.strip()]
@@ -181,14 +198,8 @@ def main():
     def storey_of(z):
         return int(np.argmin([abs(z - s['z']) for s in storeys]))
 
-    kept, dropped = [], collections.Counter()
-    for lm in lms:
-        c = np.asarray(lm['xyz'], float)
-        ok, d = hole_clear(c)
-        if not ok:
-            dropped['구멍 위/근처'] += 1
-            continue
-
+    def find_spots(c):
+        c = np.asarray(c, float)
         spots = []
         for k in range(a.n_dir):
             th = 2 * math.pi * k / a.n_dir
@@ -225,13 +236,64 @@ def main():
                               'yaw': round(yaw, 4), 'dist_m': round(dist, 2),
                               'hole_clear_m': round(hd, 2), 'yaw_off_deg': round(math.degrees(dth), 1)})
                 break                                # 이 방향은 하나면 충분
+        return spots
+
+    # 물체로 묶기 · 계단 판정 (goal_rules) ────────────────────────────
+    sys.path[:0] = [str(Path(__file__).resolve().parents[1] / 'utils'), str(Path(__file__).resolve().parents[1])]
+    import goal_rules as gr
+    import nav3d_path as npth
+    from path_quality import stairs_points
+    sc = npth.NavScene(pf)
+    def on_stairs(p):
+        return bool(stairs_points(sc, np.asarray(p, float).reshape(1, 3))[0])
+    dets = json.load(open(Path(a.landmarks) / 'detections.json'))
+    if a.corrections:                    # 70 과 같게: 스크린도어 줄 -> 줄마다 물체 하나
+        import merge_lines
+        lms = merge_lines.inject(lms, C, dets, storey_of, log=print)
+    objs, lm_obj = gr.build_objects(lms, dets, storey_of, link_m=a.link_m)
+    by_id = {l['id']: l for l in lms}
+    n_long = sum(1 for o in objs if 2 * o['half_len'] > a.long_m)
+    print(f'[73] 물체로 묶기: 랜드마크 {len(lms)} -> 물체 {len(objs)} (긴 물체 > {a.long_m} m: {n_long})')
+
+    kept, dropped = [], collections.Counter()
+    for o in objs:
+        lm = by_id[o['ids'][0]]
+        spots, why = [], collections.Counter()
+        tg = gr.targets(o, a.long_m)
+        if lm.get('stair_end'):                      # 계단 끝: 목표 = 입구 (상자 중심은 계단 안쪽으로 들어가 있다)
+            tg = [('stairs_' + lm['stair_end'], np.asarray(lm['xyz'], float))]
+        for part, c in tg:
+            ok, d = hole_clear(c)
+            if not ok:
+                why['GOAL_HOLE'] += 1
+                continue
+            rep_, anchor = gr.find_anchor(objs, o, c, a.rep_r, a.rep_n, a.anchor_r, a.succ_r) if a.rep_n else (False, None)
+            if rep_ and anchor is None:
+                why['NO_ANCHOR'] += 1
+                continue
+            got = find_spots(c)
+            if not a.allow_stairs_goal:
+                n0 = len(got)
+                got = [s for s in got if not on_stairs(s['xyz'])]
+                why['GOAL_ON_STAIRS'] += n0 - len(got)
+            if lm.get('stair_end'):                  # 계단 바로 전·후 = 입구 바깥 바닥 (계단 라벨이 빠진 디딤판 위 자리를 뺀다)
+                n0 = len(got)
+                fz, out_ = lm['stair_floor'][2], np.asarray(lm['stair_out'], float)
+                got = [s for s in got if abs(s['xyz'][2] - fz) < 0.25 and (np.asarray(s['xyz'][:2]) - c[:2]) @ out_ > 0]
+                why['STAIR_SIDE'] += n0 - len(got)
+            if not got:
+                why['NO_SPOT'] += 1
+            for s in got:
+                s.update(part=part, target_xyz=[round(float(t), 2) for t in c], repetitive=rep_, anchor=anchor)
+            spots += got
         if not spots:
-            dropped['설 자리 없음'] += 1
+            dropped[max(why, key=why.get) if why else 'NO_SPOT'] += 1
             continue
         # 고르게 퍼진 것부터 (방향이 다양하도록 yaw 로 정렬 후 솎기)
         spots.sort(key=lambda s: s['yaw'])
         pick = spots[:: max(1, len(spots) // a.max_spots)][:a.max_spots]
-        kept.append({**lm, 'storey': storey_of(c[2]), 'spots': pick, 'n_spot_all': len(spots)})
+        kept.append({**lm, 'oid': o['oid'], 'ids': o['ids'], 'half_len': round(o['half_len'], 2),
+                     'storey': o['storey'], 'spots': pick, 'n_spot_all': len(spots)})
 
     n_goal = sum(len(l['spots']) for l in kept)
     print(f"\n[73] 랜드마크 {len(lms)} -> 쓸 수 있는 것 {len(kept)}")
@@ -244,7 +306,12 @@ def main():
     cn = collections.Counter(l['name'] for l in kept)
     print('[73] 상위 종류: ' + ', '.join(f'{n}({k})' for n, k in cn.most_common(8)))
     json.dump({'landmarks': kept, 'dropped': dict(dropped),
-               'params': {'flags': sorted(flags), 'goal_r': a.goal_r, 'min_r': a.min_r,
+               'objects': [{'oid': o['oid'], 'key': o['key'], 'ids': o['ids'], 'storey': o['storey'],
+                            'c': [round(float(t), 3) for t in o['c']], 'dir': [round(float(t), 4) for t in o['dir']],
+                            'half_len': round(o['half_len'], 3)} for o in objs],
+               'reasons': gr.REASONS,
+               'params': {'flags': sorted(flags), 'goal_r': a.goal_r, 'min_r': a.min_r, 'long_m': a.long_m,
+                          'rep_r': a.rep_r, 'rep_n': a.rep_n, 'anchor_r': a.anchor_r, 'succ_r': a.succ_r,
                           'yaw_max': a.yaw_max, 'r_b': a.r_b}},
               open(out / 'goals.json', 'w'), ensure_ascii=False)
     print(f'[73] 저장 {out}/goals.json')

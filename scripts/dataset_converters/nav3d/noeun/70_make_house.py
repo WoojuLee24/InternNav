@@ -32,6 +32,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 import corrections  # noqa: E402
+import stair_ends  # noqa: E402
+import merge_lines  # noqa: E402
 
 
 def parse():
@@ -46,6 +48,8 @@ def parse():
     ap.add_argument('--max_h', type=float, default=2.2, help='상한')
     ap.add_argument('--merge_m', type=float, default=1.5)
     ap.add_argument('--min_r', type=float, default=0.10, help='반지름 하한 (너무 납작하면 투영이 깨진다)')
+    ap.add_argument('--navmesh', default='data/data/noeun_eval/navmesh/noeun_station/noeun_station.navmesh',
+                    help='corrections "stairs": "ends" 일 때 계단 끝을 찾는 navmesh (73 과 같은 것)')
     ap.add_argument('--corrections', default='',
                     help='리포트의 "고친 내용" 파일(corrections.json). 이름 고치기 + 제외를 반영한다. '
                          '73_goal_candidates.py 와 **같은 파일**을 줘야 .house 와 목적지가 어긋나지 않는다.')
@@ -70,6 +74,22 @@ def pca_box(P):
     return c, A, r
 
 
+def points_box(P, lo=1.0, hi=99.0):
+    """사람이 화면에서 지정한 물체의 3D 점 -> **똑바로 선** 상자 (중심, 축 3 개, 반지름 3 개).
+    pca_box 는 중앙값 ± 90% 라 점이 한쪽에 몰리면(가까운 쪽 픽셀이 많다) 상자가 쏠리고, 축이 기운다.
+    여기서는 위아래 축 = 수직, 가로 축 = 평면 점이 가장 길게 퍼진 방향, 범위 = 축마다 lo~hi 백분위 (끝의 튀는 점 제외)."""
+    P = np.asarray(P, float).reshape(-1, 3)
+    d = np.array([1.0, 0.0])
+    if len(P) >= 3:
+        xy = P[:, :2] - P[:, :2].mean(0)
+        if np.abs(xy).max() > 1e-6:
+            d = np.linalg.svd(xy, full_matrices=False)[2][0]
+    A = np.array([[d[0], d[1], 0.0], [-d[1], d[0], 0.0], [0.0, 0.0, 1.0]])   # det = 1
+    proj = P @ A.T
+    a, b = np.percentile(proj, lo, axis=0), np.percentile(proj, hi, axis=0)
+    return ((a + b) / 2) @ A, A, (b - a) / 2
+
+
 def main():
     a = parse()
     L = Path(a.landmarks)
@@ -80,7 +100,9 @@ def main():
     print(f'[70] 랜드마크 {len(lms)} · 검출 {len(dets)}')
 
     if a.corrections:
-        lms = corrections.apply(lms, corrections.load(a.corrections), log=print)
+        C = corrections.load(a.corrections)
+        lms = corrections.apply(lms, C, log=print)
+        lms = stair_ends.inject(lms, C, a.navmesh, log=print)   # "stairs": "ends" 이면 계단 -> 위·아래 끝
 
     # 층 높이 -> region 번호
     storeys = json.load(open(a.verify))['storeys'] if Path(a.verify).exists() else []
@@ -93,6 +115,8 @@ def main():
         return bi
     def floor_z(z):
         return storeys[region_of(z)]['z'] if storeys else 0.0
+    if a.corrections:                    # "merge_lines" 이면 스크린도어 같은 줄 -> 줄마다 물체 하나 (열리는 doorway 에 줄 이름)
+        lms = merge_lines.inject(lms, C, dets, region_of, merge_m=a.merge_m, log=print)
 
     # 랜드마크마다 자기 검출들의 3D 점을 다시 모아 축·반지름 계산
     by_name = collections.defaultdict(list)
@@ -112,10 +136,17 @@ def main():
         # 이름을 고쳤어도 점 구름은 **원래 이름**으로 묶여 있다
         pts = np.array([d['xyz'] for d in by_name.get(lm.get('orig_name', lm['name']), [])
                         if math.dist(d['xyz'], lm['xyz']) <= a.merge_m], float)
+        if lm.get('points'):                     # 화면에서 추가한 물체 = 자기 3D 점 (corrections add)
+            pts = np.asarray(lm['points'], float)
         if len(pts) == 0:
             pts = c0.reshape(1, 3)
-        c, A, r = pca_box(pts)
+        c, A, r = points_box(pts) if lm.get('points') else pca_box(pts)   # 사람이 지정한 점은 똑바로 선 상자
         r = np.maximum(r, a.min_r)
+        o_ = lm.get('override') or {}            # 걸어 보기 도구에서 사람이 고친 중심·반지름 (corrections override_ids)
+        if o_.get('center') is not None:
+            c = np.asarray(o_['center'], float)
+        if o_.get('radii') is not None:
+            r = np.maximum(np.asarray(o_['radii'], float), a.min_r)
         if lm['name'] not in cats:
             cats[lm['name']] = len(cats)
         # 공통 class 가 있으면 mpcat40 로 쓴다 (없으면 대표 이름). 다른 이름은 옆 파일로 나간다

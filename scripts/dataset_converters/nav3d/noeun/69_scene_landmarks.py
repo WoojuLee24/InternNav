@@ -66,6 +66,8 @@ def parse():
     # 묶기
     ap.add_argument('--merge_m', type=float, default=1.5, help='3D 중심이 이 거리 안이면 같은 물체')
     ap.add_argument('--min_views', type=int, default=2, help='이만큼 다른 사진에 찍혀야 인정 (사용자 결정)')
+    ap.add_argument('--save_masks', action='store_true',
+                    help='검출마다 SAM 마스크를 <out>/masks/<snap>_<번호>.png 로 저장하고 detections 에 mask 칸을 붙인다 (기본: 저장 안 함)')
     ap.add_argument('--max_dist_m', type=float, default=12.0, help='카메라에서 이보다 먼 검출은 버린다')
     return ap.parse_args()
 
@@ -270,7 +272,12 @@ def main():
                 cam_d = float(np.linalg.norm(p - org))
                 if cam_d > a.max_dist_m:
                     continue
-                dets.append({'snap': s['id'], 'name': nm, 'raw': str(lab),
+                mfile = None
+                if a.save_masks:
+                    mfile = f"{s['id']}_{len(dets)}.png"
+                    (out / 'masks').mkdir(exist_ok=True)
+                    Image.fromarray(masks[j].astype(np.uint8) * 255).convert('1').save(out / 'masks' / mfile, optimize=True)
+                dets.append({'snap': s['id'], 'name': nm, 'raw': str(lab), **({'mask': mfile} if mfile else {}),
                              'score': round(float(scores[j]), 3),
                              'xyz': [round(float(t), 2) for t in p],
                              'cam_m': round(cam_d, 2),

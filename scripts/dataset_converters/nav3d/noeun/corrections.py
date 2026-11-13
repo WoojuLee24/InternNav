@@ -13,7 +13,11 @@
       "rename_ids":    {"501": "ticket gate"},          # 랜드마크 하나의 대표 이름
       "aliases":       {"exit sign": ["station sign"]}, # 그 종류 전부의 다른 이름
       "alias_ids":     {"501": ["gate"]},               # 랜드마크 하나의 다른 이름
-      "common":        {"exit sign": "sign"}            # 공통 class (.house 의 mpcat40)
+      "common":        {"exit sign": "sign"},           # 공통 class (.house 의 mpcat40)
+      "goal_exclude_types": ["arrow"],  # 73 목적지에서만 뺀다 (.house 에는 남음). 머리 명사 규칙은 exclude_types 와 같음
+      "add":           [{"id": 100000, "name": "bench", "xyz": [x,y,z], "points": [[x,y,z],...]}]
+                       # 걸어 보기 도구에서 화면을 눌러 추가한 물체. 점 = 분할 모양을 메쉬에 쏜 3D 점.
+                       # 다른 이름·공통 class 는 alias_ids·common_ids 에 같은 id 로 들어간다.
     }
 
 한 물체가 이름을 여럿 갖는 이유:
@@ -43,7 +47,19 @@ def load(path):
 
 
 def apply(lms, c, log=print):
-    """랜드마크 목록에 적용해 **남은 것**을 돌려준다. `lms` 의 각 항목에 'id' 가 있어야 한다."""
+    """랜드마크 목록에 적용해 **남은 것**을 돌려준다. `lms` 의 각 항목에 'id' 가 있어야 한다.
+    `add` (걸어 보기 도구에서 카메라 화면을 눌러 추가한 물체) 는 `lms` 에 **제자리로** 덧붙인다 —
+    부르는 쪽이 같은 목록으로 뺀 것까지 그릴 수 있게. 추가한 것도 아래 이름 고치기·빼기를 똑같이 받는다."""
+    known = {l['id'] for l in lms}
+    for x in c.get('add') or []:
+        if int(x['id']) not in known:
+            lms.append({'id': int(x['id']), 'name': str(x['name']).strip().lower(), 'xyz': x['xyz'],
+                        'points': x.get('points') or [x['xyz']], 'views': x.get('views', 1),
+                        'score': x.get('score', 1.0), 'n_det': 0, 'added': True})
+    n_add = len(lms) - len(known)
+    if n_add:
+        log(f'[보정] 화면에서 추가한 물체 {n_add} 개')
+    all_ids = {l['id'] for l in lms}
     n_all = len(lms)
 
     # 1) 이름 고치기
@@ -61,19 +77,22 @@ def apply(lms, c, log=print):
         for o, nw in sorted(rn.items()):
             log(f'[보정]   {o} -> {nw}')
 
+    # include_ids: 종류째 · 이름째 빼기에서 이 랜드마크만 살린다 (걸어 보기 도구에서 되살린 것). 없으면 기존 동작.
+    inc = {int(x) for x in (c.get('include_ids') or [])}
+
     # 2) 머리 명사로 빼기
     ex = [w.strip().lower() for w in (c.get('exclude_types') or []) if str(w).strip()]
     if ex:
         pat = re.compile(r'\b(' + '|'.join(re.escape(w) for w in ex) + r')s?\b', re.I)
-        gone = collections.Counter(l['name'] for l in lms if pat.search(l['name']))
-        lms = [l for l in lms if not pat.search(l['name'])]
+        gone = collections.Counter(l['name'] for l in lms if pat.search(l['name']) and l['id'] not in inc)
+        lms = [l for l in lms if not pat.search(l['name']) or l['id'] in inc]
         log(f'[보정] 묶음 제외 ({",".join(ex)}): {sum(gone.values())} 개 / 종류 {len(gone)}')
 
     # 3) 종류 이름 그대로 빼기
     nm = {str(w).strip().lower() for w in (c.get('exclude_names') or []) if str(w).strip()}
     if nm:
-        gone = collections.Counter(l['name'] for l in lms if l['name'].lower() in nm)
-        lms = [l for l in lms if l['name'].lower() not in nm]
+        gone = collections.Counter(l['name'] for l in lms if l['name'].lower() in nm and l['id'] not in inc)
+        lms = [l for l in lms if l['name'].lower() not in nm or l['id'] in inc]
         log(f'[보정] 이름 제외: {sum(gone.values())} 개 / 종류 {len(gone)} -> '
             + ', '.join(f'{k} {v}' for k, v in gone.most_common(8)))
         unknown = nm - {k.lower() for k in gone}
@@ -87,7 +106,7 @@ def apply(lms, c, log=print):
         lms = [l for l in lms if l['id'] not in ids]
         log(f'[보정] 번호 제외: {sum(gone.values())} 개 / 종류 {len(gone)} -> '
             + ', '.join(f'{k} {v}' for k, v in gone.most_common(8)))
-        missing = ids - set(range(n_all))
+        missing = ids - all_ids
         if missing:
             log(f'[보정]   경고 — 범위 밖 번호 {len(missing)}: ' + ', '.join(map(str, sorted(missing)[:10])))
 
@@ -96,13 +115,19 @@ def apply(lms, c, log=print):
     al = {str(k).strip().lower(): [str(x).strip().lower() for x in v]
           for k, v in (c.get('aliases') or {}).items()}
     cm = {str(k).strip().lower(): str(v).strip().lower() for k, v in (c.get('common') or {}).items()}
+    ci = {int(k): str(v).strip().lower() for k, v in (c.get('common_ids') or {}).items()}     # 낱개 공통 class
+    ov = {int(k): v for k, v in (c.get('override_ids') or {}).items()}                        # 낱개 중심·반지름
     n_a = n_c = 0
     for l in lms:
         extra = ai.get(l['id']) or al.get(l['name'].lower()) or []
         l['names'] = [l['name']] + [x for x in extra if x and x != l['name']]
         if len(l['names']) > 1:
             n_a += 1
-        common = cm.get(l['name'].lower())
+        if l['id'] in ov:
+            l['override'] = ov[l['id']]          # 70 이 .house 중심(center)·반지름(radii) 대신 쓴다
+            if ov[l['id']].get('points'):        # 화면에서 다시 맞춘 모양의 3D 점 -> 상자를 이 점으로 다시 계산
+                l['points'] = ov[l['id']]['points']
+        common = ci.get(l['id']) or cm.get(l['name'].lower())
         if common:
             l['common'] = common
             n_c += 1
