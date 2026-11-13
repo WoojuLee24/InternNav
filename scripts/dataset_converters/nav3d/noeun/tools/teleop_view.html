@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>씬 걸어 보기</title>
+<style>
+:root{--bg:#f3f4f2;--panel:#fff;--fg:#1d2421;--muted:#5d6762;--line:#d5dad6;--accent:#1c6e8c;--robot:#d6336c;--door:#e8890c;--bad:#c92a2a;
+--sans:"Noto Sans KR","Apple SD Gothic Neo",system-ui,sans-serif;--mono:ui-monospace,Menlo,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#151a18;--panel:#1e2522;--fg:#e4e9e6;--muted:#98a39d;--line:#34403b;--accent:#4dabf7;--robot:#f06595;--door:#fcc419;--bad:#ff6b6b;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 var(--sans);padding:14px 16px}
+h1{font-size:1.2rem;margin:0 0 4px}.sub{color:var(--muted);font-size:.85rem;margin:0}
+.wrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 270px;gap:12px;margin-top:10px}
+@media (max-width:1200px){.wrap{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.side{grid-column:span 2}}
+@media (max-width:720px){body{padding:10px 16px}.sub{display:none}.wrap{grid-template-columns:minmax(0,1fr)}.side{grid-column:auto}.stage,.rgb{height:42vh;min-height:240px}.pad{grid-template-columns:repeat(3,64px)}.pad button{padding:14px 0;font-size:1rem}}
+.pad button{touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.stage{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;height:min(78vh,820px);min-height:360px;touch-action:none}
+canvas{width:100%;height:100%;display:block;cursor:crosshair}
+.rgb{background:#000;border-radius:8px;display:flex;align-items:center;justify-content:center;height:min(78vh,820px);min-height:360px;position:relative}
+.rgb img{max-width:100%;max-height:100%}
+.rgb .ov{position:absolute;left:8px;top:6px;color:#fff;font:12px var(--mono);text-shadow:0 0 3px #000}
+.side{display:grid;gap:10px;align-content:start}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:grid;gap:8px}
+.label{font-size:.72rem;letter-spacing:.06em;color:var(--muted)}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+button{font:inherit;font-size:.85rem;padding:5px 11px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer}
+button[aria-pressed=true]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pad{display:grid;grid-template-columns:repeat(3,48px);gap:4px}
+.pad button{padding:8px 0}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:.8rem}
+.warn{color:var(--bad);font-weight:600}
+ol{margin:0;padding-left:20px;font-size:.8rem;display:grid;gap:3px}
+input[type=range]{width:100%}
+.hint{position:absolute;left:8px;bottom:6px;font-size:.75rem;color:var(--muted);background:color-mix(in srgb,var(--panel) 85%,transparent);padding:2px 6px;border-radius:4px;pointer-events:none}
+</style></head><body>
+<h1 id="title">씬 걸어 보기</h1>
+<p class="sub">RBQ10 이 물리로 걷습니다. W/S 전진·후진 · A/D 회전 · Q/E 옆걸음 · R 다시 세우기. 지도: "순간이동" 도구로 클릭(드래그하면 그 방향을 봄), "유리문" 도구로 드래그해 상자. 휠 = 확대, 스페이스+드래그 = 지도 이동.</p>
+<div class="wrap">
+  <div class="stage" id="stage"><canvas id="map"></canvas><div class="hint" id="hint"></div></div>
+  <div class="rgb"><img id="rgb" alt="로봇 카메라 RGB"><div class="ov num" id="ov"></div></div>
+  <div class="side">
+    <div class="box"><span class="label">층</span><div class="row" id="layers"></div></div>
+    <div class="box"><span class="label">지도 도구</span>
+      <div class="row"><button id="tTele" aria-pressed="true">순간이동</button><button id="tDoor" aria-pressed="false">유리문</button><button id="tPan" aria-pressed="false">지도 이동</button></div>
+      <div class="row"><button id="follow" aria-pressed="true">로봇 따라가기</button><button id="fit">전체 보기</button></div>
+    </div>
+    <div class="box"><span class="label">조종</span>
+      <div class="pad">
+        <button data-k="q">Q 옆</button><button data-k="w">W ↑</button><button data-k="e">E 옆</button>
+        <button data-k="a">A ↺</button><button data-k="s">S ↓</button><button data-k="d">D ↻</button>
+      </div>
+      <label class="row" for="spd" style="justify-content:space-between"><span>전진 속도</span><span class="num" id="spdV">0.5 m/s</span></label>
+      <input id="spd" type="range" min="0.2" max="1.5" step="0.1" value="0.5">
+      <div class="row"><button id="reset">R 다시 세우기</button></div>
+      <div id="state" class="num"></div>
+    </div>
+    <div class="box"><span class="label">유리문 (이 층)</span>
+      <p class="sub" style="font-size:.8rem">막힌 유리문 위를 문틀 양쪽 벽까지 넉넉하게 덮으세요. 되돌리기 = Ctrl+Z.</p>
+      <ol id="doorList"></ol>
+      <div class="row"><button id="undo">되돌리기</button><button class="primary" id="save">유리문 저장</button></div>
+      <div id="doorStatus" class="sub" style="font-size:.8rem;min-height:1.2em"></div>
+    </div>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let META, LAY, pose = null, fallen = false, tool = 'tele', follow = true, spaceDown = false;
+const bgs = {}, doors = {}, undo = {}, unsaved = {};
+const cv = $('map'), ctx = cv.getContext('2d'), stage = $('stage');
+let view = {s: 1, tx: 0, ty: 0};
+const w2p = (x, y) => [(x - LAY.x0) / LAY.res, (LAY.y1 - y) / LAY.res];
+const p2w = (u, v) => [LAY.x0 + u * LAY.res, LAY.y1 - v * LAY.res];
+const s2w = (sx, sy) => p2w((sx - view.tx) / view.s, (sy - view.ty) / view.s);
+const post = (p, b) => fetch(p, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(b)}).then(r => r.json());
+
+function fit() { const r = stage.getBoundingClientRect(), s = Math.min(r.width / LAY.w, r.height / LAY.h); view = {s, tx: (r.width - LAY.w * s) / 2, ty: (r.height - LAY.h * s) / 2}; }
+function resize() { const r = stage.getBoundingClientRect(), d = devicePixelRatio || 1; cv.width = r.width * d; cv.height = r.height * d; ctx.setTransform(d, 0, 0, d, 0, 0); draw(); }
+function center() { if (!pose) return; const r = stage.getBoundingClientRect(), [u, v] = w2p(pose.x, pose.y); view.tx = r.width / 2 - u * view.s; view.ty = r.height / 2 - v * view.s; }
+
+let drag = null;
+function draw() {
+  if (!LAY) return;
+  const r = stage.getBoundingClientRect();
+  ctx.save(); ctx.clearRect(0, 0, r.width, r.height); ctx.translate(view.tx, view.ty); ctx.scale(view.s, view.s);
+  ctx.imageSmoothingEnabled = false;
+  if (bgs[LAY.tag]?.complete) ctx.drawImage(bgs[LAY.tag], 0, 0);
+  const dc = css('--door'); ctx.lineWidth = 2.5 / view.s; ctx.font = `${14 / view.s}px sans-serif`;
+  (doors[LAY.tag] || []).concat(drag?.door ? [drag.door] : []).forEach((d, k) => {
+    const [u0, v0] = w2p(d.x0, d.y1), [u1, v1] = w2p(d.x1, d.y0);
+    ctx.globalAlpha = .3; ctx.fillStyle = dc; ctx.fillRect(u0, v0, u1 - u0, v1 - v0); ctx.globalAlpha = 1;
+    ctx.strokeStyle = dc; ctx.strokeRect(u0, v0, u1 - u0, v1 - v0); ctx.fillStyle = dc; ctx.fillText(String(k + 1), u0 + 3 / view.s, v0 - 4 / view.s);
+  });
+  if (pose) {   // 시야 부채꼴 (hfov, 반지름 4 m) + 로봇 점
+    const [u, v] = w2p(pose.x, pose.y), R = 4 / LAY.res, hf = META.hfov_deg * Math.PI / 360, a = -pose.yaw;   // 화면 y 가 아래라 각도 부호가 반대
+    const rc = fallen ? css('--bad') : css('--robot');
+    ctx.globalAlpha = .28; ctx.fillStyle = rc; ctx.beginPath(); ctx.moveTo(u, v); ctx.arc(u, v, R, a - hf, a + hf); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1; ctx.fillStyle = rc; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 / view.s;
+    ctx.beginPath(); ctx.arc(u, v, 6 / view.s, 0, 7); ctx.fill(); ctx.stroke();
+  }
+  if (drag?.tele) {   // 순간이동 미리보기
+    const [u, v] = w2p(drag.wx, drag.wy), [u2, v2] = w2p(drag.ex, drag.ey);
+    ctx.strokeStyle = css('--accent'); ctx.lineWidth = 2 / view.s; ctx.beginPath(); ctx.arc(u, v, 8 / view.s, 0, 7); ctx.moveTo(u, v); ctx.lineTo(u2, v2); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* 지도 마우스 */
+cv.addEventListener('pointerdown', e => {
+  cv.setPointerCapture(e.pointerId);
+  const b = cv.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top, [wx, wy] = s2w(x, y);
+  if (tool === 'pan' || spaceDown || e.button !== 0) { drag = {pan: true, x, y, tx: view.tx, ty: view.ty}; setFollow(false); return; }
+  if (tool === 'door') drag = {ax: wx, ay: wy, door: {x0: wx, y0: wy, x1: wx, y1: wy}};
+  else drag = {tele: true, wx, wy, ex: wx, ey: wy};
+});
+cv.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const b = cv.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top, [wx, wy] = s2w(x, y);
+  if (drag.pan) { view.tx = drag.tx + x - drag.x; view.ty = drag.ty + y - drag.y; }
+  else if (drag.door) drag.door = {x0: Math.min(drag.ax, wx), x1: Math.max(drag.ax, wx), y0: Math.min(drag.ay, wy), y1: Math.max(drag.ay, wy)};
+  else { drag.ex = wx; drag.ey = wy; }
+  draw();
+});
+function endDrag() {
+  const d = drag; drag = null;
+  if (d?.door) {
+    const r = d.door;
+    if (r.x1 - r.x0 >= 0.2 && r.y1 - r.y0 >= 0.2) { pushUndo(); (doors[LAY.tag] ??= []).push(r); markUnsaved(); }
+  } else if (d?.tele) {
+    const b = {x: d.wx, y: d.wy, tag: LAY.tag};
+    if (Math.hypot(d.ex - d.wx, d.ey - d.wy) > 0.3) b.yaw = Math.atan2(d.ey - d.wy, d.ex - d.wx);
+    post('/teleport', b); setFollow(true);
+  }
+  draw();
+}
+cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag);
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('wheel', e => { e.preventDefault(); const b = cv.getBoundingClientRect(), f = Math.exp(-e.deltaY * .0015), sx = e.clientX - b.left, sy = e.clientY - b.top;
+  view.tx = sx - (sx - view.tx) * f; view.ty = sy - (sy - view.ty) * f; view.s *= f; draw(); }, {passive: false});
+
+function setTool(t) { tool = t; for (const [id, k] of [['tTele', 'tele'], ['tDoor', 'door'], ['tPan', 'pan']]) $(id).setAttribute('aria-pressed', k === t);
+  $('hint').textContent = {tele: '클릭 = 순간이동 · 드래그 = 그 방향을 보며', door: '드래그 = 유리문 상자', pan: '드래그 = 지도 이동'}[t]; }
+function setFollow(f) { follow = f; $('follow').setAttribute('aria-pressed', f); }
+$('tTele').onclick = () => setTool('tele'); $('tDoor').onclick = () => setTool('door'); $('tPan').onclick = () => setTool('pan');
+$('follow').onclick = () => { setFollow(!follow); if (follow) { center(); draw(); } };
+$('fit').onclick = () => { setFollow(false); fit(); draw(); };
+
+/* 유리문 목록 · 되돌리기 · 저장 */
+function pushUndo() { (undo[LAY.tag] ??= []).push((doors[LAY.tag] || []).map(d => ({...d}))); if (undo[LAY.tag].length > 30) undo[LAY.tag].shift(); }
+function markUnsaved() { unsaved[LAY.tag] = true; doorUI('저장하지 않은 유리문이 있습니다.'); }
+function doorUI(msg) {
+  const ol = $('doorList'); ol.innerHTML = '';
+  (doors[LAY.tag] || []).forEach((d, k) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="num">x ${d.x0.toFixed(1)}~${d.x1.toFixed(1)} · y ${d.y0.toFixed(1)}~${d.y1.toFixed(1)}</span> `;
+    const go = document.createElement('button'); go.textContent = '가 보기'; go.style.cssText = 'padding:0 6px;font-size:.72rem';
+    go.onclick = () => { setFollow(true); post('/teleport', {x: (d.x0 + d.x1) / 2 - 1.5, y: (d.y0 + d.y1) / 2, yaw: 0, tag: LAY.tag}); };
+    const rm = document.createElement('button'); rm.textContent = '지우기'; rm.style.cssText = 'padding:0 6px;font-size:.72rem';
+    rm.onclick = () => { pushUndo(); doors[LAY.tag].splice(k, 1); markUnsaved(); draw(); };
+    li.append(go, ' ', rm); ol.appendChild(li);
+  });
+  if (!(doors[LAY.tag] || []).length) ol.innerHTML = '<li style="list-style:none;margin-left:-20px;color:var(--muted)">아직 표시한 유리문이 없습니다.</li>';
+  if (msg !== undefined) $('doorStatus').textContent = msg;
+}
+$('undo').onclick = () => { const u = undo[LAY.tag]; if (!u?.length) return; doors[LAY.tag] = u.pop(); markUnsaved(); draw(); };
+$('save').onclick = async () => {
+  const tag = LAY.tag; $('save').disabled = true; $('doorStatus').textContent = '저장 중…';
+  try { const r = await post('/doors', {tag, boxes: doors[tag] || []});
+    if (r.error) throw new Error(r.error);
+    unsaved[tag] = false; if (LAY.tag === tag) doorUI(`유리문 ${r.n} 개를 저장했습니다 ${new Date().toLocaleTimeString('ko-KR')} → ${r.path}`);
+  } catch (e) { $('doorStatus').textContent = '저장 실패: ' + e.message + ' — 다시 눌러 주세요.'; }
+  $('save').disabled = false;
+};
+
+/* 조종: 누르고 있는 키 → 속도 명령 (10 Hz 로 보냄; 서버는 0.5 s 안 오면 멈춘다) */
+const held = new Set();
+let spd = 0.5;
+$('spd').oninput = () => { spd = +$('spd').value; $('spdV').textContent = spd.toFixed(1) + ' m/s'; };
+function cmd() { const k = c => held.has(c) ? 1 : 0; return {vx: spd * (k('w') - k('s')), vy: 0.3 * (k('q') - k('e')), wz: 0.75 * (k('a') - k('d'))}; }
+setInterval(() => { if (held.size) post('/cmd', cmd()); }, 100);
+addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); $('undo').click(); return; }
+  if (e.code === 'Space') { spaceDown = true; e.preventDefault(); return; }
+  const k = e.key.toLowerCase();
+  if ('wasdqe'.includes(k) && k.length === 1) { held.add(k); post('/cmd', cmd()); e.preventDefault(); }
+  if (k === 'r' && !e.repeat) post('/reset', {});
+});
+addEventListener('keyup', e => { if (e.code === 'Space') spaceDown = false; const k = e.key.toLowerCase(); if (held.delete(k)) post('/cmd', cmd()); });
+addEventListener('blur', () => { held.clear(); post('/cmd', cmd()); });
+document.querySelectorAll('.pad button').forEach(b => {
+  const k = b.dataset.k;
+  b.addEventListener('pointerdown', () => { held.add(k); post('/cmd', cmd()); });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => { if (held.delete(k)) post('/cmd', cmd()); });
+});
+$('reset').onclick = () => post('/reset', {});
+
+/* 층 */
+function selectLayer(tag, tellServer) {
+  LAY = META.layers.find(l => l.tag === tag);
+  document.querySelectorAll('#layers button').forEach(b => b.setAttribute('aria-pressed', b.dataset.tag === tag));
+  if (tellServer) post('/layer', {tag});
+  doorUI(unsaved[tag] ? '저장하지 않은 유리문이 있습니다.' : '');
+  if (!bgs[tag]) { bgs[tag] = new Image(); bgs[tag].onload = () => { fit(); if (follow) center(); draw(); }; bgs[tag].src = '/bg/' + tag + '.png'; }
+  else { fit(); if (follow) center(); draw(); }
+}
+
+/* 상태 · RGB */
+async function poll() {
+  try {
+    const s = await (await fetch('/state')).json();
+    pose = s.pose; fallen = s.fallen;
+    if (pose) {
+      $('state').innerHTML = `x ${pose.x.toFixed(2)} · y ${pose.y.toFixed(2)} · z ${pose.z.toFixed(2)}<br>방향 ${(pose.yaw * 180 / Math.PI).toFixed(0)}° · 기울기 ${pose.tilt.toFixed(0)}°<br>렌더 ${s.fps.toFixed(1)} 장/s`
+        + (fallen ? '<br><span class="warn">넘어짐 — R 로 다시 세우기</span>' : '') + (s.msg ? `<br><span class="warn">${s.msg}</span>` : '');
+      $('ov').textContent = `(${pose.x.toFixed(1)}, ${pose.y.toFixed(1)}) ${(pose.yaw * 180 / Math.PI).toFixed(0)}°`;
+      if (follow) center();
+      draw();
+    }
+  } catch (e) { $('state').innerHTML = '<span class="warn">서버에 연결할 수 없습니다.</span>'; }
+  setTimeout(poll, 150);
+}
+const img = $('rgb');
+function nextFrame() { img.src = '/frame.jpg?t=' + Date.now(); }
+img.onload = () => setTimeout(nextFrame, 30);
+img.onerror = () => setTimeout(nextFrame, 500);
+
+(async () => {
+  META = await (await fetch('/meta')).json();
+  $('title').textContent = META.scene + ' 걸어 보기';
+  for (const l of META.layers) {
+    doors[l.tag] = l.doors.map(d => ({...d}));
+    const b = document.createElement('button'); b.textContent = l.tag; b.dataset.tag = l.tag; b.onclick = () => selectLayer(l.tag, true);
+    $('layers').appendChild(b);
+  }
+  setTool('tele');
+  selectLayer(META.layers[0].tag, false);
+  new ResizeObserver(resize).observe(stage);
+  poll(); nextFrame();
+})();
+</script>
+</body></html>
