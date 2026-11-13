@@ -45,10 +45,16 @@ def one(sc, P, md, r_b, cfg, gt=None, sc_ref=None):
     return row, r
 
 
-def load_holes(path):
+def load_holes(path, kinds=('mesh',)):
+    """00 holes.csv -> (x, y, z, 반지름) 배열. CRITICAL 만.
+
+    `kinds` 는 `kind` 열의 **접두사** 목록이다. 기본 `('mesh',)` 는 기존 동작 그대로
+    (mesh · mesh+GS · mesh (GS solid) — 로봇이 빠지는 구멍).
+    `('mesh', 'gs')` 를 주면 GS 구멍(렌더 이미지에 바닥이 비치는 곳)까지 포함한다.
+    """
     out = []
     for r in csv.DictReader(open(path)):
-        if r['flag'] == 'CRITICAL' and r['kind'].startswith('mesh'):
+        if r['flag'] == 'CRITICAL' and any(r['kind'].startswith(k) for k in kinds):
             out.append((float(r['x']), float(r['y']), float(r['z']), float(r['inscribed_diam_m']) / 2))
     return np.array(out) if out else np.zeros((0, 4))
 

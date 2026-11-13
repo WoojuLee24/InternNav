@@ -1,0 +1,1094 @@
+<title>노은역 랜드마크 지도 만들기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+
+<style>
+  :root{
+    --ground:#F7F8FA; --surface:#FFFFFF; --surface-2:#F1F3F6;
+    --ink:#151A21; --ink-2:#4A5563; --ink-3:#77838F;
+    --rule:#E1E5EB; --rule-2:#CED5DE;
+    --accent:#2C5F8A; --accent-soft:#E7EFF6;
+    --ok:#2E7355; --ok-soft:#E4F0EA;
+    --bad:#AC4529; --bad-soft:#F8E8E3;
+    --warn:#8A6418; --warn-soft:#F7EFDC;
+    --shadow:0 1px 2px rgba(20,30,45,.05), 0 8px 24px -16px rgba(20,30,45,.25);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0E1116; --surface:#161A21; --surface-2:#1D222A;
+      --ink:#E7EBF0; --ink-2:#A8B2BF; --ink-3:#7A848F;
+      --rule:#262C35; --rule-2:#343C47;
+      --accent:#7FB3DC; --accent-soft:#17242F;
+      --ok:#6FC79C; --ok-soft:#142420;
+      --bad:#E08A6E; --bad-soft:#2A1A16;
+      --warn:#D4A843; --warn-soft:#241E10;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0E1116; --surface:#161A21; --surface-2:#1D222A;
+    --ink:#E7EBF0; --ink-2:#A8B2BF; --ink-3:#7A848F;
+    --rule:#262C35; --rule-2:#343C47;
+    --accent:#7FB3DC; --accent-soft:#17242F;
+    --ok:#6FC79C; --ok-soft:#142420;
+    --bad:#E08A6E; --bad-soft:#2A1A16;
+    --warn:#D4A843; --warn-soft:#241E10;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);
+    font-family:"IBM Plex Sans KR",system-ui,sans-serif;font-size:16px;line-height:1.75;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1120px;margin:0 auto;padding:54px 26px 56vh;display:flex;flex-direction:column;gap:52px}
+  .prose{max-width:66ch}
+  .mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+
+  .eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11.5px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--ink-3);margin:0 0 14px}
+  h1{font-size:clamp(30px,4.3vw,42px);line-height:1.17;font-weight:600;letter-spacing:-.021em;margin:0 0 18px;text-wrap:balance}
+  h2{font-size:24px;font-weight:600;letter-spacing:-.014em;margin:0;text-wrap:balance}
+  h3{font-size:17px;font-weight:600;margin:0 0 8px}
+  p{margin:0 0 14px;color:var(--ink-2)}
+  p strong,li strong,td strong{color:var(--ink);font-weight:600}
+  section{display:flex;flex-direction:column;gap:20px}
+  .sec-head{display:flex;flex-direction:column;gap:4px;padding-bottom:13px;border-bottom:1px solid var(--rule)}
+  .sec-head .n{font-family:"IBM Plex Mono",monospace;font-size:12px;letter-spacing:.1em;color:var(--accent);margin-bottom:3px}
+  .sec-head p{margin:0;font-size:14.5px;color:var(--ink-3)}
+
+  dl.terms{margin:0;display:grid;grid-template-columns:auto 1fr;gap:9px 18px;
+    background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:20px 22px;box-shadow:var(--shadow)}
+  dl.terms dt{font-weight:600;color:var(--ink);white-space:nowrap}
+  dl.terms dd{margin:0;color:var(--ink-2);font-size:14.5px}
+  dl.terms code{font-family:"IBM Plex Mono",monospace;font-size:13px;color:var(--ink)}
+
+  .io{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:720px){.io{grid-template-columns:1fr}}
+  .box{background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:17px 19px;box-shadow:var(--shadow)}
+  .box.in{border-left:3px solid var(--ink-3)}
+  .box.out{border-left:3px solid var(--accent)}
+  .box h3{font-size:12px;font-family:"IBM Plex Mono",monospace;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--ink-3);font-weight:500}
+  .box ul{margin:0;padding-left:18px;font-size:14px;color:var(--ink-2);display:flex;flex-direction:column;gap:5px}
+  .box code{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink)}
+
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:1px;
+    background:var(--rule);border:1px solid var(--rule);border-radius:3px;overflow:hidden}
+  .stat{background:var(--surface);padding:17px 19px;display:flex;flex-direction:column;gap:4px}
+  .stat .k{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+  .stat .v{font-family:"IBM Plex Mono",monospace;font-size:26px;font-weight:500;letter-spacing:-.02em}
+  .stat .nn{font-size:12.5px;color:var(--ink-3);line-height:1.45}
+  .v.ok{color:var(--ok)} .v.bad{color:var(--bad)} .v.flat{color:var(--ink-2)}
+
+  figure{margin:0;display:flex;flex-direction:column;gap:10px}
+  figure img{width:100%;height:auto;display:block;border:1px solid var(--rule);border-radius:3px;background:#fff}
+  figcaption{font-size:13.5px;color:var(--ink-3);line-height:1.6}
+  figcaption b{color:var(--ink);font-weight:600}
+
+  .tablewrap{overflow-x:auto;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+  table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:520px}
+  th,td{padding:11px 16px;text-align:left;border-bottom:1px solid var(--rule);vertical-align:top}
+  thead th{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--ink-3);font-weight:500;background:var(--surface-2);border-bottom:1px solid var(--rule-2)}
+  tbody tr:last-child td{border-bottom:none}
+  td.num{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+
+  pre{margin:0;background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+    padding:15px 17px;overflow-x:auto;font-family:"IBM Plex Mono",monospace;font-size:12.5px;
+    line-height:1.7;color:var(--ink-2)}
+  pre b{color:var(--ink);font-weight:500}
+  pre .c{color:var(--ink-3)}
+
+  .note{background:var(--surface-2);border:1px solid var(--rule);border-radius:3px;
+    padding:16px 19px;font-size:14px;color:var(--ink-2)}
+  .note strong{color:var(--ink)}
+  .note.warn{border-left:3px solid var(--warn)}
+  .note.ok{border-left:3px solid var(--ok)}
+
+  .pill{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.07em;
+    text-transform:uppercase;padding:3px 8px;border-radius:2px;white-space:nowrap}
+  .pill.ok{background:var(--ok-soft);color:var(--ok)}
+  .pill.run{background:var(--accent-soft);color:var(--accent)}
+  .pill.warn{background:var(--warn-soft);color:var(--warn)}
+
+
+  /* ── 단계 ⑦ 종류별 사진 ─────────────────────────────── */
+  .galbar{display:flex;gap:13px;align-items:center;flex-wrap:wrap;
+    background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+    padding:11px 15px;box-shadow:var(--shadow);position:sticky;top:0;z-index:10}
+  .galbar .sp{flex:1}
+  .galbar label{font-size:13px;color:var(--ink-3);display:flex;align-items:center;gap:6px}
+  .galbar select,.gfind{font-family:inherit;font-size:13px;color:var(--ink);background:var(--surface);
+    border:1px solid var(--rule-2);border-radius:3px;padding:5px 9px}
+  .gfind{min-width:230px}
+  .savechip{font-family:"IBM Plex Mono",monospace;font-size:11.5px;padding:4px 9px;border-radius:3px;
+    background:var(--surface-2);color:var(--ink-3);border:1px solid var(--rule);white-space:nowrap}
+  .savechip.ok{background:var(--ok-soft);color:var(--ok);border-color:var(--ok)}
+  .savechip.bad{background:var(--bad-soft);color:var(--bad);border-color:var(--bad)}
+  .savechip.busy{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+  .galbar :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+  .gal{display:flex;flex-direction:column;gap:1px;background:var(--rule);
+    border:1px solid var(--rule);border-radius:3px;overflow:hidden}
+  .gmsg{margin:0;padding:26px;background:var(--surface);color:var(--ink-3);font-size:14px;text-align:center}
+
+  .cls{background:var(--surface);padding:13px 16px;display:flex;gap:15px;align-items:flex-start}
+  .cls.off{background:var(--surface-2)}
+  .cls.off .cname{text-decoration:line-through;color:var(--ink-3)}
+  .ctl{display:flex;align-items:center;gap:9px;min-width:300px;padding-top:3px;flex-wrap:wrap}
+  .ctl input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex:none}
+  .cname{font-weight:600;font-size:14.5px;line-height:1.35;word-break:break-word}
+  .cnum{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink-3);white-space:nowrap}
+  .gall{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.04em;
+    background:var(--surface-2);color:var(--ink-3);border:1px solid var(--rule-2);border-radius:2px;
+    padding:2px 7px;cursor:pointer;white-space:nowrap}
+  .gall:hover{color:var(--bad);border-color:var(--bad)}
+  .crops{display:flex;gap:7px;flex-wrap:wrap;flex:1;min-width:0}
+  .crop{position:relative;width:118px;height:118px;overflow:hidden;flex:none;
+    border:1px solid var(--rule-2);border-radius:3px;background:#0b0d10}
+  .crop img{position:absolute;max-width:none;image-rendering:auto}
+  .crop .ring{position:absolute;left:50%;top:50%;width:34px;height:34px;transform:translate(-50%,-50%);
+    border:2px solid #ffd24a;border-radius:50%;box-shadow:0 0 0 1.5px rgba(0,0,0,.65);pointer-events:none}
+  .crop .cm{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.62);color:#fff;
+    font-family:"IBM Plex Mono",monospace;font-size:10px;padding:1px 4px;text-align:right}
+  .crop[title]{cursor:pointer}
+  .crop .xmark{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+    background:rgba(172,69,41,.55);color:#fff;font-size:34px;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,.6)}
+  .crop:hover .xmark{display:flex;background:rgba(172,69,41,.22);font-size:26px}
+  .crop.xout .xmark{display:flex}
+  .crop.xout img{filter:grayscale(1) brightness(.55)}
+  .crop.xout:hover .xmark{background:rgba(46,115,85,.5)}
+  .crop.dim{opacity:.3}
+  .cright{display:flex;flex-direction:column;gap:9px;flex:1;min-width:0}
+  .cname{background:none;border:1px dashed transparent;border-radius:3px;padding:2px 5px;
+    margin:-2px -5px;text-align:left;font-family:inherit;color:inherit;cursor:pointer}
+  .cname{border-bottom:1px dashed var(--rule-2)}
+  .cname:hover{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+  .cpen{font-size:11px;color:var(--ink-3);margin-left:7px;vertical-align:1px}
+  .cname:hover .cpen{color:var(--accent)}
+  .cstar{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.06em;
+    background:var(--warn-soft);color:var(--warn);border-radius:2px;padding:1px 5px;margin-left:7px;
+    vertical-align:1px;font-weight:500}
+  /* 붙박이 편집 바 — 목록을 밀지 않는다 */
+  .edbar{position:fixed;left:0;right:0;bottom:0;z-index:40;display:none;
+    background:var(--surface);border-top:2px solid var(--accent);
+    box-shadow:0 -8px 28px -14px rgba(20,30,45,.45);max-height:52vh;overflow-y:auto}
+  .edbar.on{display:block}
+  .edhead{display:flex;align-items:center;gap:13px;padding:9px 20px;
+    border-bottom:1px solid var(--rule);background:var(--accent-soft)}
+  .edwho{font-family:"IBM Plex Mono",monospace;font-size:13px;color:var(--accent);font-weight:500;flex:1}
+  .edtip{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3)}
+  .edbody{max-width:1120px;margin:0 auto;padding:14px 20px 18px;
+    display:flex;flex-direction:column;gap:12px}
+  .edfield{display:grid;grid-template-columns:118px 1fr;gap:12px;align-items:start}
+  @media(max-width:720px){.edfield{grid-template-columns:1fr;gap:5px}}
+  .edlab{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink-2);
+    padding-top:7px;display:flex;flex-direction:column;gap:2px}
+  .edhint{font-family:"IBM Plex Sans KR",sans-serif;font-size:11px;color:var(--ink-3);line-height:1.4}
+  .edin{width:100%;font-family:"IBM Plex Mono",monospace;font-size:13.5px;
+    border:1px solid var(--rule-2);border-radius:3px;padding:7px 10px;
+    background:var(--surface);color:var(--ink)}
+  .edin.small{width:auto;min-width:190px;font-size:12.5px;padding:4px 9px}
+  .edin:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .tag{font-family:"IBM Plex Mono",monospace;font-size:11.5px;
+    background:var(--surface-2);color:var(--ink-2);border:1px solid var(--rule-2);
+    border-radius:3px;padding:3px 8px;display:inline-flex;align-items:center;gap:5px}
+  .tag.group{background:var(--ok-soft);color:var(--ok);border-color:var(--ok)}
+  .tag.rm button,.tag.cand button{background:none;border:none;color:inherit;cursor:pointer;
+    font-family:inherit;font-size:inherit;padding:0;line-height:1}
+  .tag.rm button:hover{color:var(--bad)}
+  .tag.cand{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);padding:3px 4px 3px 8px}
+  .tag.cand button:first-child:hover{text-decoration:underline}
+  .tag.cand button:last-child{font-size:13px;padding:0 4px;border-left:1px solid var(--accent);margin-left:3px}
+  .tag.cand button:last-child:hover{background:var(--accent);color:#fff;border-radius:2px}
+  .cmeta{display:flex;gap:5px;flex-wrap:wrap;width:100%;margin-top:3px}
+  .cls.aim{box-shadow:inset 3px 0 0 var(--accent)}
+  .crop.aim{outline:2px solid var(--accent);outline-offset:1px}
+  .crop .pen{position:absolute;top:3px;right:3px;z-index:3;display:block;
+    background:rgba(20,26,33,.72);color:#fff;border:none;border-radius:2px;
+    font-size:12px;line-height:1;padding:3px 6px;cursor:pointer}
+  .crop .pen:hover{background:var(--accent)}
+  .crop .rn{position:absolute;top:3px;left:3px;z-index:2;background:rgba(138,100,24,.9);color:#fff;
+    font-family:"IBM Plex Mono",monospace;font-size:9px;padding:1px 4px;border-radius:2px}
+  .gmore{align-self:center;font-family:"IBM Plex Mono",monospace;font-size:11px;
+    background:var(--surface-2);color:var(--ink-2);border:1px solid var(--rule-2);border-radius:3px;
+    padding:6px 11px;cursor:pointer;white-space:nowrap}
+  .gmore:hover{border-color:var(--accent);color:var(--accent)}
+
+  .cmdbox{background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+    box-shadow:var(--shadow);overflow:hidden}
+  .cmdhead{display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:9px 15px;border-bottom:1px solid var(--rule);background:var(--surface-2);
+    font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.09em;
+    text-transform:uppercase;color:var(--ink-3)}
+  .cbtn{font-family:inherit;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    background:var(--accent);color:#fff;border:none;border-radius:2px;padding:4px 11px;cursor:pointer}
+  .cbtn:hover{filter:brightness(1.1)}
+  .cmd{border:none;border-radius:0;box-shadow:none;white-space:pre-wrap;word-break:break-all;color:var(--ink)}
+  @media(max-width:720px){.cls{flex-direction:column;gap:9px}.ctl{min-width:0}}
+
+  footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13px;color:var(--ink-3)}
+  footer code{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink-2)}
+</style>
+
+<div class="wrap">
+
+<header class="prose">
+  <p class="eyebrow">노은역 · 데이터 재구축 · 2026-11-13</p>
+  <h1>역 안에 무엇이 어디 있는지 먼저 지도로 만든다</h1>
+  <p>지금까지는 목적지를 아무 데나 찍고 “거기 멈출 만한 게 있나”를 나중에 봤다. 그래서 평가셋 40개 중 21개가 쓸 수 없었다. <strong>순서를 뒤집어, 역 안의 물건을 먼저 찾아 목록으로 만들고 그 옆을 목적지로 삼는다.</strong></p>
+</header>
+
+<section>
+  <div class="sec-head"><h2>용어</h2><p>이 문서에 나오는 말들</p></div>
+  <dl class="terms">
+    <dt>랜드마크</dt><dd>“저기서 멈춰라”라고 가리킬 수 있는 물건. 기둥·자판기·벤치처럼 <strong>한 점으로 지목되는 것</strong>. 바닥·벽은 어디에나 있어 못 쓴다.</dd>
+    <dt>씬 스캔</dt><dd>역 안을 격자로 훑으며 사진을 찍는 것. 걸을 수 있는 바닥 위 167곳에서 네 방향씩, 모두 666장.</dd>
+    <dt>Gemma</dt><dd>사진을 읽는 큰 언어모델(Gemma-4-31B). 여기서는 <strong>사진에 무엇이 있는지 이름을 말하는</strong> 역할.</dd>
+    <dt>GroundingDINO</dt><dd>“이 이름의 물건이 화면 어디 있나”를 찾아 네모를 그려주는 모델. <strong>위치만</strong> 알려준다.</dd>
+    <dt>SAM</dt><dd>네모 안에서 물건의 <strong>정확한 모양</strong>을 오려내는 모델.</dd>
+    <dt>메시 광선</dt><dd>역의 3D 모형에 카메라에서 광선을 쏴 <strong>실제 거리를 재는</strong> 것. 추측이 아니라 계산이다.</dd>
+    <dt><code>score</code></dt><dd>검출기가 “이게 그 물건이 맞다”고 확신하는 정도. 0~1.</dd>
+    <dt><code>.house</code></dt><dd>MP3D 데이터셋이 쓰는 <strong>물체 목록 파일</strong>. 이름·3D 위치·크기가 적혀 있다. 최종 목표는 노은역용으로 이 파일을 만드는 것.</dd>
+  </dl>
+</section>
+
+<section>
+  <div class="sec-head">
+    <p class="n">목적</p>
+    <h2>왜 이걸 만드나</h2>
+  </div>
+  <div class="prose">
+    <p>문장 생성기는 “<em>흰 기둥 옆에서 멈춰라</em>” 같은 문장을 쓴다. 그 <strong>흰 기둥이 무엇이고 어디 있는지</strong>를 알려주는 입력이 <code>stop_cue</code>인데, 노은역에서는 이 칸이 비어 있었다(<code>null</code>). 모델이 사진만 보고 지어냈고, 결과가 이랬다.</p>
+  </div>
+<pre>ep23  "계단 근처에서 멈춰라"   →  계단이 <b>16.7 m</b> 밖
+ep36  "주황 벽에서 멈춰라"     →  주황 벽이 <b>13.4 m</b> 밖
+ep21  "자판기와 좌석 구역"     →  가리키는 범위가 <b>8.6 m</b></pre>
+  <div class="prose">
+    <p>성공 기준이 <strong>목적지 3 m 안</strong>이므로, 문장대로 따라가면 실패한다. 풀 수 없는 문제를 내고 채점한 셈이다.</p>
+  </div>
+  <div class="note ok prose">
+    <strong>MP3D에는 이 문제가 없었다.</strong> <code>.house</code> 파일에 사람이 물체를 하나하나 적어뒀기 때문이다.
+    노은역은 3D 스캔이라 그 파일이 없다. <strong>그래서 만든다.</strong> 만들어 주면 기존 파이프라인을 한 줄도 고치지 않고 그대로 쓸 수 있고,
+    ETRI의 다른 장소도 같은 방식으로 처리된다.
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <p class="n">전체 방법</p>
+    <h2>다섯 단계</h2>
+  </div>
+<pre>① 씬 스캔      역 안 167곳 × 4방향  →  사진 <b>666장</b>
+      ↓
+② 이름 뽑기    Gemma가 사진마다 "여기 뭐가 있나" 답함
+      ↓
+③ 어휘 검증    그 이름을 GroundingDINO가 찾아낼 수 있는지 확인
+               <span class="c">못 찾는 말은 버리고, 같은 물건의 여러 표현은 제일 잘 찾는 것으로 통일</span>
+      ↓
+④ 위치 측정    GroundingDINO(어디) → SAM(모양) → 메시 광선(거리)  →  3D 위치
+      ↓
+⑤ 묶기        여러 사진에 찍힌 같은 물건을 하나로  →  <b>랜드마크 목록</b>
+      ↓
+   .house 파일 생성</pre>
+  <div class="io">
+    <div class="box in">
+      <h3>입력</h3>
+      <ul>
+        <li>역 3D 모형 <code>noeun_station.glb</code></li>
+        <li>걸을 수 있는 영역 <code>noeun_station.navmesh</code></li>
+        <li>층 정보 <code>verify.json</code> (3개 층)</li>
+      </ul>
+    </div>
+    <div class="box out">
+      <h3>출력</h3>
+      <ul>
+        <li><code>names.json</code> — 사진별 Gemma가 말한 이름</li>
+        <li><code>vocab.json</code> — 검증된 어휘 + 표현 통일표</li>
+        <li><code>landmarks.json</code> — 랜드마크 목록 (이름·3D 위치·관측 횟수)</li>
+        <li><code>noeun_station.house</code> — 최종</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <p class="n">단계 ①</p>
+    <h2>씬 스캔 — 역을 골고루 찍었나</h2>
+    <p>걸을 수 있는 바닥에 5 m 격자를 깔고, 각 지점에서 동·서·남·북 네 방향으로 한 장씩.</p>
+  </div>
+  <div class="stats">
+    <div class="stat"><span class="k">촬영 지점</span><span class="v ok mono">167</span><span class="nn">격자 5 m</span></div>
+    <div class="stat"><span class="k">사진</span><span class="v ok mono">666</span><span class="nn">지점당 4방향</span></div>
+    <div class="stat"><span class="k">층</span><span class="v flat mono">3</span><span class="nn">전부 포함</span></div>
+    <div class="stat"><span class="k">걸린 시간</span><span class="v flat mono">35분</span><span class="nn">7초/장</span></div>
+  </div>
+  <figure>
+    <img src="img/scan_coverage.png" alt="층별 평면도 세 개. 파란 점이 사진을 찍은 지점이며 지하 2층 196장, 지하 1층 280장, 지상 190장으로 골고루 퍼져 있다.">
+    <figcaption><b>범례 읽는 법</b> — 파란 점 하나가 <b>사진을 찍은 자리</b> 하나다(그 자리에서 4방향을 찍었다). 가로·세로축은 역 평면 좌표[m]. 세 그림은 왼쪽부터 <b>지하 2층 승강장 · 지하 1층 대합실 · 지상 출구</b>다. 점이 빈 곳은 걸을 수 없는 곳(벽·선로)이다.</figcaption>
+  </figure>
+  <div class="note prose">
+    <strong>중간에 한 번 멈췄다.</strong> Isaac 렌더가 601장째에서 죽었지만(종료 시 segfault — 기존에도 기록된 현상)
+    저장된 결과는 온전했고, 남은 21지점을 따로 찍어 합쳤다. 최종 <strong>167/167 지점 전부</strong> 완료.
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <p class="n">단계 ②③</p>
+    <h2>어휘 — 이름을 짓지 않고 뽑아낸다</h2>
+    <p>어휘를 사람이 추측해 만들면 빠뜨린다. Gemma가 사진에서 뽑고, 검출기가 아는 말만 남긴다.</p>
+  </div>
+
+  <div class="prose">
+    <p>처음에는 내가 23개를 추측으로 적었다. 그런데 Gemma가 뽑은 것을 보니 <strong>지하철역에서 가장 흔한 것들이 빠져 있었다.</strong></p>
+  </div>
+<pre><span class="c">내 추측 어휘에 없었던 것 (등장 횟수 · 검출 신뢰도)</span>
+platform screen doors   <b>97회</b>  score 0.46   <span class="c">승강장 안전문</span>
+yellow tactile paving   <b>70회</b>  score 0.48   <span class="c">점자블록</span>
+handrail                <b>57회</b>  score 0.41   <span class="c">손잡이 난간</span>
+metal railing           <b>71회</b>  score 0.58</pre>
+
+  <figure>
+    <img src="img/vocab_scatter.png" alt="가로축은 그 이름이 나온 사진 수(로그), 세로축은 검출 신뢰도. 초록 점이 통과한 어휘, 빨간 점이 탈락. 가로 점선이 통과선 0.35.">
+    <figcaption><b>범례 읽는 법</b> — 점 하나가 <b>이름 하나</b>다. 가로축은 <b>그 이름이 몇 장의 사진에서 나왔나</b>(로그 눈금, 오른쪽일수록 흔함), 세로축은 <b>검출기가 얼마나 확신했나</b>(score). <span style="color:#2E7355;font-weight:600">초록 = 통과</span>, <span style="color:#AC4529;font-weight:600">빨강 = 탈락</span>. 가로 점선이 통과선(score 0.35)이다. 글자가 붙은 점은 가장 자주 나온 10개.</figcaption>
+  </figure>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>통일 전</th><th></th><th>통일 후</th><th style="text-align:right">효과</th></tr></thead>
+      <tbody>
+        <tr><td><code>bench</code></td><td>→</td><td><code>metal bench</code></td><td class="num">score 0.32 → <b>0.72</b></td></tr>
+        <tr><td><code>trash bin</code></td><td>→</td><td><code>trash can</code></td><td class="num">검출 <b>0%</b> → 100%</td></tr>
+        <tr><td><code>light fixture</code></td><td>→</td><td><code>ceiling lights</code></td><td class="num">검출 <b>0%</b> → 100%</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note prose">
+    <strong>같은 물건이라도 뭐라고 부르냐에 따라 검출이 갈린다.</strong> 그래서 같은 물건의 여러 표현을 묶고,
+    그중 <strong>가장 잘 찾아지는 표현</strong>을 대표로 삼는 표를 자동으로 만든다.
+    색은 따로 본다 — <code>blue pillar</code>와 <code>red pillar</code>는 다른 물건이라 합치면 안 된다.
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <p class="n">단계 ④⑤</p>
+    <h2>랜드마크 지도</h2>
+    <p>검출 → 모양 오려내기 → 3D 위치 → 여러 사진의 같은 물건을 하나로.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><span class="k">검출</span><span class="v flat mono">4,998</span><span class="nn">건</span></div>
+    <div class="stat"><span class="k">랜드마크</span><span class="v ok mono">812</span><span class="nn">77종류</span></div>
+    <div class="stat"><span class="k">가장 많은 것</span><span class="v flat mono">103</span><span class="nn">white pillar</span></div>
+  </div>
+
+  <figure>
+    <img src="img/landmark_map.png" alt="층별 평면도에 랜드마크가 종류별 색으로 찍혀 있다.">
+    <figcaption><b>범례 읽는 법</b> — 점 하나가 <b>랜드마크 하나</b>이고 <b>색이 종류</b>다. 범례의 괄호 숫자는 역 전체에서 그 종류가 몇 개인지. 회색은 범례에 없는 나머지 종류. 세 평면도는 위에서부터 <b>지하 2층 · 지하 1층 · 지상</b>이다.</figcaption>
+  </figure>
+
+  <div class="note warn prose">
+    <strong>처음 그린 지도에서 문제를 찾았다.</strong> 가장 많은 것이 <code>white tiles</code>(100) ·
+    <code>black baseboard</code>(93) · <code>paved path</code>(78)였다 — <strong>바닥과 걸레받이다.</strong>
+    “저기서 멈춰라”의 대상이 못 된다. MP3D가 <code>wall</code>·<code>floor</code>·<code>ceiling</code>을 뺀 것과
+    같은 이유로 제외 목록을 보강했고, 그 과정에서 <strong>단수화 버그</strong>도 찾았다
+    (<code>tiles</code>를 <code>til</code>로 잘라 <code>white tiles</code>가 빠져나가고 있었다).
+    1,573개 → <strong>812개</strong>로 정리됐다.
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <p class="n">단계 ⑥</p>
+    <h2>목적지 후보 — 여기가 핵심이다</h2>
+    <p>랜드마크 옆 0.6~2 m에 “서는 자리”를 둔다. 이게 목적지가 된다.</p>
+  </div>
+
+  <div class="prose">
+    <p>지금까지 목적지를 아무 데나 찍고 나중에 멈출 대상을 찾았다. 그래서 대상이 16 m 밖에 있기도 했다. <strong>순서를 뒤집으면 그런 일이 구조적으로 생기지 않는다.</strong></p>
+  </div>
+<pre>랜드마크에서 <b>2 m 안</b>을 목적지로  +  로봇이 랜드마크 옆(약 1 m)에 섬
+                                   = 목적지에서 <b>최대 3 m</b>  →  성공 기준 충족</pre>
+
+  <div class="stats">
+    <div class="stat"><span class="k">쓸 수 있는 랜드마크</span><span class="v ok mono">471</span><span class="nn">812 중</span></div>
+    <div class="stat"><span class="k">목적지 후보</span><span class="v ok mono">1,412</span><span class="nn">필요 1,280</span></div>
+    <div class="stat"><span class="k">거리 중앙</span><span class="v ok mono">1.31 m</span><span class="nn">최대 2.00 m</span></div>
+    <div class="stat"><span class="k">버린 랜드마크</span><span class="v bad mono">341</span><span class="nn">아래 표</span></div>
+  </div>
+
+  <figure>
+    <img src="img/goal_map.png" alt="층별 평면도에 파란 점(랜드마크)과 초록 점(목적지 후보), 초록 선(바라보는 방향)이 찍혀 있다.">
+    <figcaption><b>범례 읽는 법</b> — <span style="color:#2C5F8A;font-weight:600">파란 점</span>이 <b>랜드마크</b>(멈출 대상), <span style="color:#2E7355;font-weight:600">초록 점</span>이 <b>목적지 후보</b>(로봇이 서는 자리), 초록 선이 <b>바라보는 방향</b>이다. 회색 바탕은 걸을 수 있는 바닥. 초록 점이 파란 점을 둘러싸고 선이 안쪽을 향하는 것이 정상이다.</figcaption>
+  </figure>
+
+  <figure>
+    <img src="img/goal_dist.png" alt="목적지에서 랜드마크까지 거리 막대그래프. 전부 2 m 이하이고 중앙값 1.34 m.">
+    <figcaption><b>범례 읽는 법</b> — 가로축은 <b>목적지에서 멈출 대상까지 거리</b>, 세로축은 그런 목적지가 몇 개인지. 빨간 점선이 <b>상한 2 m</b>다. 전부 왼쪽에 있으므로 <b>조건을 어긴 목적지가 하나도 없다</b>.</figcaption>
+  </figure>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>버린 이유</th><th style="text-align:right">개수</th><th>설명</th></tr></thead>
+      <tbody>
+        <tr><td><strong>종류 제외</strong> — 기둥·표지판·자동차·차양·화살표</td><td class="num">297</td><td>사람이 정했다. 아래 설명</td></tr>
+        <tr><td>설 자리 없음</td><td class="num">41</td><td>2 m 안에 설 수 있는 곳이 없거나, 서도 <strong>그 물체가 안 보인다</strong></td></tr>
+        <tr><td>구멍 위/근처</td><td class="num">3</td><td>바닥이 망가진 곳 — 로봇이 빠지거나 사진에 바닥이 비친다</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note warn prose">
+    <strong>기둥·표지판·자동차·차양·화살표는 통째로 뺐다 (297개, 랜드마크의 37 %).</strong>
+    <code>white pillar</code> 103 · <code>concrete pillar</code> 55 · <code>green sign</code> 25 ·
+    <code>white sign</code> 24 · <code>blue arrow</code> 19 · <code>blue sign</code> 16 · 나머지 55.
+    이유는 간단하다 — <strong>역 안에 흰 기둥이 103개 있으면 “흰 기둥 옆에서 멈춰라”가 어느 기둥인지 가리키지 못한다.</strong>
+    물체를 못 찾아서가 아니라, 찾아도 <strong>말로 지목이 안 되기 때문</strong>이다. 표지판도 같다.
+    남은 상위 종류는 <code>marble counter</code> 56 · <code>sliding door</code> 44 ·
+    <code>doorway</code> 38 · <code>stairs</code> 33 로, 역 안에서 자리가 특정되는 것들이다.
+  </div>
+
+  <div class="note prose">
+    <strong>빼고 나니 남은 것의 합격률이 올랐다 — 82 % → 91 %.</strong>
+    기둥·표지판은 벽에 붙어 있거나 서로 가려서 “설 자리 없음”으로 떨어지는 비율이 높았다.
+    그래서 <strong>랜드마크는 608 → 515로 줄었는데 쓸 수 있는 것은 500 → 471로 덜 줄었다.</strong>
+    버려진 “설 자리 없음”도 104 → 41로 줄었다.
+  </div>
+
+  <div class="note prose">
+    <strong>바닥 구멍은 CRITICAL 197곳만 걸렀다.</strong>
+    (<code>gs</code> 139 — 사진에 바닥이 비침 · <code>mesh</code> 48 — 로봇이 빠짐 · 둘 다 10).
+    약한 구멍(<code>minor</code>)이 1,993곳이라 전부 빼면 역을 거의 쓸 수 없다.
+    출발점과 경로의 구멍 검사는 <strong>경로를 만들 때</strong> 한다(기존 U4 판정을 <code>gs</code>까지 넓혀서).
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <p class="n">단계 ⑦</p>
+    <h2>종류별로 눈으로 확인하기</h2>
+    <p>어떤 종류를 쓰고 어떤 종류를 뺄지, 사진을 보고 정한다.</p>
+  </div>
+
+  <div class="prose">
+    <p>숫자만으로는 <code>marble counter</code> 56개가 정말 쓸 만한지 알 수 없다. <strong>종류마다 실제 사진을 붙여 놓았다.</strong> 노란 테두리가 그 물체를 잘라낸 자리다.</p>
+  </div>
+
+  <div class="galbar">
+    <input id="gFind" class="gfind" placeholder="종류 이름으로 찾기 (예: door)" autocomplete="off">
+    <label>보기
+      <select id="gShow">
+        <option value="keep">남은 것만</option>
+        <option value="all">전체</option>
+        <option value="drop">뺀 것만</option>
+      </select>
+    </label>
+    <label>정렬
+      <select id="gSort">
+        <option value="n">개수 많은 순</option>
+        <option value="name">이름순</option>
+      </select>
+    </label>
+    <span class="sp"></span>
+    <span class="mono" id="gCount"></span>
+    <button id="gSave" class="cbtn" style="padding:6px 13px">저장</button>
+    <span class="savechip" id="gSaved">불러오는 중…</span>
+  </div>
+
+  <div class="note ok prose" style="margin:0">
+    <strong>고치는 대로 자동으로 저장됩니다.</strong> 위 <span class="mono" style="font-size:12px">저장됨 11/13 22:14</span>
+    표시가 초록이면 들어간 것입니다. 페이지를 닫았다 열어도 그대로 남고, 클로드가 바로 읽을 수 있습니다.
+    빨갛게 뜨면 저장이 안 되는 상황이니 아래 <strong>내려받기</strong>로 파일을 받아 주세요.
+  </div>
+
+  <div class="note prose" style="margin:0">
+    <strong>체크를 끄면 그 종류 하나만 빠집니다.</strong> <code>white sign</code>만 꺼도
+    <code>green sign</code>은 그대로 남습니다. 같은 머리 명사를 한꺼번에 빼려면 옆의
+    <span class="mono" style="font-size:12px">✕ sign 전부</span> 버튼을 쓰세요.
+    <strong>사진을 누르면 그 랜드마크 하나만 빠집니다.</strong> 같은 종류여도 잘못 잡힌 것 하나만
+    골라낼 수 있습니다 — 회색으로 바뀌고 <span class="mono" style="font-size:12px">✕</span> 가 덮이며,
+    다시 누르면 되살아납니다. 사진 오른쪽 아래 <span class="mono" style="font-size:12px">#번호</span> 가
+    그 랜드마크의 번호입니다. 종류당 8장만 보이고, <span class="mono" style="font-size:12px">더 보기</span> 로 전부 펼칩니다.
+    <strong>이름을 누르면 화면 아래에 고치는 칸이 열립니다.</strong> 목록은 그대로 있고 자리도 안 밀립니다.
+    한 물체는 이름을 <strong>여러 개</strong> 가질 수 있습니다 —
+    <span class="mono" style="font-size:12px">대표 이름</span> 하나로 묶이고,
+    <span class="mono" style="font-size:12px">다른 이름</span>은 문장 만들 때 골라 씁니다.
+    <span class="mono" style="font-size:12px">공통 class</span> 로 여러 종류를 한 단어로 묶을 수도 있습니다
+    (<code>exit sign</code> · <code>station sign</code> → <code>sign</code>).
+    <span class="mono" style="font-size:12px">후보</span> 에는 Gemma 가 원래 말했던 이름들이 뜹니다 — 누르면 바로 들어갑니다.
+    다 고르신 뒤 아래 <strong>고친 내용</strong>을 내려받아 주시면 그대로 다시 돌립니다.
+    처음 상태는 지금까지 정한 제외 목록이 반영돼 있습니다.
+  </div>
+
+  <div id="gal" class="gal"><p class="gmsg">사진을 불러오는 중…</p></div>
+
+  <datalist id="gVocab"></datalist>
+  <datalist id="gHeads"></datalist>
+
+  <div id="edBar" class="edbar">
+    <div class="edhead">
+      <span class="edwho" id="edWho"></span>
+      <span class="edtip">Enter 적용 · Esc 닫기</span>
+      <button id="edClose" class="gmore" style="padding:4px 11px">닫기</button>
+    </div>
+    <div id="edBody" class="edbody"></div>
+  </div>
+
+  <div class="cmdbox">
+    <div class="cmdhead">
+      <span>고친 내용 <span id="gCmdNote" style="text-transform:none;letter-spacing:0;margin-left:9px"></span></span>
+      <span style="display:flex;gap:7px">
+        <button id="gReset" class="gmore" style="padding:4px 10px">이름 되돌리기</button>
+        <button id="gCopy" class="cbtn">복사</button>
+        <button id="gDown" class="cbtn">내려받기</button>
+      </span>
+    </div>
+    <pre id="gJson" class="cmd"></pre>
+    <div class="cmdhead" style="border-top:1px solid var(--rule);border-bottom:none">
+      <span>이 파일로 다시 돌린다</span>
+    </div>
+    <pre id="gCmd" class="cmd"></pre>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <p class="n">진행</p>
+    <h2>지금 어디까지</h2>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>단계</th><th>결과</th><th style="text-align:right">상태</th></tr></thead>
+      <tbody>
+        <tr><td>① 씬 스캔</td><td>666장 · 167지점 · 3개 층</td><td style="text-align:right"><span class="pill ok">완료</span></td></tr>
+        <tr><td>② 이름 뽑기</td><td>531종류</td><td style="text-align:right"><span class="pill ok">완료</span></td></tr>
+        <tr><td>③ 어휘 검증</td><td>100개 확정 · 표현 통일</td><td style="text-align:right"><span class="pill ok">완료</span></td></tr>
+        <tr><td>④⑤ 위치·묶기</td><td>검출 4,998건 → 랜드마크 <strong>812개</strong></td><td style="text-align:right"><span class="pill ok">완료</span></td></tr>
+        <tr><td>⑥ 목적지 후보</td><td>랜드마크 <strong>471</strong> → 목적지 <strong>1,412개</strong> (기둥·표지판·자동차 제외)</td><td style="text-align:right"><span class="pill ok">완료</span></td></tr>
+        <tr><td>⑦ <code>.house</code> 생성</td><td>코드 완성 · 되읽기 검증 포함</td><td style="text-align:right"><span class="pill warn">대기</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note prose">
+    <strong>목적지 1,412개는 필요한 1,280개(학습 1,200 + 평가 80)보다 132개 많다.</strong>
+    여유가 얇아졌으므로 <strong>랜드마크당 3자리를 그대로 쓴다</strong>. 2자리로 줄이면 942개라 모자란다.
+    다음은 <code>.house</code> 생성과 경로 만들기다.
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <p class="n">다음</p>
+    <h2>남은 일</h2>
+  </div>
+  <div class="prose">
+    <ol style="margin:0;padding-left:20px;color:var(--ink-2);display:flex;flex-direction:column;gap:8px">
+      <li><strong>랜드마크 목록 확인</strong> — 편집 도구로 “쓴다 / 뺀다”를 정한다</li>
+      <li><strong><code>.house</code> 생성</strong> — 목록을 MP3D 형식으로. 기존 <code>load_objects()</code>로 되읽어 검증</li>
+      <li><strong>경로 만들기</strong> — 정해진 목적지까지. 출발점도 구멍 밖인지 검사</li>
+      <li><strong>문장 생성</strong> — Gemma-4-31B에 <code>stop_cue</code>를 채워서</li>
+      <li><strong>학습 2셀</strong> — 400개 · 1,200개 / 평가 80개</li>
+    </ol>
+  </div>
+</section>
+
+<footer class="prose">
+  <p>서버 RTX PRO 6000 Blackwell ×4 (GPU 0 = Isaac 렌더 · GPU 1 = Gemma) · apptainer</p>
+  <p>코드 <code>noeun_scene_scan.py</code> · <code>69_scene_landmarks.py</code> · <code>70_make_house.py</code> · <code>71_landmark_viz.py</code></p>
+  <p>로그 <code>logs/scene_scan/</code> · <code>logs/scene_landmarks/</code></p>
+</footer>
+
+</div>
+
+<script>
+/* ── 단계 ⑦ 종류별 사진 ───────────────────────────────────────────────
+   data.json(편집기와 같은 파일)을 읽어 종류마다 대표 사진을 잘라 보여준다.
+   자르기는 캔버스 없이 CSS 로만 한다 — 원본 640x480 을 확대·이동해 창 안에 물체를 맞춘다.
+
+   한 물체는 이름을 **여러 개** 가질 수 있다.
+     names[0]  대표 이름 — 묶이는 기준이고 .house 의 raw_name 이 된다
+     names[1:] 다른 이름 — 같은 물체를 부르는 다른 말. 문장 만들 때 골라 쓴다
+     공통 class 여러 종류를 한 단어로 묶는 윗단계 이름. .house 의 mpcat40_name 이 된다
+
+   고친 내용은 고칠 때마다 자동으로 저장되고, 70(.house)·73(목적지)이 같은 파일을 읽는다. */
+const G = {lm: [], vocab: [], heads: [], pool: {}, orig: new Map(), common: {},
+           off: new Set(), offId: new Set(), open: new Set(),
+           find: '', show: 'keep', sort: 'n', edit: null, booted: false};
+const SRC_W = 640, SRC_H = 480, BOX = 118, MAX_SHOT = 8;
+const g$ = id => document.getElementById(id);
+let DL = null, DB = null, saveTimer = null, saving = false, pending = false;
+claude?.use?.('downloads').then(d => { DL = d; }).catch(() => {});
+
+/* ── 저장 ── */
+function chip(cls, txt){ const e = g$('gSaved'); e.className = 'savechip ' + cls; e.textContent = txt; }
+function hhmm(iso){
+  return new Date(iso).toLocaleString('ko-KR', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'});
+}
+function touch(){
+  if(!DB){ chip('bad', '저장 안 됨 — 내려받기로 보관하세요'); return; }
+  chip('busy', '저장 중…');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(save, 700);
+}
+async function save(){
+  if(!DB) return;
+  if(saving){ pending = true; return; }
+  saving = true;
+  try{
+    const now = new Date().toISOString();
+    await DB.doc('corrections/latest').set({...corrections(), saved_at: now});
+    chip('ok', '저장됨 ' + hhmm(now));
+  }catch(e){ chip('bad', '저장 실패 — 내려받기로 보관하세요'); console.warn(e); }
+  finally{ saving = false; if(pending){ pending = false; save(); } }
+}
+async function restore(){
+  try{
+    DB = await Promise.race([
+      claude?.use?.('db') ?? Promise.resolve(null),
+      new Promise(r => setTimeout(() => r(null), 10000)),
+    ]);
+    if(!DB){ chip('bad', '저장 안 됨 — 내려받기로 보관하세요'); return; }
+    const snap = await DB.doc('corrections/latest').get();
+    if(!snap.exists){ chip('ok', '저장할 준비됨'); return; }
+    const v = snap.data() || {};
+    G.off.clear(); G.offId.clear();
+    (v.exclude_names || []).forEach(n => G.off.add(n));
+    (v.exclude_ids   || []).forEach(i => G.offId.add(i));
+    G.common = {...(v.common || {})};
+
+    const ri = v.rename_ids || {}, rn = v.rename || {};
+    const ai = v.alias_ids  || {}, al = v.aliases || {};
+    G.lm.forEach(l => {
+      const o = G.orig.get(l.id);
+      const p = ri[l.id] || rn[o];
+      const ex = ai[l.id] || al[p || o] || [];
+      l.names = [p || o, ...ex.filter(x => x !== (p || o))];
+    });
+    const ex = (v.exclude_types || []).map(w => String(w).toLowerCase());
+    if(ex.length){
+      const esc = ex.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+      const pat = new RegExp('\\b(' + esc + ')s?\\b', 'i');
+      classes().forEach(c => { if(pat.test(c.name)) G.off.add(c.name); });
+    }
+    chip('ok', '저장됨 ' + hhmm(v.saved_at));
+  }catch(e){ chip('bad', '저장 안 됨 — 내려받기로 보관하세요'); }
+}
+
+(async function galBoot(){
+  let d;
+  try{ d = await (await fetch('data.json')).json(); }
+  catch(e){ g$('gal').innerHTML = '<p class="gmsg">사진을 불러오지 못했습니다.</p>'; return; }
+
+  (d.excluded_types || []).forEach(t => G.off.add(t));
+  G.pool  = d.alias_pool || {};
+  G.heads = d.heads || [];
+  G.vocab = [...new Set([...(d.vocab || []), ...d.landmarks.map(l => l.name)])].sort();
+
+  G.lm = d.landmarks.map(l => {
+    const best = (l.shots || []).slice().sort((a,b) => b.score - a.score)[0];
+    G.orig.set(l.id, l.name);
+    return {id: l.id, names: [l.name], storey: l.storey, views: l.views,
+            shot: best && d.images[best.rgb] ? {...best, url: d.images[best.rgb]} : null};
+  });
+  d.landmarks.forEach(l => { if(!l.keep && !G.off.has(l.name)) G.offId.add(l.id); });
+
+  fill('gVocab', G.vocab);
+  fill('gHeads', [...new Set([...G.heads, ...Object.values(G.common)])].sort());
+
+  g$('gFind').oninput  = e => { G.find = e.target.value.trim().toLowerCase(); render(); };
+  g$('gShow').onchange = e => { G.show = e.target.value; render(); };
+  g$('gSort').onchange = e => { G.sort = e.target.value; render(); };
+  g$('gCopy').onclick  = copyCmd;
+  g$('gDown').onclick  = download;
+  g$('gSave').onclick  = () => { clearTimeout(saveTimer); save(); };
+  g$('gReset').onclick = () => {
+    if(!confirm('이름 바꾼 것을 모두 되돌립니다. 계속할까요?')) return;
+    G.lm.forEach(l => { l.names = [G.orig.get(l.id)]; });
+    G.common = {}; render();
+  };
+  g$('edClose').onclick = () => { G.edit = null; renderEditor(); };
+  document.addEventListener('keydown', e => { if(e.key === 'Escape' && G.edit){ G.edit = null; renderEditor(); } });
+
+  await restore();
+  render();
+})();
+
+function fill(id, arr){
+  const dl = g$(id); dl.innerHTML = '';
+  arr.forEach(v => dl.appendChild(Object.assign(document.createElement('option'), {value: v})));
+}
+
+/* ── 지금 대표 이름 기준으로 묶는다 ── */
+function classes(){
+  const by = new Map();
+  G.lm.forEach(l => { const k = l.names[0]; if(!by.has(k)) by.set(k, []); by.get(k).push(l); });
+  return [...by.entries()].map(([name, ls]) => ({
+    name, ls, n: ls.length,
+    floors: new Set(ls.map(l => l.storey)).size,
+    alias: sharedAlias(ls),
+    shots: ls.slice().sort((a,b) => b.views - a.views).filter(l => l.shot)
+             .map(l => ({...l.shot, id: l.id})),
+    renamed: ls.some(l => G.orig.get(l.id) !== l.names[0]),
+  }));
+}
+/* 구성원 전부가 똑같이 가진 다른 이름만 "종류의 다른 이름"으로 본다 */
+function sharedAlias(ls){
+  if(!ls.length) return [];
+  return ls[0].names.slice(1).filter(a => ls.every(l => l.names.includes(a)));
+}
+function head(t){ const w = t.toLowerCase().split(/\s+/); return (w[w.length-1] || t).replace(/s$/, ''); }
+function rows(cs){
+  return cs
+    .filter(c => !G.find || c.name.toLowerCase().includes(G.find) ||
+                 c.alias.some(a => a.toLowerCase().includes(G.find)))
+    .filter(c => G.show === 'all' || (G.show === 'drop') === G.off.has(c.name))
+    .sort((a,b) => G.sort === 'name' ? a.name.localeCompare(b.name)
+                                     : (b.n - a.n || a.name.localeCompare(b.name)));
+}
+
+/* ── 그리기 — 스크롤 위치를 그대로 지킨다 ── */
+function render(){
+  const y = window.scrollY;
+  const box = g$('gal'); box.innerHTML = '';
+  const cs = classes(), rs = rows(cs);
+  const kept = cs.filter(c => !G.off.has(c.name));
+  const nOffId = [...G.offId].filter(id => {
+    const l = G.lm.find(x => x.id === id); return l && !G.off.has(l.names[0]);
+  }).length;
+  g$('gCount').textContent =
+    `보이는 종류 ${rs.length} · 남길 종류 ${kept.length}/${cs.length} · ` +
+    `랜드마크 ${kept.reduce((s,c) => s + c.n, 0) - nOffId}개` + (nOffId ? ` (낱개 ${nOffId}개 뺌)` : '');
+
+  if(!rs.length) box.innerHTML = '<p class="gmsg">해당하는 종류가 없습니다.</p>';
+  else rs.forEach(c => box.appendChild(clsEl(c, cs)));
+
+  cmd(); renderEditor();
+  if(G.booted) touch(); else G.booted = true;
+  requestAnimationFrame(() => window.scrollTo(0, y));
+}
+
+function clsEl(c, cs){
+  const on = !G.off.has(c.name);
+  const el = document.createElement('div');
+  el.className = 'cls' + (on ? '' : ' off');
+  if(G.edit && G.edit.kind === 'class' && G.edit.name === c.name) el.classList.add('aim');
+
+  const ctl = document.createElement('div');
+  ctl.className = 'ctl';
+
+  const cb = document.createElement('input');
+  cb.type = 'checkbox'; cb.checked = on;
+  cb.title = on ? '이 종류 빼기' : '이 종류 되살리기';
+  cb.onchange = () => { on ? G.off.add(c.name) : G.off.delete(c.name); render(); };
+
+  const nm = document.createElement('button');
+  nm.type = 'button'; nm.className = 'cname';
+  nm.title = '이름 고치기 — 이 종류 전부에 적용됩니다';
+  nm.onclick = () => { G.edit = {kind: 'class', name: c.name}; render(); };
+  const txt = document.createElement('span'); txt.textContent = c.name;
+  const pen = document.createElement('span'); pen.className = 'cpen'; pen.textContent = '✎';
+  nm.append(txt, pen);
+  if(c.renamed){
+    const st = document.createElement('span');
+    st.className = 'cstar'; st.textContent = '고침'; nm.appendChild(st);
+  }
+
+  const nn = document.createElement('span');
+  nn.className = 'cnum'; nn.textContent = `${c.n}개 · ${c.floors}개 층`;
+  ctl.append(cb, nm, nn);
+
+  const meta = document.createElement('div');
+  meta.className = 'cmeta';
+  if(G.common[c.name]){
+    const g = document.createElement('span');
+    g.className = 'tag group'; g.textContent = '묶음: ' + G.common[c.name];
+    g.title = '공통 class — .house 의 mpcat40 이 됩니다';
+    meta.appendChild(g);
+  }
+  c.alias.forEach(a => {
+    const t = document.createElement('span');
+    t.className = 'tag'; t.textContent = a;
+    t.title = '다른 이름';
+    meta.appendChild(t);
+  });
+  if(meta.children.length) ctl.appendChild(meta);
+
+  const sibs = cs.filter(x => head(x.name) === head(c.name));
+  if(sibs.length > 1){
+    const allOff = sibs.every(x => G.off.has(x.name));
+    const b = document.createElement('button');
+    b.className = 'gall'; b.type = 'button';
+    b.textContent = (allOff ? '↺ ' : '✕ ') + head(c.name) + ` 전부 (${sibs.length})`;
+    b.onclick = () => { sibs.forEach(x => allOff ? G.off.delete(x.name) : G.off.add(x.name)); render(); };
+    ctl.appendChild(b);
+  }
+
+  const crops = document.createElement('div');
+  crops.className = 'crops';
+  if(!c.shots.length){
+    const p = document.createElement('span');
+    p.className = 'cnum'; p.textContent = '사진 없음';
+    crops.appendChild(p);
+  }
+  const open = G.open.has(c.name);
+  (open ? c.shots : c.shots.slice(0, MAX_SHOT)).forEach(sh => crops.appendChild(cropEl(sh, on)));
+  if(c.shots.length > MAX_SHOT){
+    const more = document.createElement('button');
+    more.className = 'gmore'; more.type = 'button';
+    more.textContent = open ? '접기' : `더 보기 +${c.shots.length - MAX_SHOT}`;
+    more.onclick = () => { open ? G.open.delete(c.name) : G.open.add(c.name); render(); };
+    crops.appendChild(more);
+  }
+
+  el.append(ctl, crops);
+  return el;
+}
+
+function cropEl(sh, clsOn){
+  const area = Math.max(sh.area_pct || 0.5, 0.05) / 100;
+  const side = Math.min(Math.max(Math.sqrt(area) * SRC_W * 2.6, 110), 460);
+  const k = BOX / side;
+  const d = document.createElement('div');
+  d.className = 'crop';
+  if(G.edit && G.edit.kind === 'one' && G.edit.id === sh.id) d.classList.add('aim');
+  const img = document.createElement('img');
+  img.loading = 'lazy'; img.alt = '';
+  img.src = sh.url;
+  img.style.width  = (SRC_W * k) + 'px';
+  img.style.height = (SRC_H * k) + 'px';
+  img.style.left = (BOX/2 - sh.u * k) + 'px';
+  img.style.top  = (BOX/2 - sh.v * k) + 'px';
+  const ring = document.createElement('div'); ring.className = 'ring';
+  const cm = document.createElement('div');
+  cm.className = 'cm'; cm.textContent = '#' + sh.id + ' · ' + (sh.cam_m ?? '?') + ' m';
+  d.append(img, ring, cm);
+
+  if(!clsOn){ d.classList.add('dim'); d.title = '이 종류가 통째로 빠져 있습니다'; return d; }
+
+  const l = G.lm.find(x => x.id === sh.id) || {names: []};
+  const idOff = G.offId.has(sh.id);
+  d.classList.toggle('xout', idOff);
+  d.title = idOff ? `#${sh.id} 되살리기` : `#${sh.id} 이 랜드마크만 빼기`;
+  d.onclick = () => { idOff ? G.offId.delete(sh.id) : G.offId.add(sh.id); render(); };
+
+  const bad = document.createElement('div');
+  bad.className = 'xmark'; bad.textContent = idOff ? '↺' : '✕';
+  d.appendChild(bad);
+
+  const pen = document.createElement('button');
+  pen.className = 'pen'; pen.type = 'button'; pen.textContent = '✎';
+  pen.title = `#${sh.id} 이 하나만 고치기`;
+  pen.onclick = ev => { ev.stopPropagation(); G.edit = {kind: 'one', id: sh.id}; render(); };
+  d.appendChild(pen);
+
+  if(G.orig.get(sh.id) !== l.names[0] || l.names.length > 1){
+    const r = document.createElement('div');
+    r.className = 'rn'; r.textContent = l.names.length > 1 ? `+${l.names.length - 1}` : '고침';
+    r.title = l.names.join(' · ');
+    d.appendChild(r);
+  }
+  return d;
+}
+
+/* ── 고치는 칸 — 화면 아래에 붙박이. 목록이 밀리지 않는다 ── */
+function target(){
+  if(!G.edit) return null;
+  if(G.edit.kind === 'one'){
+    const l = G.lm.find(x => x.id === G.edit.id);
+    return l ? {ls: [l], label: `#${l.id} 이 랜드마크 하나`, cls: null} : null;
+  }
+  const ls = G.lm.filter(l => l.names[0] === G.edit.name);
+  return ls.length ? {ls, label: `${G.edit.name} — ${ls.length}개 전부`, cls: G.edit.name} : null;
+}
+function setNames(t, names){
+  const uniq = [...new Set(names.map(s => s.trim().toLowerCase()).filter(Boolean))];
+  if(!uniq.length) return;
+  const old = t.cls;
+  t.ls.forEach(l => { l.names = [...uniq]; });
+  if(old && old !== uniq[0]){
+    if(G.off.has(old)){ G.off.delete(old); G.off.add(uniq[0]); }
+    if(G.common[old]){ G.common[uniq[0]] = G.common[old]; delete G.common[old]; }
+    G.edit = {kind: 'class', name: uniq[0]};
+  }
+  render();
+}
+
+function renderEditor(){
+  const bar = g$('edBar'), t = target();
+  if(!t){ bar.classList.remove('on'); return; }
+  bar.classList.add('on');
+  g$('edWho').textContent = t.label;
+
+  const names = t.ls[0].names;
+  const body = g$('edBody'); body.innerHTML = '';
+
+  // 대표 이름
+  body.appendChild(field('대표 이름', (() => {
+    const i = document.createElement('input');
+    i.className = 'edin'; i.value = names[0]; i.setAttribute('list', 'gVocab');
+    i.placeholder = '예: exit sign';
+    i.onkeydown = e => { if(e.key === 'Enter'){ e.preventDefault(); setNames(t, [i.value, ...names.slice(1)]); } };
+    i.onblur = () => { if(i.value.trim().toLowerCase() !== names[0]) setNames(t, [i.value, ...names.slice(1)]); };
+    setTimeout(() => { if(document.activeElement === document.body){ i.focus(); i.select(); } }, 0);
+    return i;
+  })(), '묶이는 기준이고 .house 의 raw_name 이 됩니다'));
+
+  // 다른 이름
+  const box = document.createElement('div'); box.className = 'chips';
+  names.slice(1).forEach(a => {
+    const c = document.createElement('span'); c.className = 'tag rm';
+    c.textContent = a;
+    const x = document.createElement('button'); x.type = 'button'; x.textContent = '✕';
+    x.title = '빼기';
+    x.onclick = () => setNames(t, names.filter(n => n !== a));
+    c.appendChild(x);
+    box.appendChild(c);
+  });
+  const add = document.createElement('input');
+  add.className = 'edin small'; add.placeholder = '＋ 다른 이름 적고 Enter';
+  add.setAttribute('list', 'gVocab');
+  add.onkeydown = e => { if(e.key === 'Enter'){ e.preventDefault(); setNames(t, [...names, add.value]); } };
+  box.appendChild(add);
+  body.appendChild(field('다른 이름', box, '같은 물체를 부르는 다른 말. 문장 만들 때 골라 씁니다'));
+
+  // 공통 class
+  if(t.cls){
+    const i = document.createElement('input');
+    i.className = 'edin'; i.value = G.common[t.cls] || ''; i.setAttribute('list', 'gHeads');
+    i.placeholder = '예: sign  (비우면 대표 이름을 씁니다)';
+    const apply = () => {
+      const v = i.value.trim().toLowerCase();
+      if(v) G.common[t.cls] = v; else delete G.common[t.cls];
+      render();
+    };
+    i.onkeydown = e => { if(e.key === 'Enter'){ e.preventDefault(); apply(); } };
+    i.onblur = apply;
+    body.appendChild(field('공통 class', i, '여러 종류를 한 단어로 묶습니다. .house 의 mpcat40 이 됩니다'));
+  }
+
+  // 후보
+  const origName = G.orig.get(t.ls[0].id);
+  const cand = [...new Set([
+    ...(G.pool[origName] || []), ...(G.pool[names[0]] || []),
+    head(names[0]), origName,
+  ])].filter(x => x && !names.includes(x));
+  if(cand.length){
+    const cb = document.createElement('div'); cb.className = 'chips';
+    cand.slice(0, 16).forEach(x => {
+      const c = document.createElement('span'); c.className = 'tag cand';
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = x;
+      b.title = '대표 이름으로';
+      b.onclick = () => setNames(t, [x, ...names.slice(1)]);
+      const p = document.createElement('button'); p.type = 'button'; p.textContent = '＋';
+      p.title = '다른 이름으로 추가';
+      p.onclick = () => setNames(t, [...names, x]);
+      c.append(b, p);
+      cb.appendChild(c);
+    });
+    body.appendChild(field('후보', cb, '이름을 누르면 대표, ＋ 를 누르면 다른 이름으로 들어갑니다'));
+  }
+}
+function field(label, node, hint){
+  const w = document.createElement('div'); w.className = 'edfield';
+  const l = document.createElement('div'); l.className = 'edlab';
+  l.textContent = label;
+  if(hint){ const h = document.createElement('span'); h.className = 'edhint'; h.textContent = hint; l.appendChild(h); }
+  w.append(l, node);
+  return w;
+}
+
+/* ── 고친 내용 ── */
+function corrections(){
+  const cs = classes();
+  const group = new Map();
+  cs.forEach(c => { const h = head(c.name); if(!group.has(h)) group.set(h, []); group.get(h).push(c.name); });
+  const types = [], names = [];
+  group.forEach((members, h) => {
+    const off = members.filter(n => G.off.has(n));
+    if(!off.length) return;
+    if(off.length === members.length) types.push(h); else names.push(...off);
+  });
+
+  // 원래 종류 단위로 묶어, 전부 같은 결과면 종류 단위 · 아니면 번호 단위
+  const byOld = new Map();
+  G.lm.forEach(l => {
+    const o = G.orig.get(l.id);
+    const key = JSON.stringify(l.names);
+    if(o === key.slice(2, -2) && l.names.length === 1) return;   // 그대로면 기록하지 않는다
+    if(!byOld.has(o)) byOld.set(o, new Map());
+    const m = byOld.get(o);
+    if(!m.has(key)) m.set(key, []);
+    m.get(key).push(l.id);
+  });
+  const rename = {}, rename_ids = {}, aliases = {}, alias_ids = {};
+  byOld.forEach((m, o) => {
+    const total = G.lm.filter(l => G.orig.get(l.id) === o).length;
+    m.forEach((ids, key) => {
+      const ns = JSON.parse(key);
+      const whole = m.size === 1 && ids.length === total;
+      if(whole){
+        if(ns[0] !== o) rename[o] = ns[0];
+        if(ns.length > 1) aliases[ns[0]] = ns.slice(1);
+      }else{
+        ids.forEach(i => {
+          if(ns[0] !== o) rename_ids[i] = ns[0];
+          if(ns.length > 1) alias_ids[i] = ns.slice(1);
+        });
+      }
+    });
+  });
+
+  return {scene: 'noeun_station',
+          exclude_types: types.sort(), exclude_names: names.sort(),
+          exclude_ids: [...G.offId].sort((a,b) => a - b),
+          rename, rename_ids, aliases, alias_ids, common: {...G.common}};
+}
+
+function cmd(){
+  const c = corrections();
+  g$('gCmd').textContent =
+    'python3 scripts/dataset_converters/nav3d/noeun/73_goal_candidates.py --landmarks logs/scene_landmarks --out logs/goal_candidates_v4 --corrections corrections.json\n' +
+    'python3 scripts/dataset_converters/nav3d/noeun/70_make_house.py  --landmarks logs/scene_landmarks --out data/scene_data/noeun_station/noeun_station.house --corrections corrections.json';
+  g$('gJson').textContent = JSON.stringify(c, null, 1);
+  const b = [];
+  const nEx = c.exclude_types.length + c.exclude_names.length + c.exclude_ids.length;
+  if(nEx) b.push(`제외 ${c.exclude_types.length}묶음·${c.exclude_names.length}종류·${c.exclude_ids.length}낱개`);
+  const nR = Object.keys(c.rename).length + Object.keys(c.rename_ids).length;
+  if(nR) b.push(`이름 ${nR}`);
+  const nA = Object.keys(c.aliases).length + Object.keys(c.alias_ids).length;
+  if(nA) b.push(`다른 이름 ${nA}`);
+  const nC = Object.keys(c.common).length;
+  if(nC) b.push(`묶음 ${nC}`);
+  g$('gCmdNote').textContent = b.length ? b.join(' · ') : '아직 고친 것이 없습니다';
+}
+
+function flash(b, t){ const o = b.textContent; b.textContent = t; setTimeout(() => b.textContent = o, 1400); }
+function copyCmd(){
+  const t = g$('gJson').textContent, b = g$('gCopy');
+  if(navigator.clipboard?.writeText) navigator.clipboard.writeText(t).then(() => flash(b, '복사됨')).catch(sel);
+  else sel();
+  function sel(){
+    const r = document.createRange(); r.selectNodeContents(g$('gJson'));
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r); flash(b, '선택됨 — Ctrl+C');
+  }
+}
+async function download(){
+  const text = JSON.stringify(corrections(), null, 1), name = 'corrections.json';
+  if(DL){
+    try{ await DL.save({filename: name, data: text}); flash(g$('gDown'), '저장됨'); return; }
+    catch(e){ if(e && e.code === 'not_granted'){ alert('내려받기가 허용되지 않았습니다.'); return; } }
+  }
+  try{
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], {type: 'application/json'}));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  }catch(e){ copyCmd(); }
+}
+</script>
+
+

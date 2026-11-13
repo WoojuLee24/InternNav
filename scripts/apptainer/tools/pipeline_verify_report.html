@@ -1,0 +1,311 @@
+<title>노은역 데이터 재구축 검증</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+
+<style>
+  :root{
+    --ground:#F7F8FA; --surface:#FFFFFF; --surface-2:#F1F3F6;
+    --ink:#151A21; --ink-2:#4A5563; --ink-3:#77838F;
+    --rule:#E1E5EB; --rule-2:#CED5DE;
+    --accent:#2C5F8A; --accent-soft:#E7EFF6;
+    --ok:#2E7355; --ok-soft:#E4F0EA;
+    --bad:#AC4529; --bad-soft:#F8E8E3;
+    --warn:#8A6418; --warn-soft:#F7EFDC;
+    --shadow:0 1px 2px rgba(20,30,45,.05), 0 8px 24px -16px rgba(20,30,45,.25);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0E1116; --surface:#161A21; --surface-2:#1D222A;
+      --ink:#E7EBF0; --ink-2:#A8B2BF; --ink-3:#7A848F;
+      --rule:#262C35; --rule-2:#343C47;
+      --accent:#7FB3DC; --accent-soft:#17242F;
+      --ok:#6FC79C; --ok-soft:#142420;
+      --bad:#E08A6E; --bad-soft:#2A1A16;
+      --warn:#D4A843; --warn-soft:#241E10;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0E1116; --surface:#161A21; --surface-2:#1D222A;
+    --ink:#E7EBF0; --ink-2:#A8B2BF; --ink-3:#7A848F;
+    --rule:#262C35; --rule-2:#343C47;
+    --accent:#7FB3DC; --accent-soft:#17242F;
+    --ok:#6FC79C; --ok-soft:#142420;
+    --bad:#E08A6E; --bad-soft:#2A1A16;
+    --warn:#D4A843; --warn-soft:#241E10;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0; background:var(--ground); color:var(--ink);
+    font-family:"IBM Plex Sans KR", system-ui, sans-serif; font-size:16px; line-height:1.72;
+    -webkit-font-smoothing:antialiased;}
+  .wrap{max-width:1020px; margin:0 auto; padding:56px 28px 96px; display:flex; flex-direction:column; gap:52px}
+  .prose{max-width:66ch}
+  .mono{font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums}
+
+  .eyebrow{font-family:"IBM Plex Mono",monospace; font-size:11.5px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--ink-3); margin:0 0 14px}
+  h1{font-size:clamp(30px,4.3vw,42px); line-height:1.17; font-weight:600; letter-spacing:-.021em; margin:0 0 20px; text-wrap:balance}
+  h2{font-size:24px; font-weight:600; letter-spacing:-.014em; margin:0 0 6px; text-wrap:balance}
+  p{margin:0 0 14px; color:var(--ink-2)}
+  p strong, li strong, td strong{color:var(--ink); font-weight:600}
+  section{display:flex; flex-direction:column; gap:20px}
+  .sec-head{display:flex; flex-direction:column; gap:4px; padding-bottom:13px; border-bottom:1px solid var(--rule)}
+  .sec-head p{margin:0; font-size:14.5px; color:var(--ink-3)}
+
+  .stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px;
+    background:var(--rule); border:1px solid var(--rule); border-radius:3px; overflow:hidden}
+  .stat{background:var(--surface); padding:17px 19px; display:flex; flex-direction:column; gap:4px}
+  .stat .k{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-3)}
+  .stat .v{font-family:"IBM Plex Mono",monospace; font-size:26px; font-weight:500; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+  .stat .n{font-size:12.5px; color:var(--ink-3); line-height:1.45}
+  .v.ok{color:var(--ok)} .v.bad{color:var(--bad)} .v.flat{color:var(--ink-2)}
+
+  .tablewrap{overflow-x:auto; border:1px solid var(--rule); border-radius:3px; background:var(--surface)}
+  table{border-collapse:collapse; width:100%; font-size:14.5px; min-width:560px}
+  th,td{padding:12px 16px; text-align:left; border-bottom:1px solid var(--rule); vertical-align:top}
+  thead th{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--ink-3); font-weight:500; background:var(--surface-2); border-bottom:1px solid var(--rule-2)}
+  tbody tr:last-child td{border-bottom:none}
+  td.num{font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; white-space:nowrap}
+
+  .pill{display:inline-block; font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.07em;
+    text-transform:uppercase; padding:3px 8px; border-radius:2px; white-space:nowrap}
+  .pill.ok{background:var(--ok-soft); color:var(--ok)}
+  .pill.bad{background:var(--bad-soft); color:var(--bad)}
+  .pill.warn{background:var(--warn-soft); color:var(--warn)}
+  .pill.run{background:var(--accent-soft); color:var(--accent)}
+
+  .note{background:var(--surface-2); border:1px solid var(--rule); border-radius:3px;
+    padding:16px 19px; font-size:14px; color:var(--ink-2)}
+  .note strong{color:var(--ink)}
+  .note.warn{border-left:3px solid var(--warn)}
+  .note.ok{border-left:3px solid var(--ok)}
+
+  pre{margin:0; background:var(--surface); border:1px solid var(--rule); border-radius:3px;
+    padding:15px 17px; overflow-x:auto; font-family:"IBM Plex Mono",monospace; font-size:12.5px;
+    line-height:1.65; color:var(--ink-2)}
+  pre b{color:var(--ink); font-weight:500}
+
+  ol.flow{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px;
+    background:var(--rule); border:1px solid var(--rule); border-radius:3px; overflow:hidden}
+  ol.flow li{background:var(--surface); padding:13px 18px; display:flex; align-items:center; gap:14px; font-size:14.5px}
+  ol.flow li .n{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-3); min-width:38px}
+  ol.flow li .t{flex:1; color:var(--ink-2)}
+  ol.flow li.done .t{color:var(--ink)}
+  ol.flow li .est{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-3); white-space:nowrap}
+
+  footer{border-top:1px solid var(--rule); padding-top:22px; font-size:13px; color:var(--ink-3)}
+  footer code{font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--ink-2)}
+</style>
+
+<div class="wrap">
+
+<header class="prose">
+  <p class="eyebrow">노은역 S2 · 데이터 재구축 · 2026-11-13</p>
+  <h1>만든 도구가 맞게 동작하는지 하나씩 확인했다</h1>
+  <p>평가셋 문장의 절반 이상이 못 쓸 수준이라는 것을 확인한 뒤, 데이터를 다시 만들기로 했다. 그러려면 A5000에만 있던 입력 파일을 여기서 다시 만들고, 느린 단계를 빠르게 바꿔야 했다. <strong>만든 것마다 기존 결과와 대조해 같은지 확인했고, 그 기록이 이 문서다.</strong></p>
+</header>
+
+<section>
+  <div class="stats">
+    <div class="stat"><span class="k">검증 항목</span><span class="v ok mono">6</span><span class="n">전부 통과</span></div>
+    <div class="stat"><span class="k">고속 렌더</span><span class="v ok mono">60×</span><span class="n">7분 → 7초</span></div>
+    <div class="stat"><span class="k">경로 생성</span><span class="v ok mono">17×</span><span class="n">병렬 24샤드</span></div>
+    <div class="stat"><span class="k">정정한 오류</span><span class="v bad mono">3</span><span class="n">아래 기록</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head prose">
+    <h2>무엇을 확인했나</h2>
+    <p>각 항목은 “기존 것과 같은가” 또는 “의도대로 동작하는가”를 숫자로 확인했다.</p>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>항목</th><th>확인 방법</th><th>결과</th><th style="text-align:right">판정</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>경로 생성 병렬화</strong><br><span style="font-size:13px;color:var(--ink-3)">24개로 쪼개 동시 실행</span></td>
+          <td>같은 seed(0)로 20쌍을 따로 돌려 기존 200쌍의 앞 20개와 대조</td>
+          <td class="num">지표 불일치 <b>0</b> <span style="color:var(--ink-3)">(27종×20경로)</span><br>궤적 불일치 <b>0</b> <span style="color:var(--ink-3)">(40개 배열)</span></td>
+          <td style="text-align:right"><span class="pill ok">동일</span></td>
+        </tr>
+        <tr>
+          <td><strong>원본 3D 메시</strong><br><span style="font-size:13px;color:var(--ink-3)">noeun_station_mid.ply</span></td>
+          <td>USDZ 안 <span class="mono">mesh.ply</span>를 꺼내 기존 navmesh 산출물과 대조</td>
+          <td class="num">면 <b>665,812</b> · 점 <b>384,207</b><br>bounds <b>완전 일치</b></td>
+          <td style="text-align:right"><span class="pill ok">일치</span></td>
+        </tr>
+        <tr>
+          <td><strong>바닥 구멍 목록</strong><br><span style="font-size:13px;color:var(--ink-3)">holes.csv</span></td>
+          <td>위 메시로 <span class="mono">11_check_assets.py</span> 재실행</td>
+          <td class="num"><b>2,416</b>행 · CRITICAL <b>197</b><br>75초</td>
+          <td style="text-align:right"><span class="pill ok">생성</span></td>
+        </tr>
+        <tr>
+          <td><strong>3D 위치 측정</strong><br><span style="font-size:13px;color:var(--ink-3)">메시 광선 vs Isaac depth</span></td>
+          <td>같은 프레임·같은 픽셀 80곳을 두 방법으로 재어 비교</td>
+          <td class="num">차이 중앙 <b>+0.21 m</b><br>0.3 m 안 <b>96.2 %</b> · 상관 <b>0.904</b></td>
+          <td style="text-align:right"><span class="pill ok">일치</span></td>
+        </tr>
+        <tr>
+          <td><strong>고속 렌더</strong><br><span style="font-size:13px;color:var(--ink-3)">목적지 한 장만</span></td>
+          <td>로봇을 목적지로 순간이동시켜 렌더 — 실제 도착 거리 측정</td>
+          <td class="num">목적지까지 <b>0.01 m</b><br><b>7초</b>/개 (기존 7분)</td>
+          <td style="text-align:right"><span class="pill ok">정확</span></td>
+        </tr>
+        <tr>
+          <td><strong>문장 생성 모델</strong><br><span style="font-size:13px;color:var(--ink-3)">Gemma-4-31B</span></td>
+          <td>내려받아 설정 읽기 시도 → 새 transformers를 별도 경로에 설치</td>
+          <td class="num">62.6 GB · <b>gemma4</b> 인식<br>numpy 충돌 없음</td>
+          <td style="text-align:right"><span class="pill ok">준비</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note ok prose">
+    <strong>메시 광선이 Isaac depth보다 낫다.</strong> 어긋난 2개 점은 모두 <span class="mono">메시 23.93 m vs Isaac 10.00 m</span>이었다 —
+    Isaac은 설정상 <span class="mono">max_depth=10 m</span>에서 값이 잘린다. <strong>10 m 넘는 거리는 메시 광선만 잴 수 있다.</strong>
+    덕분에 2.5시간짜리 Isaac depth 렌더를 중단하고 메시 광선으로 갈아탔다.
+  </div>
+</section>
+
+<section>
+  <div class="sec-head prose">
+    <h2>고속 렌더가 왜 필요했나</h2>
+    <p>목적지가 쓸 만한지 거르려면 목적지 사진이 필요한데, 기존 방식은 경로를 처음부터 끝까지 걸었다.</p>
+  </div>
+
+<pre><b>기존</b>  출발점부터 정답 경로를 0.25 m씩 걸으며 매 8걸음 촬영   →  7분/개
+      (목적지 사진은 그중 한 장. 나머지는 버림)
+
+<b>고속</b>  로봇을 목적지로 바로 놓고 한 장만 촬영                →  7초/개
+      flash 컨트롤러의 reset_robot_state — 평가 때 쓰는 것과 같은 길</pre>
+
+  <p class="prose" style="margin-bottom:0">3,600개를 찍어야 하므로 <strong>15일이 걸리던 일이 7시간으로</strong> 줄었다. 카메라 자세는 task가 기존과 동일하게 다시 놓으므로 사진의 성격은 같다.</p>
+</section>
+
+<section>
+  <div class="sec-head prose">
+    <h2>정정한 오류</h2>
+    <p>진행 중 내가 틀렸던 것들. 결론에 영향을 준 것만 적는다.</p>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>무엇</th><th>틀린 내용</th><th>원인</th><th>맞는 값</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>계단 위 목적지</strong></td>
+          <td>“387개 중 219개(57%)”<br>→ 다시 “0개”</td>
+          <td>원본 좌표가 habitat 기준인데 변환 없이 썼다. <span class="mono">p[2]</span>는 높이가 아니라 <strong>수평축</strong>이었다</td>
+          <td class="num"><b>61개 (15.8%)</b><br>쓸 수 있는 경로 326/387</td>
+        </tr>
+        <tr>
+          <td><strong>문장 생성 모델</strong></td>
+          <td>“Gemma 3 <b>1B</b>가 지어낸다”</td>
+          <td>설정 파일 이름 <span class="mono">gemma31b</span>를 “3-1B”로 읽었다. 실제는 <span class="mono">gemma-4-31B-it</span></td>
+          <td class="num"><b>31B</b> 모델<br>크기 문제가 아니었다</td>
+        </tr>
+        <tr>
+          <td><strong>랜드마크 거리</strong></td>
+          <td>Isaac depth 중앙값 0.22 m</td>
+          <td>obs의 depth는 미터가 아니라 <span class="mono">max_depth=10</span>으로 나눈 <strong>정규화 값</strong></td>
+          <td class="num">×10 하면 <b>2.21 m</b><br>메시 광선 2.37 m와 일치</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note warn prose">
+    <strong>좌표계 오류가 가장 컸다.</strong> “계단이 문제다 → 아니다 → 다시 문제다”로 결론이 두 번 뒤집혔다.
+    검산 방법은 단순했다: 변환 후 높이축 범위가 <span class="mono">[-5.81, 8.28]</span>로
+    navmesh가 기록한 3개 층 높이(<span class="mono">-5.32 / -0.22 / 6.98</span>)와 맞는지 보면 됐다.
+  </div>
+</section>
+
+<section>
+  <div class="sec-head prose">
+    <h2>왜 데이터를 다시 만드나</h2>
+    <p>앞선 분석에서 나온 결론이 이번 작업의 출발점이다.</p>
+  </div>
+
+  <div class="prose">
+    <p>평가셋 40개에 “멈출 대상 A가 목적지 2 m 안에 있고, 알아볼 만큼 크고, 가리키는 범위가 3 m 안인가”를 물었더니 <strong>19개만 통과</strong>했다. 탈락 21개는 대부분 <strong>A가 너무 멀었다</strong>.</p>
+  </div>
+
+<pre>ep23  "계단 근처에서 멈춰라"      →  계단이 <b>16.7 m</b> 밖
+ep36  "주황 벽에서 멈춰라"        →  주황 벽이 <b>13.4 m</b> 밖
+ep21  "자판기와 좌석 구역"        →  범위가 <b>8.6 m</b></pre>
+
+  <p class="prose">성공 기준이 목적지 3 m 안이므로, <strong>문장대로 따라가면 실패</strong>한다. 풀 수 없는 문제를 내고 채점한 셈이다.</p>
+
+  <div class="note prose">
+    <strong>원인은 모델 크기가 아니라 빈 칸이었다.</strong> 문장 생성 입력에 <span class="mono">stop_cue</span>(멈출 대상) 자리가 있는데
+    노은역에서는 <span class="mono">null</span>이었다. MP3D용 코드는 거리 제한과 가림 검사로 이 칸을 채우지만,
+    노은역은 물체 목록이 없어 그 경로가 비어 있었다. 31B 모델이 사진만 보고 썼으니 거리를 알 길이 없었다.
+    <strong>이번에 GroundingDINO + SAM + 메시 광선으로 그 칸을 채우는 코드를 만들었다.</strong>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head prose">
+    <h2>지금 어디까지 왔나</h2>
+  </div>
+
+  <ol class="flow">
+    <li class="done"><span class="n mono">11</span><span class="t">바닥 구멍 검사 — <strong>holes.csv</strong> 생성</span><span class="pill ok">완료</span></li>
+    <li class="done"><span class="n mono">21</span><span class="t">층간 경로 다듬기 <strong>1,800쌍</strong> (24샤드 병렬, 전부 성공)</span><span class="pill ok">완료</span></li>
+    <li><span class="n mono">22</span><span class="t">경로 선별 — 층간 1,800 + 평지 1,800 = <strong>3,600개</strong></span><span class="pill run">진행 중</span></li>
+    <li><span class="n mono">새</span><span class="t">고속 렌더 → stop_cue → 필터 <span style="color:var(--ink-3)">(3,600 → 약 1,700)</span></span><span class="est">~7 h</span></li>
+    <li><span class="n mono">31-45</span><span class="t">경로 보정 + RBQ 걷기 <span style="color:var(--ink-3)">(살아남은 것만)</span></span><span class="est">수 시간</span></li>
+    <li><span class="n mono">51</span><span class="t">전체 렌더 <span style="color:var(--ink-3)">— 가장 오래 걸림</span></span><span class="est">수 시간~1 d</span></li>
+    <li><span class="n mono">61-64</span><span class="t">구역 → 문장 생성(Gemma-4-31B + stop_cue) → 빌드</span><span class="est">1-2 h</span></li>
+    <li><span class="n mono">—</span><span class="t">평가 <strong>80</strong> / 학습 <strong>1,200</strong> 분리</span><span class="est">—</span></li>
+    <li><span class="n mono">—</span><span class="t">학습 2셀 (<strong>400</strong> · <strong>1,200</strong>) + 평가 80</span><span class="est">각 2-3 h</span></li>
+  </ol>
+</section>
+
+<section>
+  <div class="sec-head prose">
+    <h2>남은 걸림돌</h2>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>문제</th><th>영향</th><th>상태</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Isaac 렌더가 GPU 0에서만 된다</strong><br><span style="font-size:13px;color:var(--ink-3)">GPU 1은 “No device could be created”</span></td>
+          <td>렌더 병렬도가 GPU 한 장에 묶인다. 51단계가 크게 늘어난다</td>
+          <td><span class="pill warn">조사 필요</span></td>
+        </tr>
+        <tr>
+          <td><strong>문장 생성이 vLLM을 전제로 한다</strong></td>
+          <td>이 서버에 vLLM이 없다. 모델은 받아뒀고 새 transformers로 인식까지 확인</td>
+          <td><span class="pill warn">백엔드 추가 필요</span></td>
+        </tr>
+        <tr>
+          <td><strong>A5000 파일 3개 미도착</strong></td>
+          <td>직접 만들어 대체했고 메시는 검증까지 끝났다. 진행에 지장 없음</td>
+          <td><span class="pill ok">우회 완료</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer class="prose">
+  <p>서버 RTX PRO 6000 Blackwell ×4 (GPU 0·1 사용) · apptainer ·
+  habitat SIF <code>internnav-habitat-6000pro.sif</code> · isaac sandbox <code>internnav</code></p>
+  <p>만든 코드 <code>21b_refine_paths_parallel.py</code> · <code>68_stop_cues.py</code> ·
+  <code>noeun_goal_snap_fast.py</code> · <code>noeun_goal_filter.py</code> · <code>noeun_landmark_sam.py</code></p>
+  <p>로그 <code>logs/pipeline/</code> · <code>logs/refine_parallel.log</code> · <code>logs/select_paths.log</code></p>
+</footer>
+
+</div>

@@ -49,6 +49,9 @@ def parse():
     ap.add_argument('--flat_min_m', type=float, default=3.0, help='U5 평지 최소 길이')
     ap.add_argument('--flat_max_m', type=float, default=40.0, help='평지 시작·끝 직선 거리 상한 (R2R 수준 길이)')
     ap.add_argument('--holes_csv', default='scripts/dataset_converters/nav3d/logs/noeun/11_check_assets/noeun_station/holes.csv')
+    ap.add_argument('--hole_kinds', default='mesh',
+                    help="U4 가 피할 구멍 종류 (쉼표). 'mesh' = 로봇이 빠지는 곳(기본, 기존 동작). "
+                         "'mesh,gs' = 렌더에 바닥이 비치는 GS 구멍까지 피한다.")
     ap.add_argument('--nav03', default='scripts/dataset_converters/nav3d/logs/common/refine_paths/scenes/noeun_station')
     ap.add_argument('--out_dir', default='scripts/dataset_converters/nav3d/logs/noeun/paths')
     ap.add_argument('--seed', type=int, default=0)
@@ -67,7 +70,9 @@ def main():
     md = nu.MeshDistance(mesh)
     cfg = npth.RefineCfg()
     r_b = sc.agent_radius
-    holes = load_holes(args.holes_csv)
+    hole_kinds = tuple(k.strip() for k in args.hole_kinds.split(',') if k.strip())
+    holes = load_holes(args.holes_csv, hole_kinds)
+    print(f'[22] U4 구멍 {len(holes)} 개 (종류 {",".join(hole_kinds)})')
     rng = np.random.default_rng(args.seed)
     cand = []                 # (kind, from, to, row, X, stairs)
 
@@ -225,7 +230,7 @@ def report(out, args, final, rejected, holes, sc, mesh):
                       '큰 mesh 구멍 = 00 holes.csv 의 CRITICAL mesh 구멍.</p>' + R.table([
                           {'ID': 'U1', '기준': '경로 있음'}, {'ID': 'U2', '기준': 'navmesh 위 100 %'},
                           {'ID': 'U3', '기준': 'mesh 여유 < r_b 인 점 0 · 최소 여유 ≥ 0.02 m'},
-                          {'ID': 'U4', '기준': '큰 mesh 구멍 중심에서 (r_b + 구멍 반지름) 안을 지나는 점 0 (높이 ±0.5 m)'},
+                          {'ID': 'U4', '기준': f'큰 구멍({args.hole_kinds}) 중심에서 (r_b + 구멍 반지름) 안을 지나는 점 0 (높이 ±0.5 m)'},
                           {'ID': 'U5', '기준': f'평지: 높이 폭 < 0.5 m · 길이 ≥ {args.flat_min_m} m'}], ['ID', '기준']))
     body += R.section('고른 경로', R.table(rows, list(rows[0].keys())))
     body += R.section('뺀 후보 (사유별)', R.table(rej or [{'사유': '없음', '경로 수': 0}], ['사유', '경로 수']))

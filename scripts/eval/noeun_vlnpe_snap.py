@@ -44,6 +44,8 @@ def main():
     ap.add_argument('--max_snaps', type=int, default=12, help='ep 당 최대 장수')
     ap.add_argument('--out', required=True)
     ap.add_argument('--warmup_renders', type=int, default=4)
+    ap.add_argument('--save_depth', action='store_true',
+                    help='obs 의 depth[m] 를 npz 로 같이 저장 (랜드마크 3D 위치 계산용). 기본 off = 기존 동작')
     args = ap.parse_args()
     want = {int(x) for x in args.episodes.split(',')}
 
@@ -60,6 +62,8 @@ def main():
 
     env = Env.init(eval_cfg.env, eval_cfg.task)
     os.makedirs(f'{args.out}/rgb', exist_ok=True)
+    if args.save_depth:
+        os.makedirs(f'{args.out}/depth', exist_ok=True)
     f_out = open(f'{args.out}/snaps.jsonl', 'w')
     obs_list, reset_info_list = env.reset()
     env.env.warm_up(steps=args.warmup_renders, render=True, physics=True)
@@ -80,7 +84,19 @@ def main():
             T = c2w_cv(np.asarray(o['camera_position'], dtype=float), yaw, pitch_deg)
             fn = f'rgb/ep{eid:02d}_{step:04d}.jpg'
             Image.fromarray(np.asarray(o['rgb'], dtype=np.uint8)).save(f'{args.out}/{fn}', quality=95)
-            f_out.write(json.dumps({'ep': eid, 'step': step, 'c2w': T.tolist(), 'rgb': fn, 'robot_pos': np.round(o['globalgps'], 3).tolist()}) + '\n')
+            rec = {'ep': eid, 'step': step, 'c2w': T.tolist(), 'rgb': fn, 'robot_pos': np.round(o['globalgps'], 3).tolist()}
+            if args.save_depth:
+                if not hasattr(snap, '_keys_shown'):
+                    print('[SNAP] obs keys:', sorted(o.keys()), flush=True)
+                    snap._keys_shown = True
+                d = o.get('depth')
+                if d is None:
+                    print('[SNAP] 경고: obs 에 depth 가 없다 — depth 저장 생략', flush=True)
+                else:
+                    dn = f'depth/ep{eid:02d}_{step:04d}.npz'
+                    np.savez_compressed(f'{args.out}/{dn}', depth=np.asarray(d, dtype=np.float32))
+                    rec['depth'] = dn
+            f_out.write(json.dumps(rec) + '\n')
             f_out.flush()
 
         snap(obs)

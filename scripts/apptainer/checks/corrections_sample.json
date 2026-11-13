@@ -1,0 +1,6 @@
+{"scene":"noeun_station",
+ "exclude_types":["pillar","canopy","arrow","car"],
+ "rename":{"digital sign":"exit sign"},
+ "aliases":{"exit sign":["station sign","wayfinding sign"],"marble counter":["counter","ticket counter"]},
+ "alias_ids":{"500":["gate"]},
+ "common":{"exit sign":"sign","white sign":"sign","green sign":"sign","blue sign":"sign"}}

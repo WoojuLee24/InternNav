@@ -3,6 +3,8 @@
 `scripts/eval/noeun_navmesh_server.py` 의 Planner(/next) 를 그대로 쓰고 두 가지를 더한다:
   /step   {"pos", "yaw", "base_height", "dist"} -> 전진 dist 를 navmesh 위로 (try_step, 벽에서 미끄러짐) -> {"pos": base 위치}
   /expert {"pos", "yaw", "base_height", "ref", "hint", ...} -> 전문가가 여기서부터 걷는 궤적 [{pos, yaw, action}] (렌더 없음)
+  STOP 은 **끝에서 stop_radius_m 안 + 목표가 stop_yaw_deg(기본 45°) 안에 보일 때만**. 등 뒤·옆이면 목표 쪽으로 회전한다
+  (거리만 보면 목표를 등지고 선 자세에 STOP 이 붙는다).
 전문가 = 정답 경로(ref, 문장이 말하는 길)로 복귀: ref 위 가장 가까운 점(hint 이후, 되돌아가지 않음)에서 lookahead_m 앞 점을
 navmesh 최단 경로로 향한다. ref 끝에서 stop_radius_m 안이면 STOP. 회전 15° · 전진 0.25 m (학습 데이터 vlnce_discretize 와 같음).
 
@@ -26,9 +28,10 @@ STOP, FORWARD, LEFT, RIGHT = NS.STOP, NS.FORWARD, NS.LEFT, NS.RIGHT
 
 
 class DaggerPlanner(NS.Planner):
-    def __init__(self, navmesh, rotation_deg, min_seg, forward_m):
+    def __init__(self, navmesh, rotation_deg, min_seg, forward_m, stop_yaw_deg=45.0):
         super().__init__(navmesh, 0.0, rotation_deg, min_seg)
         self.rot, self.forward_m = math.radians(rotation_deg), forward_m
+        self.stop_yaw_deg = float(stop_yaw_deg)  # 목표가 이 각도 안에 있을 때만 STOP (요청의 stop_yaw_deg 로 덮어쓸 수 있다)
 
     def step(self, pos, yaw, base_height, dist):
         """base 위치에서 yaw 방향 dist 전진 (navmesh 위). -> 새 base 위치."""
@@ -58,9 +61,24 @@ class DaggerPlanner(NS.Planner):
             floor = pos - [0, 0, bh]
             i, dev = self.progress(floor, ref, hint)
             hint = i
-            if np.linalg.norm(floor[:2] - ref[-1, :2]) < req.get('stop_radius_m', 0.35) and abs(floor[2] - ref[-1, 2]) < 1.0:
-                out.append({'pos': pos.tolist(), 'yaw': yaw, 'action': STOP, 'ref_i': i, 'dev': dev})
-                break
+            d_goal = float(np.linalg.norm(floor[:2] - ref[-1, :2]))
+            if d_goal < req.get('stop_radius_m', 0.35) and abs(floor[2] - ref[-1, 2]) < 1.0:
+                # 반경 안이어도 **목표가 앞에 있을 때만** STOP. 등 뒤/옆이면 목표 쪽으로 돈다.
+                #   거리만 보면 목표를 등지고 선 자세에 STOP 이 붙는다 (84 smoke: B 가지 90°+ 구간 STOP 13 개).
+                #   정답 경로 위 데이터(반경 STOP 학습)에서는 "남은 행동이 전진뿐" 조건이 각도 역할을 대신했지만,
+                #   82 · 84 는 일부러 비켜서고 지나치므로 그 조건이 성립하지 않는다.
+                #   아주 가까우면 목표 방향이 정의되지 않으므로(84 view() 와 같은 0.3 m) 그대로 STOP.
+                if d_goal < req.get('min_goal_dir_m', 0.3):
+                    err = 0.0
+                else:
+                    err = (math.atan2(ref[-1, 1] - floor[1], ref[-1, 0] - floor[0]) - yaw + math.pi) % (2 * math.pi) - math.pi
+                if abs(err) <= math.radians(req.get('stop_yaw_deg', self.stop_yaw_deg)):
+                    out.append({'pos': pos.tolist(), 'yaw': yaw, 'action': STOP, 'ref_i': i, 'dev': dev})
+                    break
+                a = LEFT if err > 0 else RIGHT
+                out.append({'pos': pos.tolist(), 'yaw': yaw, 'action': a, 'ref_i': i, 'dev': dev})
+                yaw += self.rot if a == LEFT else -self.rot
+                continue
             # 목표 점은 가까워질 때(retarget_m)까지 유지 — 매 step 바꾸면 15° 양자화 때문에 좌우로 흔들린다 (vlnce_discretize 의 waypoint 추종과 같은 방식)
             if t is None or t <= i or np.linalg.norm(floor[:2] - ref[t, :2]) < req.get('retarget_m', 0.5):
                 t = self.target(ref, i, req.get('lookahead_m', 2.0))
@@ -93,8 +111,10 @@ def main():
     ap.add_argument('--rotation_deg', type=float, default=15.0)
     ap.add_argument('--min_seg', type=float, default=0.05)
     ap.add_argument('--forward_m', type=float, default=0.25)
+    ap.add_argument('--stop_yaw_deg', type=float, default=45.0,
+                    help='반경 안이어도 목표가 이 각도 밖이면 STOP 대신 회전. 180 = 예전처럼 거리만 봄')
     args = ap.parse_args()
-    P = DaggerPlanner(args.navmesh, args.rotation_deg, args.min_seg, args.forward_m)
+    P = DaggerPlanner(args.navmesh, args.rotation_deg, args.min_seg, args.forward_m, args.stop_yaw_deg)
     routes = {
         '/next': lambda r: P.next(r),
         '/step': lambda r: {'pos': P.step(r['pos'], float(r['yaw']), float(r['base_height']), float(r.get('dist', args.forward_m)))},

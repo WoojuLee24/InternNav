@@ -1,0 +1,663 @@
+<title>노은역 랜드마크 편집기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+
+<style>
+  :root{
+    --ground:#F6F7F9; --surface:#FFFFFF; --surface-2:#EFF2F5;
+    --ink:#141A21; --ink-2:#4B5663; --ink-3:#7A858F;
+    --rule:#DFE4EA; --rule-2:#C9D1DA;
+    --accent:#2C5F8A; --accent-soft:#E6EFF6;
+    --ok:#2E7355; --ok-soft:#E3F0E9;
+    --bad:#AC4529; --bad-soft:#F8E7E2;
+    --warn:#8A6418; --warn-soft:#F7EEDB;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0D1015; --surface:#151920; --surface-2:#1C2129;
+      --ink:#E6EAEF; --ink-2:#A6B1BE; --ink-3:#78828D;
+      --rule:#252B34; --rule-2:#333B46;
+      --accent:#7FB3DC; --accent-soft:#16232E;
+      --ok:#6FC79C; --ok-soft:#13241F;
+      --bad:#E08A6E; --bad-soft:#291A15;
+      --warn:#D4A843; --warn-soft:#231D0F;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0D1015; --surface:#151920; --surface-2:#1C2129;
+    --ink:#E6EAEF; --ink-2:#A6B1BE; --ink-3:#78828D;
+    --rule:#252B34; --rule-2:#333B46;
+    --accent:#7FB3DC; --accent-soft:#16232E;
+    --ok:#6FC79C; --ok-soft:#13241F;
+    --bad:#E08A6E; --bad-soft:#291A15;
+    --warn:#D4A843; --warn-soft:#231D0F;
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);
+    font-family:"IBM Plex Sans KR",system-ui,sans-serif;font-size:14px;line-height:1.6}
+  .mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+
+  header{background:var(--surface);border-bottom:1px solid var(--rule);
+    padding:12px 20px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;position:sticky;top:0;z-index:20}
+  header h1{font-size:17px;font-weight:600;margin:0;white-space:nowrap}
+  header .sp{flex:1}
+  .chip{font-family:"IBM Plex Mono",monospace;font-size:12px;background:var(--surface-2);
+    border:1px solid var(--rule);border-radius:3px;padding:4px 9px;color:var(--ink-2);white-space:nowrap}
+  .chip b{color:var(--ink)}
+
+  button,select,input{font-family:inherit;font-size:13px;color:var(--ink);
+    background:var(--surface);border:1px solid var(--rule-2);border-radius:3px;padding:6px 11px}
+  button{cursor:pointer}
+  button:hover{background:var(--surface-2)}
+  button.pri{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:500}
+  button.pri:hover{filter:brightness(1.08)}
+  button.danger{color:var(--bad);border-color:var(--bad)}
+  button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+  .main{display:grid;grid-template-columns:1fr 440px;gap:0;height:calc(100vh - 57px)}
+  @media(max-width:1100px){.main{grid-template-columns:1fr;height:auto}}
+
+  .left{display:flex;flex-direction:column;border-right:1px solid var(--rule);min-width:0}
+  .bar{padding:9px 16px;border-bottom:1px solid var(--rule);display:flex;gap:12px;align-items:center;
+    flex-wrap:wrap;background:var(--surface)}
+  .bar label{font-size:12.5px;color:var(--ink-2);display:flex;align-items:center;gap:6px}
+  #map{flex:1;min-height:420px;background:var(--surface);display:block;width:100%}
+
+  .legend{padding:8px 16px;border-top:1px solid var(--rule);background:var(--surface-2);
+    display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--ink-2)}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+
+  .right{overflow-y:auto;background:var(--surface);min-width:0}
+  .pane{padding:16px 18px;border-bottom:1px solid var(--rule)}
+  .pane h2{font-size:12px;font-family:"IBM Plex Mono",monospace;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink-3);font-weight:500;margin:0 0 11px}
+
+  .shots{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .shot{position:relative;border:1px solid var(--rule);border-radius:3px;overflow:hidden;cursor:pointer;background:#000}
+  .shot.cur{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
+  .shot img{width:100%;display:block;aspect-ratio:4/3;object-fit:cover}
+  .shot .mark{position:absolute;width:26px;height:26px;border:2.5px solid #ffd24a;border-radius:50%;
+    transform:translate(-50%,-50%);box-shadow:0 0 0 1.5px rgba(0,0,0,.6);pointer-events:none}
+  .shot .cap{position:absolute;left:0;bottom:0;right:0;background:rgba(0,0,0,.62);color:#fff;
+    font-family:"IBM Plex Mono",monospace;font-size:10.5px;padding:2px 5px}
+  #big{width:100%;border:1px solid var(--rule);border-radius:3px;display:block}
+
+  .form{display:grid;grid-template-columns:70px 1fr;gap:8px 10px;align-items:center}
+  .form label{font-size:12.5px;color:var(--ink-3)}
+  .form input,.form select{width:100%;font-family:"IBM Plex Mono",monospace;font-size:12.5px}
+  .xyz{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+  .meta{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;font-size:12.5px;color:var(--ink-2);margin-top:10px}
+  .meta b{color:var(--ink);font-family:"IBM Plex Mono",monospace}
+  .acts{display:flex;gap:8px;margin-top:13px;flex-wrap:wrap}
+
+  .list{max-height:260px;overflow-y:auto;border:1px solid var(--rule);border-radius:3px}
+  .row{padding:7px 11px;border-bottom:1px solid var(--rule);cursor:pointer;display:flex;
+    justify-content:space-between;gap:8px;font-size:12.5px}
+  .row:last-child{border-bottom:none}
+  .row:hover{background:var(--surface-2)}
+  .row.sel{background:var(--accent-soft)}
+  .row.off{opacity:.42;text-decoration:line-through}
+  .row .n{font-family:"IBM Plex Mono",monospace;color:var(--ink-3)}
+
+  .tp{max-height:240px;overflow-y:auto;border:1px solid var(--rule);border-radius:3px}
+  .tp .r{display:flex;align-items:center;gap:9px;padding:6px 11px;border-bottom:1px solid var(--rule);
+    font-size:12.5px;cursor:pointer;user-select:none}
+  .tp .r:last-child{border-bottom:none}
+  .tp .r:hover{background:var(--surface-2)}
+  .tp .r.off .nm{opacity:.42;text-decoration:line-through}
+  .tp .r input{pointer-events:none;margin:0}
+  .tp .r .nm{flex:1}
+  .tp .r .ct{font-family:"IBM Plex Mono",monospace;color:var(--ink-3);font-variant-numeric:tabular-nums}
+  .find{width:100%;margin-bottom:8px;font-size:12.5px;padding:5px 8px;
+    border:1px solid var(--rule);border-radius:3px;background:var(--surface);color:var(--ink)}
+  .x{border:none;background:none;color:var(--ink-3);cursor:pointer;font-size:14px;
+    padding:0 2px;line-height:1;border-radius:2px}
+  .x:hover{color:var(--bad);background:var(--bad-soft)}
+
+  .hint{font-size:12.5px;color:var(--ink-3);line-height:1.55}
+  .empty{color:var(--ink-3);font-size:13px;padding:18px 0;text-align:center}
+</style>
+
+<header>
+  <h1>노은역 랜드마크 편집기</h1>
+  <span class="chip">전체 <b id="cTotal">–</b></span>
+  <span class="chip">쓸 것 <b id="cKeep">–</b></span>
+  <span class="chip">버린 것 <b id="cDrop">–</b></span>
+  <span class="chip">고침 <b id="cEdit">–</b></span>
+  <span class="sp"></span>
+  <button id="btnMerge">가까운 것 묶기</button>
+  <button class="pri" id="btnSave">저장 (클로드 + 내려받기)</button>
+  <span class="chip" id="savedAt" style="display:none"></span>
+</header>
+
+<div class="main">
+  <div class="left">
+    <div class="bar">
+      <label>층
+        <select id="selFloor"></select>
+      </label>
+      <label>종류 찾기
+        <input id="selType" class="find" list="typeList" placeholder="전체 — 타자로 찾기 (예: pillar)"
+               style="width:210px;margin:0" autocomplete="off">
+        <datalist id="typeList"></datalist>
+        <button id="btnTypeClear" title="전체 보기" style="padding:5px 9px">✕</button>
+        <span class="mono" id="typeHit" style="font-size:12px;color:var(--ink-3)"></span>
+      </label>
+      <label>묶는 거리
+        <input id="mergeM" type="range" min="0.5" max="5" step="0.1" value="1.5" style="width:120px">
+        <span class="mono" id="mergeV">1.5 m</span>
+      </label>
+      <label><input type="checkbox" id="showSize" checked> 크기 타원</label>
+      <label><input type="checkbox" id="showCam"> 촬영 지점</label>
+      <label><input type="checkbox" id="hideOff" checked> 버린 것 숨기기</label>
+    </div>
+    <canvas id="map"></canvas>
+    <div class="legend">
+      <span><i style="background:#2C5F8A"></i>랜드마크 — 클릭하면 선택</span>
+      <span><i style="background:#ffd24a"></i>선택된 것</span>
+      <span><i style="background:#AC4529"></i>버린 것</span>
+      <span><i style="background:#9aa5b1"></i>촬영 지점</span>
+      <span>점선 타원 = 물체 크기(반지름)</span>
+      <span>가로·세로축 = 역 평면 좌표 [m]</span>
+    </div>
+  </div>
+
+  <div class="right">
+    <div class="pane">
+      <h2>보이는 사진</h2>
+      <div id="shots" class="shots"></div>
+      <div id="shotEmpty" class="empty">왼쪽 지도에서 랜드마크를 클릭하세요</div>
+    </div>
+
+    <div class="pane">
+      <h2>크게 보기</h2>
+      <canvas id="big" width="640" height="480"></canvas>
+      <p class="hint" style="margin:8px 0 0"><b>↑↓←→</b> 앞뒤 랜드마크 · <b>[ ]</b> 사진 넘기기. 노란 동그라미가 <b>그 물체의 3D 위치를 이 사진에 되찍은 자리</b>입니다. 물체와 맞지 않으면 위치가 틀린 것입니다.</p>
+    </div>
+
+    <div class="pane">
+      <h2>물체 정보 — 고쳐서 저장</h2>
+      <div id="form" style="display:none">
+        <div class="form">
+          <label>이름</label>
+          <input id="fName" list="vocabList" placeholder="예: white pillar">
+          <datalist id="vocabList"></datalist>
+          <label>위치 xyz</label>
+          <div class="xyz"><input id="fX" type="number" step="0.01"><input id="fY" type="number" step="0.01"><input id="fZ" type="number" step="0.01"></div>
+          <label>크기 r</label>
+          <div class="xyz"><input id="fR0" type="number" step="0.01"><input id="fR1" type="number" step="0.01"><input id="fR2" type="number" step="0.01"></div>
+          <label>층(region)</label>
+          <select id="fStorey"></select>
+        </div>
+        <div class="meta">
+          <span>관측 <b id="mViews">–</b>회</span><span>검출 <b id="mDet">–</b>건</span>
+          <span>score <b id="mScore">–</b></span><span>퍼짐 <b id="mSpread">–</b> m</span>
+          <span>화면 <b id="mArea">–</b>%</span><span>id <b id="mId">–</b></span>
+        </div>
+        <div class="acts">
+          <button class="pri" id="btnApply">이 물체 저장</button>
+          <button class="danger" id="btnDrop">버리기</button>
+          <button id="btnRestore">되살리기</button>
+        </div>
+      </div>
+      <div id="formEmpty" class="empty">선택된 물체가 없습니다</div>
+    </div>
+
+    <div class="pane">
+      <h2>종류별로 한 번에 <span class="mono" id="tpCount" style="color:var(--ink-3)"></span></h2>
+      <p class="hint" style="margin:0 0 9px">체크를 끄면 <b>그 종류 전체를 모든 층에서</b> 버립니다.
+        바닥·벽처럼 “저기서 멈춰라”의 대상이 못 되는 종류를 한 번에 거를 때 씁니다.
+        개수는 <span class="mono">쓸 것/전체</span>.</p>
+      <input id="tpFind" class="find" placeholder="여기서도 찾을 수 있습니다 (예: sign)">
+      <div class="tp" id="types"></div>
+      <div class="acts">
+        <button id="btnTpNone">모두 끄기</button>
+        <button id="btnTpAll">모두 켜기</button>
+        <button id="btnUndo" disabled>되돌리기</button>
+      </div>
+      <p class="hint" style="margin:10px 0 0">단축키 — <b>↑↓←→</b> 앞뒤 랜드마크 · <b>[ ]</b> 사진 넘기기 ·
+        <b>D</b> 버리기 · <b>R</b> 되살리기 · <b>Ctrl+Z</b> 되돌리기. 목록의 <b>✕</b>를 눌러도 하나씩 버릴 수 있습니다.</p>
+    </div>
+
+    <div class="pane">
+      <h2>목록 <span class="mono" id="listCount" style="color:var(--ink-3)"></span></h2>
+      <div class="list" id="list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const S = {data:null, floor:0, type:'', sel:null, shot:0, merge:1.5, floorPts:null, undo:[]};
+const $ = id => document.getElementById(id);
+
+async function boot(){
+  S.data = await (await fetch('data.json')).json();
+  try{ S.floorPts = await (await fetch('floor.json')).json(); }catch(e){ S.floorPts = null; }
+  S.data.landmarks.forEach(l => { l.orig = JSON.stringify({name:l.name,xyz:l.xyz,radii:l.radii,storey:l.storey}); });
+  await loadSaved();
+
+  const sf = $('selFloor');
+  S.data.storeys.forEach(s => sf.add(new Option(s.name, s.i)));
+  sf.value = 1; S.floor = 1;
+
+  const types = [...new Set(S.data.landmarks.map(l=>l.name))].sort();
+  types.forEach(t => {
+    const o = document.createElement('option');
+    o.value = t; o.label = `${t} (${S.data.landmarks.filter(l=>l.name===t).length})`;
+    $('typeList').appendChild(o);
+  });
+  types.forEach(t => $('vocabList').appendChild(Object.assign(document.createElement('option'),{value:t})));
+  S.data.vocab.forEach(v => { if(!types.includes(v)) $('vocabList').appendChild(Object.assign(document.createElement('option'),{value:v})); });
+
+  S.data.storeys.forEach(s => $('fStorey').add(new Option(s.name, s.i)));
+
+  sf.onchange = e => { S.floor = +e.target.value; S.sel=null; draw(); renderList(); renderForm(); };
+  $('selType').oninput = e => { S.type = e.target.value.trim().toLowerCase(); onTypeQuery(); };
+  $('btnTypeClear').onclick = () => { $('selType').value=''; S.type=''; onTypeQuery(); };
+  $('mergeM').oninput = e => { S.merge = +e.target.value; $('mergeV').textContent = (+e.target.value).toFixed(1)+' m'; };
+  ['showSize','showCam','hideOff'].forEach(id => $(id).onchange = draw);
+  $('btnApply').onclick = applyEdit;
+  $('btnDrop').onclick = () => { snapshot('하나 버리기'); setKeep(false); };
+  $('btnRestore').onclick = () => { snapshot('하나 되살리기'); setKeep(true); };
+  $('btnMerge').onclick = () => { snapshot('묶기'); doMerge(); };
+  $('tpFind').oninput = renderTypes;
+  $('btnTpNone').onclick = () => { snapshot('모두 끄기'); typeRows().forEach(([t]) => setKeepByType(t, false)); refresh(); };
+  $('btnTpAll').onclick  = () => { snapshot('모두 켜기'); typeRows().forEach(([t]) => setKeepByType(t, true));  refresh(); };
+  $('btnUndo').onclick = undo;
+  window.addEventListener('keydown', onKey);
+  $('btnSave').onclick = save;
+  $('map').onclick = onMapClick;
+  window.onresize = draw;
+
+  stats(); draw(); renderList(); renderTypes();
+}
+
+/* ---- 저장본 읽어오기: 새로고침하거나 데이터가 갱신돼도 내 편집이 살아남는다 ---- */
+async function loadSaved(){
+  try{
+    DB = await Promise.race([
+      claude?.use?.('db') ?? Promise.resolve(null),
+      new Promise(r => setTimeout(() => r(null), 10000)),
+    ]);
+    if(!DB) return;
+    const snap = await DB.doc('edits/latest').get();
+    if(!snap.exists) return;
+    const v = snap.data() || {};
+    const by = {}; S.data.landmarks.forEach(l => { by[l.id] = l; });
+    (v.dropped_ids || []).forEach(id => { if(by[id]) by[id].keep = false; });
+    (v.kept_ids    || []).forEach(id => { if(by[id]) by[id].keep = true;  });
+    Object.entries(v.edits || {}).forEach(([id, e]) => {
+      const l = by[id]; if(!l) return;
+      if(e.name  != null) l.name   = e.name;
+      if(e.xyz   != null) l.xyz    = e.xyz;
+      if(e.radii != null) l.radii  = e.radii;
+      if(e.storey!= null) l.storey = e.storey;
+      l.edited = true;
+    });
+    showSaved(v.saved_at);
+  }catch(e){ /* 저장본이 없거나 권한이 없으면 원본 그대로 쓴다 */ }
+}
+function showSaved(iso){
+  if(!iso) return;
+  const el = $('savedAt');
+  el.style.display = '';
+  el.innerHTML = '저장됨 <b>' + new Date(iso).toLocaleString('ko-KR',
+      {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}) + '</b>';
+}
+
+/* ---- 되돌리기: 버리기/되살리기 상태만 되돌린다 (이름·좌표 수정은 대상 아님) ---- */
+function snapshot(label){
+  S.undo.push({label, keep: S.data.landmarks.map(l => l.keep)});
+  if(S.undo.length > 30) S.undo.shift();
+  $('btnUndo').disabled = false;
+  $('btnUndo').textContent = `되돌리기 (${label})`;
+}
+function undo(){
+  const u = S.undo.pop(); if(!u) return;
+  S.data.landmarks.forEach((l,i) => { l.keep = u.keep[i]; });
+  const n = S.undo.length;
+  $('btnUndo').disabled = !n;
+  $('btnUndo').textContent = n ? `되돌리기 (${S.undo[n-1].label})` : '되돌리기';
+  refresh();
+}
+function refresh(){ stats(); draw(); renderList(); renderTypes(); renderForm(); }
+
+function onKey(e){
+  const t = e.target.tagName;
+  if(t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA') return;
+  if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z'){ e.preventDefault(); undo(); return; }
+
+  // 화살표 네 개 모두 = 앞뒤 랜드마크.  사진은 [ ] 또는 클릭.
+  const BACK = {ArrowLeft:1, ArrowUp:1}, FWD = {ArrowRight:1, ArrowDown:1};
+  if(BACK[e.key] || FWD[e.key]){
+    const ls = listOrder();
+    if(!ls.length) return;
+    e.preventDefault();
+    const i = S.sel ? ls.findIndex(l => l.id === S.sel.id) : -1;
+    const j = i < 0 ? 0 : (i + (FWD[e.key] ? 1 : ls.length - 1)) % ls.length;
+    select(ls[j]);
+    const row = $('list').children[j];
+    if(row) row.scrollIntoView({block:'nearest'});
+    return;
+  }
+  if(e.key === '[' || e.key === ']'){
+    const n = ((S.sel && S.sel.shots) || []).length;
+    if(n > 1){
+      e.preventDefault();
+      S.shot = (S.shot + (e.key === ']' ? 1 : n - 1)) % n;
+      renderShots();
+    }
+    return;
+  }
+
+  if(!S.sel) return;
+  if(e.key === 'd' || e.key === 'D'){ e.preventDefault(); snapshot('하나 버리기'); setKeep(false); }
+  if(e.key === 'r' || e.key === 'R'){ e.preventDefault(); snapshot('하나 되살리기'); setKeep(true); }
+}
+
+/* ---- 종류 찾기: 부분일치. 'pillar' 한 번에 white/concrete/blue pillar 를 모두 잡는다 ---- */
+function matchType(l){ return !S.type || l.name.toLowerCase().includes(S.type); }
+function onTypeQuery(){
+  const n = S.data.landmarks.filter(matchType).length;
+  const t = new Set(S.data.landmarks.filter(matchType).map(l => l.name)).size;
+  $('typeHit').textContent = S.type ? `${t}종류 · ${n}개` : '';
+  S.sel = null; draw(); renderList(); renderForm();
+}
+
+/* ---- 종류별 일괄 ---- */
+function setKeepByType(t, v){ S.data.landmarks.forEach(l => { if(l.name === t) l.keep = v; }); }
+function typeRows(){
+  const by = {};
+  S.data.landmarks.forEach(l => { const c = (by[l.name] = by[l.name] || {n:0, k:0}); c.n++; if(l.keep) c.k++; });
+  const q = ($('tpFind').value || '').trim().toLowerCase();
+  return Object.entries(by)
+    .filter(([t]) => !q || t.toLowerCase().includes(q))
+    .sort((a,b) => b[1].n - a[1].n || a[0].localeCompare(b[0]));
+}
+function renderTypes(){
+  const box = $('types'); box.innerHTML = '';
+  const rows = typeRows();
+  $('tpCount').textContent = `${rows.filter(r => r[1].k > 0).length} / ${rows.length} 종류`;
+  rows.forEach(([t,c]) => {
+    const d = document.createElement('div');
+    d.className = 'r' + (c.k ? '' : ' off');
+    d.innerHTML = `<input type="checkbox" ${c.k ? 'checked' : ''}><span class="nm"></span><span class="ct">${c.k}/${c.n}</span>`;
+    d.querySelector('.nm').textContent = t;
+    d.onclick = () => { snapshot(`종류 ${t}`); setKeepByType(t, c.k === 0); refresh(); };
+    box.appendChild(d);
+  });
+}
+
+function visible(){
+  return S.data.landmarks.filter(l =>
+    l.storey === S.floor &&
+    matchType(l) &&
+    (!$('hideOff').checked || l.keep));
+}
+
+function bounds(){
+  const ls = S.data.landmarks.filter(l => l.storey === S.floor);
+  let pts = ls.map(l => l.xyz);
+  if(S.floorPts && S.floorPts[S.floor]) pts = pts.concat(S.floorPts[S.floor]);
+  if(!pts.length) return {x0:-10,x1:10,y0:-10,y1:10};
+  const xs = pts.map(p=>p[0]), ys = pts.map(p=>p[1]);
+  const pad = 3;
+  return {x0:Math.min(...xs)-pad, x1:Math.max(...xs)+pad, y0:Math.min(...ys)-pad, y1:Math.max(...ys)+pad};
+}
+
+let TR = null;
+function draw(){
+  const cv = $('map'), dpr = window.devicePixelRatio||1;
+  const w = cv.clientWidth, h = cv.clientHeight||480;
+  cv.width = w*dpr; cv.height = h*dpr;
+  const g = cv.getContext('2d'); g.scale(dpr,dpr);
+  const cs = getComputedStyle(document.body);
+  const C = n => cs.getPropertyValue(n).trim();
+  g.fillStyle = C('--surface'); g.fillRect(0,0,w,h);
+
+  const b = bounds();
+  const sx = w/(b.x1-b.x0), sy = h/(b.y1-b.y0), s = Math.min(sx,sy)*0.94;
+  const ox = (w - (b.x1-b.x0)*s)/2, oy = (h - (b.y1-b.y0)*s)/2;
+  const X = x => ox + (x-b.x0)*s, Y = y => h - oy - (y-b.y0)*s;
+  TR = {X,Y,s,b,invX:px=>(px-ox)/s+b.x0, invY:py=>(h-oy-py)/s+b.y0};
+
+  // 걸을 수 있는 바닥
+  if(S.floorPts && S.floorPts[S.floor]){
+    g.fillStyle = C('--surface-2');
+    const r = Math.max(2, s*0.35);
+    S.floorPts[S.floor].forEach(p => g.fillRect(X(p[0])-r/2, Y(p[1])-r/2, r, r));
+  }
+  // 촬영 지점
+  if($('showCam').checked){
+    g.fillStyle = '#9aa5b1';
+    S.data.snaps.filter(sn=>sn.storey===S.floor).forEach(sn=>{
+      g.beginPath(); g.arc(X(sn.pos[0]),Y(sn.pos[1]),2.2,0,7); g.fill();
+      g.strokeStyle='rgba(154,165,177,.5)'; g.beginPath();
+      g.moveTo(X(sn.pos[0]),Y(sn.pos[1]));
+      g.lineTo(X(sn.pos[0]+Math.cos(sn.yaw)*1.4),Y(sn.pos[1]+Math.sin(sn.yaw)*1.4)); g.stroke();
+    });
+  }
+  // 랜드마크
+  visible().forEach(l=>{
+    const isSel = S.sel && S.sel.id===l.id;
+    const col = !l.keep ? '#AC4529' : (isSel ? '#ffd24a' : C('--accent'));
+    if($('showSize').checked){
+      g.strokeStyle = col+'88'; g.setLineDash([3,3]); g.lineWidth=1;
+      g.beginPath(); g.ellipse(X(l.xyz[0]),Y(l.xyz[1]), Math.max(2,l.radii[0]*s), Math.max(2,l.radii[1]*s), 0,0,7);
+      g.stroke(); g.setLineDash([]);
+    }
+    g.fillStyle = col; g.beginPath(); g.arc(X(l.xyz[0]),Y(l.xyz[1]), isSel?7:4.2, 0,7); g.fill();
+    if(isSel){ g.strokeStyle='#000'; g.lineWidth=1.4; g.stroke(); }
+  });
+  // 선택된 것이 보이는 촬영 지점 — 시야 선
+  if(S.sel){
+    const shots = S.sel.shots||[];
+    g.strokeStyle = '#ffd24a'; g.lineWidth = 1.6;
+    shots.forEach(sh=>{
+      const sn = S.data.snaps.find(x=>x.id===sh.snap);
+      if(!sn || sn.storey!==S.floor) return;
+      g.beginPath(); g.moveTo(X(sn.pos[0]),Y(sn.pos[1])); g.lineTo(X(S.sel.xyz[0]),Y(S.sel.xyz[1])); g.stroke();
+      g.fillStyle='#ffd24a'; g.beginPath(); g.arc(X(sn.pos[0]),Y(sn.pos[1]),3.4,0,7); g.fill();
+    });
+  }
+  // 눈금
+  g.fillStyle = C('--ink-3'); g.font='12px "IBM Plex Mono", monospace';
+  g.fillText(`${b.x0.toFixed(0)} m`, 6, h-6);
+  g.fillText(`${b.x1.toFixed(0)} m`, w-52, h-6);
+  g.fillText(`${visible().length} 개 표시`, 6, 16);
+}
+
+function onMapClick(e){
+  if(!TR) return;
+  const r = e.target.getBoundingClientRect();
+  const mx = TR.invX(e.clientX-r.left), my = TR.invY(e.clientY-r.top);
+  let best=null, bd=1e9;
+  visible().forEach(l=>{ const d=Math.hypot(l.xyz[0]-mx,l.xyz[1]-my); if(d<bd){bd=d;best=l;} });
+  if(best && bd < 6/TR.s*4){ select(best); }
+}
+
+function select(l){ S.sel = l; S.shot = 0; draw(); renderForm(); renderShots(); renderList(); }
+
+function renderShots(){
+  const box = $('shots'); box.innerHTML='';
+  const shots = (S.sel && S.sel.shots) || [];
+  $('shotEmpty').style.display = shots.length ? 'none' : 'block';
+  shots.forEach((sh,i)=>{
+    const d = document.createElement('div');
+    d.className = 'shot' + (i===S.shot ? ' cur' : '');
+    d.innerHTML = `<img src="${S.data.images[sh.rgb]||''}" loading="lazy" alt="">
+      ${sh.u!=null?`<div class="mark" style="left:${sh.u/640*100}%;top:${sh.v/480*100}%"></div>`:''}
+      <div class="cap">${i+1}/${shots.length} · ${sh.cam_m} m · score ${sh.score}</div>`;
+    d.onclick = () => { S.shot=i; drawBig(); };
+    box.appendChild(d);
+  });
+  drawBig();
+}
+
+function drawBig(){
+  const cv=$('big'), g=cv.getContext('2d');
+  g.clearRect(0,0,640,480);
+  const sh = S.sel && S.sel.shots && S.sel.shots[S.shot];
+  if(!sh){ g.fillStyle='#8a929b'; g.font='15px sans-serif'; g.fillText('사진을 고르세요',230,240); return; }
+  const im = new Image();
+  im.onload = () => {
+    g.drawImage(im,0,0,640,480);
+    if(sh.u!=null){
+      g.strokeStyle='#ffd24a'; g.lineWidth=3;
+      g.beginPath(); g.arc(sh.u,sh.v,26,0,7); g.stroke();
+      g.beginPath(); g.moveTo(sh.u-36,sh.v); g.lineTo(sh.u-14,sh.v);
+      g.moveTo(sh.u+14,sh.v); g.lineTo(sh.u+36,sh.v); g.stroke();
+      g.fillStyle='rgba(0,0,0,.65)'; g.fillRect(4,452,250,24);
+      g.fillStyle='#ffd24a'; g.font='14px "IBM Plex Mono", monospace';
+      g.fillText(`${S.sel.name} · ${sh.cam_m} m`, 10, 469);
+    }
+  };
+  im.src = S.data.images[sh.rgb] || '';
+}
+
+function renderForm(){
+  const on = !!S.sel;
+  $('form').style.display = on?'block':'none';
+  $('formEmpty').style.display = on?'none':'block';
+  if(!on) return;
+  const l = S.sel;
+  $('fName').value=l.name; $('fX').value=l.xyz[0]; $('fY').value=l.xyz[1]; $('fZ').value=l.xyz[2];
+  $('fR0').value=l.radii[0]; $('fR1').value=l.radii[1]; $('fR2').value=l.radii[2];
+  $('fStorey').value=l.storey;
+  $('mViews').textContent=l.views; $('mDet').textContent=l.n_det;
+  $('mScore').textContent=l.score; $('mSpread').textContent=l.spread_m;
+  $('mArea').textContent=l.area_pct; $('mId').textContent=l.id;
+}
+
+function applyEdit(){
+  const l=S.sel; if(!l) return;
+  l.name=$('fName').value.trim()||l.name;
+  l.xyz=[+$('fX').value,+$('fY').value,+$('fZ').value];
+  l.radii=[+$('fR0').value,+$('fR1').value,+$('fR2').value];
+  l.storey=+$('fStorey').value;
+  l.edited = JSON.stringify({name:l.name,xyz:l.xyz,radii:l.radii,storey:l.storey}) !== l.orig;
+  stats(); draw(); renderList();
+}
+function setKeep(v){ if(!S.sel) return; S.sel.keep=v; stats(); draw(); renderList(); renderTypes(); }
+
+function doMerge(){
+  const d = S.merge, ls = S.data.landmarks.filter(l=>l.keep);
+  const by={}; ls.forEach(l=>{ (by[l.name]=by[l.name]||[]).push(l); });
+  let merged=0;
+  Object.values(by).forEach(g=>{
+    const used=new Set();
+    g.forEach((a,i)=>{
+      if(used.has(a.id)) return;
+      g.slice(i+1).forEach(b=>{
+        if(used.has(b.id)||!b.keep) return;
+        const dist=Math.hypot(a.xyz[0]-b.xyz[0],a.xyz[1]-b.xyz[1],a.xyz[2]-b.xyz[2]);
+        if(dist<=d){
+          b.keep=false; used.add(b.id); merged++;
+          a.views += b.views; a.n_det += b.n_det;
+          a.shots = (a.shots||[]).concat(b.shots||[]).slice(0,8);
+          a.edited = true;
+        }
+      });
+    });
+  });
+  alert(`묶는 거리 ${d.toFixed(1)} m → ${merged}개를 합쳤습니다.\n남은 랜드마크 ${S.data.landmarks.filter(l=>l.keep).length}개`);
+  refresh();
+}
+
+function listOrder(){
+  return S.data.landmarks
+    .filter(l => l.storey===S.floor && matchType(l))
+    .sort((a,b)=> a.name.localeCompare(b.name) || b.views-a.views);
+}
+function renderList(){
+  const box=$('list'); box.innerHTML='';
+  const ls = listOrder();
+  $('listCount').textContent = `${ls.filter(l=>l.keep).length} / ${ls.length}`;
+  ls.forEach(l=>{
+    const d=document.createElement('div');
+    d.className='row'+(S.sel&&S.sel.id===l.id?' sel':'')+(l.keep?'':' off');
+    d.innerHTML=`<span>${l.name}${l.edited?' <b style="color:var(--warn)">*</b>':''}</span>
+      <span class="n">${l.views}회 · ${l.xyz[0].toFixed(0)},${l.xyz[1].toFixed(0)}</span>
+      <button class="x" title="${l.keep?'버리기':'되살리기'}">${l.keep?'✕':'↺'}</button>`;
+    d.onclick=()=>select(l);
+    d.querySelector('.x').onclick = ev => {
+      ev.stopPropagation();
+      snapshot(l.keep ? '하나 버리기' : '하나 되살리기');
+      l.keep = !l.keep; refresh();
+    };
+    box.appendChild(d);
+  });
+}
+
+function stats(){
+  const L=S.data.landmarks;
+  $('cTotal').textContent=L.length;
+  $('cKeep').textContent=L.filter(l=>l.keep).length;
+  $('cDrop').textContent=L.filter(l=>!l.keep).length;
+  $('cEdit').textContent=L.filter(l=>l.edited).length;
+}
+
+let DB = null;   // db capability — 저장하면 클로드가 읽을 수 있다
+let DL = null;   // downloads capability — 아티팩트 뷰어는 보통 <a download> 를 막는다
+claude?.use?.('downloads').then(d => { DL = d; }).catch(()=>{});
+
+async function save(){
+  const now = new Date().toISOString();
+  const out = {scene:S.data.scene, storeys:S.data.storeys,
+    edited_at:now,
+    landmarks:S.data.landmarks.filter(l=>l.keep).map(l=>({
+      id:l.id, name:l.name, xyz:l.xyz, radii:l.radii, storey:l.storey,
+      views:l.views, n_det:l.n_det, score:l.score, spread_m:l.spread_m, edited:!!l.edited})),
+    dropped: S.data.landmarks.filter(l=>!l.keep).map(l=>({id:l.id, name:l.name, storey:l.storey})),
+    counts: {total:S.data.landmarks.length,
+             kept:S.data.landmarks.filter(l=>l.keep).length,
+             dropped:S.data.landmarks.filter(l=>!l.keep).length}};
+  // 1) 클로드가 읽을 수 있게 db 에 — 새로고침해도 편집이 남는다
+  let toClaude = false;
+  if(DB){
+    const edits = {};
+    S.data.landmarks.forEach(l => {
+      if(!l.edited) return;
+      const o = JSON.parse(l.orig);
+      const e = {};
+      if(l.name!==o.name) e.name=l.name;
+      if(JSON.stringify(l.xyz)!==JSON.stringify(o.xyz)) e.xyz=l.xyz;
+      if(JSON.stringify(l.radii)!==JSON.stringify(o.radii)) e.radii=l.radii;
+      if(l.storey!==o.storey) e.storey=l.storey;
+      if(Object.keys(e).length) edits[l.id]=e;
+    });
+    try{
+      await DB.doc('edits/latest').set({
+        saved_at: now,
+        kept_ids:    S.data.landmarks.filter(l=>l.keep).map(l=>l.id),
+        dropped_ids: S.data.landmarks.filter(l=>!l.keep).map(l=>l.id),
+        edits,
+        counts: out.counts});
+      toClaude = true; showSaved(now);
+    }catch(e){ console.warn('db 저장 실패', e); }
+  }
+
+  // 2) 파일로도 내려받는다
+  const text = JSON.stringify(out,null,1);
+  const name = 'landmarks_edited.json';
+  if(!toClaude) setTimeout(()=>alert('클로드 쪽 저장은 실패했습니다. 파일만 내려받습니다.'), 50);
+  if(DL){
+    try{ await DL.save({filename:name, data:text}); return; }
+    catch(e){ if(e && e.code==='not_granted'){ alert('내려받기가 허용되지 않았습니다.'); return; } }
+  }
+  // 로컬에서 파일로 열었을 때의 길
+  try{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([text],{type:'application/json'}));
+    a.download=name; document.body.appendChild(a); a.click(); a.remove();
+  }catch(e){
+    const w=window.open('','_blank');
+    if(w){ w.document.write('<pre>'+text.replace(/</g,'&lt;')+'</pre>'); }
+    else alert('내려받기를 쓸 수 없습니다. 콘솔에 출력합니다.'), console.log(text);
+  }
+}
+
+boot();
+</script>
