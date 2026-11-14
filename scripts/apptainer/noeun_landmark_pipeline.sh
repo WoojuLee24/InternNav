@@ -8,6 +8,7 @@
 #
 # 단계마다 $P/<단계>.log, 성공하면 $P/done_<단계>. 다시 돌리면 끝난 단계는 건너뛴다. 실패하면 멈춘다.
 #   bash scripts/apptainer/noeun_landmark_pipeline.sh
+#   (2026-11-14 추가) 2b: 좁은 통로 ep 는 46_mark_narrow + walk --narrow_only --steer_gain 1.5 로 다시 걸어 결과를 바꾼다.
 #   REDO=walk bash scripts/apptainer/noeun_landmark_pipeline.sh
 set -u
 cd /data/users/dnwn24/src/InternNav
@@ -57,20 +58,47 @@ walk(){
   bash -c "$C $SB bash -c '$ENVS; python3 $N/42_walk_rbq.py --episodes_json $D/eps_g$g.json --paths_json $PJ --log_dir $D/walk --tag g$g --workers 3 --timeout_s 60000'" >> $P/walk_g$g.log 2>&1
 }
 if [ ! -f $P/done_walk ]; then
-  say "START walk (GPU 0 · 1)"
-  walk 0 "$G0" & p0=$!; sleep 90; walk 1 "$G1" & p1=$!
-  wait $p0; r0=$?; wait $p1; r1=$?
-  [ $r0 -ne 0 -o $r1 -ne 0 ] && { say "FAIL  walk rc=$r0/$r1"; exit 1; }
+  if ps -eo args | grep -q "[4]2_walk_rbq.py --episodes_json $D/eps_g"; then   # 이전 실행의 걷기가 아직 돌면 기다린다
+    say "WAIT  walk (이미 도는 중)"
+    while ps -eo args | grep -q "[4]2_walk_rbq.py --episodes_json $D/eps_g"; do sleep 60; done
+  else
+    say "START walk (GPU 0 · 1)"
+    walk 0 "$G0" & p0=$!; sleep 90; walk 1 "$G1" & p1=$!
+    wait $p0; wait $p1
+  fi
+  [ -s $D/walk/walk_g0.json -a -s $D/walk/walk_g1.json ] || { say "FAIL  walk 결과 없음"; exit 1; }
   touch $P/done_walk; say "DONE  walk"
 fi
 
-# 3) 고르기: split 마다 episode_id 순서로 성공한 것 앞에서부터
+# 2b) 좁은 통로(개찰구 등) 있는 ep 만 다시 걷기: 그 구간에서만 걸으며 방향 보정 (46 + --narrow_only --steer_gain 1.5)
+#     2026-11-14 시험: 개찰구 실패 8/8 -> 성공, 좁은 구간 없는 ep 는 결과가 기본과 똑같음. 이 ep 들은 결과를 통째로 바꾼다.
+run mark46 bash -c "$AX habitat python3 $N/46_mark_narrow.py --eps_json $EJ --out $D/eps_noeun_v5_narrow.json"
+run nsplit python3 -c "
+import json; d=json.load(open('$D/eps_noeun_v5_narrow.json'))
+E=[e for e in d['episodes'] if e.get('narrow_wp')]
+for g in (0, 1):
+    json.dump(dict(d, episodes=E[g::2]), open('$D/eps_n%d.json' % g, 'w'))
+print(len(E))"
+nwalk(){
+  local g=$1 C=$2
+  bash -c "$C $SB bash -c '$ENVS; python3 $N/42_walk_rbq.py --episodes_json $D/eps_n$g.json --paths_json $PJ --log_dir $D/walk --tag n$g --workers 3 --timeout_s 60000 -- --narrow_only --steer_gain 1.5'" >> $P/walk_n$g.log 2>&1
+}
+if [ ! -f $P/done_nwalk ]; then
+  say "START nwalk (좁은 통로 ep, GPU 0 · 1)"
+  nwalk 0 "$G0" & p0=$!; sleep 90; nwalk 1 "$G1" & p1=$!
+  wait $p0; wait $p1
+  [ -s $D/walk/walk_n0.json -a -s $D/walk/walk_n1.json ] || { say "FAIL  nwalk 결과 없음"; exit 1; }
+  touch $P/done_nwalk; say "DONE  nwalk"
+fi
+
+# 3) 고르기: split 마다 episode_id 순서로 성공한 것 앞에서부터 (좁은 통로 ep 는 nwalk 결과)
 run select python3 -c "
 import json, collections
 R = {}
-for g in (0, 1):
-    W = json.load(open('$D/walk/walk_g%d.json' % g)); bg = W.get('background')
+for t in ('g0', 'g1', 'n0', 'n1'):
+    W = json.load(open('$D/walk/walk_%s.json' % t)); bg = W.get('background')
     for r in W['results']: R[int(r['key'].split(':')[1])] = r
+json.dump({'background': bg, 'results': [R[i] for i in sorted(R)]}, open('$D/walk/walk_all.json', 'w'))
 E = {e['episode_id']: e for e in json.load(open('$PJ'))['episodes']}
 need = {'eval': $N_EVAL, 'eval_seen': $N_SEEN, 'train': $N_TRAIN}
 sel, stat = collections.defaultdict(list), collections.defaultdict(collections.Counter)

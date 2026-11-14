@@ -41,6 +41,11 @@ def parse():
                     help='0 = 전진 중 회전 없음 (이전). >0 = 전진 action 동안 wz = gain × 방향 오차 (rad/s, ±turn_speed 로 자름) — 좁은 통로에서 제자리 보정 회전을 줄인다')
     ap.add_argument('--steer_lookahead_m', type=float, default=0.0,
                     help='0 = 방향 보정 목표 = 지금 경유점 (이전, 0.5 m 간격이라 가깝다). >0 = 지금 경유점부터 몸에서 이 거리 이상 떨어진 첫 경유점 (pure pursuit, 계단 지그재그 줄이기)')
+    ap.add_argument('--narrow_only', action='store_true',
+                    help='켜면 --steer_gain 과 --narrow_turn_threshold_deg 를 episode 의 narrow_wp(46_mark_narrow) 표시 경유점에서만 쓴다. '
+                         '표시가 없는 ep · 구간은 기본 규칙 그대로 (이산 동작 라벨 유지)')
+    ap.add_argument('--narrow_turn_threshold_deg', type=float, default=0.0,
+                    help='0 = 안 씀. >0 = --narrow_only 구간에서 쓸 제자리 회전 기준 (기본 구간은 --turn_threshold_deg)')
     ap.add_argument('--settle_s', type=float, default=0.1, help='action 사이 명령 0 으로 둘 시간 (속도 전환을 부드럽게)')
     ap.add_argument('--warmup_s', type=float, default=0.3, help='스폰 후 PD 로 서기 (sim_docker POLICY_WARMUP_S)')
     ap.add_argument('--policy_settle_s', type=float, default=0.0,
@@ -316,13 +321,17 @@ def main() -> int:
                 break
             dp = W[wi, :2] - pos[:2]
             d = (math.atan2(dp[1], dp[0]) - yaw + math.pi) % (2 * math.pi) - math.pi
-            a = (2 if d > 0 else 3) if abs(d) > math.radians(args.turn_threshold_deg) else 1
+            nw = e.get('narrow_wp')                                         # 46_mark_narrow 표시 (--narrow_only 일 때만 씀)
+            in_n = bool(args.narrow_only and nw is not None and nw[min(wi, len(nw) - 1)])
+            thr = args.narrow_turn_threshold_deg if (in_n and args.narrow_turn_threshold_deg > 0) else args.turn_threshold_deg
+            steer_on = args.steer_gain > 0 and (in_n or not args.narrow_only)
+            a = (2 if d > 0 else 3) if abs(d) > math.radians(thr) else 1
             if a == 1:
                 cmd, dur = [args.fwd_speed, 0.0, 0.0], FWD / args.fwd_speed
             else:
                 cmd, dur = [0.0, 0.0, args.turn_speed * (1 if a == 2 else -1)], TURN / args.turn_speed
             for k in range(int(round(dur / PHYSICS_DT))):
-                if a == 1 and args.steer_gain > 0 and k % DECIMATION == 0:       # 걸으면서 방향 보정
+                if a == 1 and steer_on and k % DECIMATION == 0:                  # 걸으면서 방향 보정
                     p_, q_ = robot.get_world_pose()
                     R_ = rot(np.asarray(q_, np.float32))
                     tgt_ = wi
