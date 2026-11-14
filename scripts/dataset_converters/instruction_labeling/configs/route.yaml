@@ -112,7 +112,48 @@ rooms:                      # route.rooms=<key>: MP3D .house 방 정보로 "지�
       G-A: street
       G-B: exit
       G-C: exit
+  noeun-v2:                 # noeun-v1 + 랜드마크 경로가 새로 간 곳 (nav3d/noeun/61b_extend_zones.py): 다른 출구 앞 지상 바깥 = G-D street, B1·B2 가장자리는 같은 층 가까운 구역
+    zones_file: scripts/dataset_converters/nav3d/noeun/zones/noeun_zones_v2.json
+    max_dist_m: 3.0
+    step_m: 0.25
+    min_visit_m: 1.5
+    min_visit_by_label: {C1: 1.0, C2: 1.0, C3: 1.0}
+    form: verbs
+    joiner: ", "
+    leave: "leave the {room}"
+    enter: "enter the {room}"
+    line: "Area changes along the path (from station layout): {changes}. You stop in the {goal}."
+    single_line: "The whole path stays in the {goal} (from station layout)."
+    names:                  # v1 이름 그대로 + G-D (2026-11-15 사용자 결정: street)
+      B2-A: platform
+      B2-B: platform
+      B2-C: platform
+      B2-D: end of the platform
+      C1: stairs
+      C2: stairs
+      C3: exit stairs
+      B1-A: exit passage
+      B1-B: concourse
+      B1-C: concourse
+      B1-D: concourse
+      B1-E: ticket gates
+      B1-F: paid area
+      G-A: street
+      G-B: exit
+      G-C: exit
+      G-D: street
 stop_cue:                  # route.stop_cue=<key>: 정지 단서 (label/stop_cues.py). none = b0 (VLM 이 도착 이미지에서 스스로 고름)
+  noeun-paths-v1:           # 노은역 랜드마크 경로: 경로를 만들 때 고른 랜드마크(paths json stop_cue)를 그대로 한 줄로 (nav3d/noeun/62b_label_landmark.py 만 읽음, b1 전용)
+    kind: paths
+    line: "You stop {where}{side} (from scene annotation)."
+    whole: "next to the {name}"
+    ordinal: "next to the {nth} {name} you reach"      # ordinal >= 2 (같은 종류를 지나친 뒤 몇 번째)
+    anchor: "next to the {name} by the {anchor}"       # 같은 종류가 여럿이라 옆 물체로 가리킬 때
+    parts: {end: "at the end of the {name}", stairs_top: "at the top of the {name}", stairs_bottom: "at the bottom of the {name}"}
+    nth: {2: second, 3: third, 4: fourth}
+    ahead_deg: 20           # 마지막 자세 기준 |방위| 이 각도 안이면 ahead
+    behind_deg: 135         # 이보다 크면 방향 말 안 함
+    side_words: {left: ", on your left", right: ", on your right", ahead: ", right in front of you"}
   A-grounded-v1:            # 정지 지점 근처의, 마지막 프레임에 보이는 annotation 물체 하나를 경로 단어 뒤에 사실로 넣는다
     kind: A
     max_dist_m: 2.0         # 정지 지점(수평)과 물체 bbox 사이 거리
