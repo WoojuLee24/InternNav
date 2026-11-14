@@ -78,6 +78,9 @@ def parse():
     ap.add_argument('--anchor_r', type=float, default=5.0, help='기준점을 찾는 반경 (목적지 대상에서)')
     ap.add_argument('--succ_r', type=float, default=3.0, help='성공 반경 (SR@3m). 이 안의 같은 종류는 헷갈려도 성공이다')
     ap.add_argument('--allow_stairs_goal', action='store_true', help='주면 계단 한가운데 목적지도 허용 (기본: 금지)')
+    ap.add_argument('--stairs_buffer_m', type=float, default=None,
+                    help='계단 삼각형에서 이 거리 안의 목적지도 계단으로 본다. 기본(None) = RefineCfg.min_run_m(0.3 m) = 74 와 같은 판정. '
+                         '0 = 점 하나만 본다(이전 동작)')
     ap.add_argument('--keep_json', default='',
                     help='편집기에서 내려받은 landmarks_edited.json. 주면 그 안의 id 만 쓴다.')
     return ap.parse_args()
@@ -242,10 +245,11 @@ def main():
     sys.path[:0] = [str(Path(__file__).resolve().parents[1] / 'utils'), str(Path(__file__).resolve().parents[1])]
     import goal_rules as gr
     import nav3d_path as npth
-    from path_quality import stairs_points
+    from path_quality import near_stairs
     sc = npth.NavScene(pf)
-    def on_stairs(p):
-        return bool(stairs_points(sc, np.asarray(p, float).reshape(1, 3))[0])
+    buf = npth.RefineCfg().min_run_m if a.stairs_buffer_m is None else a.stairs_buffer_m
+    def on_stairs(p):                    # 74 와 같은 판정: 계단 위 또는 계단 buf 안 (path_quality.near_stairs 설명)
+        return near_stairs(sc, p, r=buf)
     dets = json.load(open(Path(a.landmarks) / 'detections.json'))
     if a.corrections:                    # 70 과 같게: 스크린도어 줄 -> 줄마다 물체 하나
         import merge_lines

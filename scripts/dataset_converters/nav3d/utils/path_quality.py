@@ -30,6 +30,25 @@ def stairs_points(sc, X):
     return np.where(idx >= 0, sc.stairs_tri[np.maximum(idx, 0)], False)
 
 
+def near_stairs(sc, p, r=None, n_dir=16, step=0.05):
+    """점 p 가 계단이거나, 같은 바닥을 따라 r 안에 계단 삼각형이 있으면 True.
+
+    왜: 74 는 경로를 계단/바닥 구간으로 나눌 때 r(= RefineCfg.min_run_m, 0.3 m)보다 짧은 바닥 조각을
+    옆 계단 구간에 합친다(nav3d_path._runs). 그래서 계단 끝에서 r 안쪽 목적지는 점 하나로는 바닥(73 통과)인데
+    경로 끝에서는 계단(74 GOAL_ON_STAIRS)이 된다. 점에서 사방으로 r 만큼 바닥을 따라가 보면
+    (stairs_points 와 같은 track_idx) 어느 방향에서 들어와도 74 와 판정이 같다."""
+    if r is None:
+        import nav3d_path as npth
+        r = npth.RefineCfg().min_run_m
+    p = np.asarray(p, float).reshape(3)
+    t = np.arange(0.0, r + 1e-9, step)
+    for th in np.linspace(0, 2 * np.pi, n_dir, endpoint=False):
+        X = np.stack([p[0] + t * np.cos(th), p[1] + t * np.sin(th), np.full_like(t, p[2])], -1)
+        if stairs_points(sc, X).any():
+            return True
+    return False
+
+
 def one(sc, P, md, r_b, cfg, gt=None, sc_ref=None):
     """sc = 평가용(기본 계단 라벨), sc_ref = 다듬기용(없으면 sc). --stairs_mode none 이면 sc_ref 의 계단이 비어 있다."""
     t = time.time()

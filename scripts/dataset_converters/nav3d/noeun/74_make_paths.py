@@ -46,7 +46,7 @@ sys.path.insert(0, str(HERE))
 import nav3d_path as npth  # noqa: E402
 import nav3d_utils as nu  # noqa: E402
 import nav3d_scenes as scenes  # noqa: E402
-from path_quality import load_holes, segments, judge, one, stairs_points  # noqa: E402
+from path_quality import load_holes, segments, judge, one, stairs_points, near_stairs  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import collections  # noqa: E402
 import goal_rules as gr  # noqa: E402
@@ -77,6 +77,13 @@ def parse():
     ap.add_argument('--hole_kinds', default='mesh,gs',
                     help="U4 가 피할 구멍 종류. 'mesh'=로봇이 빠지는 곳 · 'gs'=렌더에 바닥이 비치는 곳")
     ap.add_argument('--navmesh', default='scripts/dataset_converters/nav3d/logs/noeun/12_build_navmesh/noeun_station/noeun_station.navmesh')
+    ap.add_argument('--stairs_buffer_m', type=float, default=None,
+                    help='계단 삼각형에서 이 거리 안의 목적지는 뺀다. 기본(None) = RefineCfg.min_run_m(0.3 m): 이보다 짧은 '
+                         '바닥 조각은 경로에서 계단 구간에 합쳐져 GOAL_ON_STAIRS 가 되기 때문 (path_quality.near_stairs). '
+                         '0 = 점 하나만 본다(이전 동작)')
+    ap.add_argument('--eval_over', type=float, default=1.5,
+                    help='평가 랜드마크를 목적지 n_eval x 이 배수만큼 뽑는다 (실패를 메운다. 평가 경로 수는 n_eval 그대로). '
+                         '1 = 이전 동작')
     ap.add_argument('--seed', type=int, default=0)
     return ap.parse_args()
 
@@ -112,9 +119,10 @@ def main():
     # 계단 한가운데는 목적지가 될 수 없다 (계단 바로 앞·뒤 바닥은 된다). 계단 = NavScene 의 계단 삼각형 위.
     def on_stairs(p):
         return bool(stairs_points(sc, np.asarray(p, float).reshape(1, 3))[0])
+    buf = cfg.min_run_m if a.stairs_buffer_m is None else a.stairs_buffer_m
     n0 = len(goals)
-    goals = [g for g in goals if not on_stairs(g[2]['xyz'])]
-    print(f'[74] 계단 위 목적지 제외 {n0 - len(goals)} -> 목적지 {len(goals)}', flush=True)
+    goals = [g for g in goals if not near_stairs(sc, g[2]['xyz'], r=buf)]
+    print(f'[74] 계단 위·계단 {buf:g} m 안 목적지 제외 {n0 - len(goals)} -> 목적지 {len(goals)}', flush=True)
 
     need = a.n_eval + a.n_train
     if len(goals) < need:
@@ -125,7 +133,7 @@ def main():
     per = {li: sum(1 for g in goals if g[0] == li) for li in range(len(lms))}
     eval_lm, got = set(), 0
     for li in order:
-        if got >= a.n_eval:
+        if got >= a.n_eval * a.eval_over:
             break
         eval_lm.add(int(li)); got += per.get(int(li), 0)
     print(f'[74] 나누기 — 평가 랜드마크 {len(eval_lm)} (목적지 {got}) · 학습 랜드마크 {len(lms) - len(eval_lm)}', flush=True)
