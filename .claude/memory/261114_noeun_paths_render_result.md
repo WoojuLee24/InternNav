@@ -69,3 +69,10 @@
 - 07:15 후 도 구역 v2 · 역 단어 (사용자 결정): gen_hash b7b15a339bc3, 11 ep x 3 한 번에 통과 33/33, ep 6 "street". 후 는 멈출 곳 줄 없음 (ep 27 정답 second poster -> "glass railing").
 - 정정: ep 16 "second set of stairs" 는 맞음 (계단 두 번, 층계참에서 오른쪽).
 - H200 설정: b1 = `--landmark_nouns noeun-v1 --rooms noeun-v2 --stop_cue noeun-paths-v1` / 후 = `--landmark_nouns noeun-v1 --rooms noeun-v2`.
+
+## 2026-11-15 08:00 H200 에서 라벨 → 학습 (사용자 결정: b1 · post 각각 랜드마크 줄 있음/없음, 400 · 1200, 공개 S2 출발 1 epoch)
+- 62b: 후(post) 에도 `--stop_cue noeun-paths-v1` — joint.facts_memo · LP.joint_results · config.load 를 62b 안에서 바꿔 끼움 (facts+stop_cue 는 config 가 막던 조합). post+lm gen_hash 7743e94b44d6, 11 ep 한 번에 33/33.
+- 라벨 4 종: b1 1dd95593a6ff · b1lm 8ee0be42a6e4 · post b7b15a339bc3 · postlm 7743e94b44d6 (모두 rooms noeun-v2 · nouns noeun-v1).
+- 64b_build_train_landmark.py: `<mini>/vln_ce_noeun-lm{400,1200}-{label}/traj_data/r2r/landmark_s{0,1,2}` (형제별 scene). 시험(11 ep, --test_eps) loader_check PASS x4.
+- 셀 8 개 `relabel_half_noeun/s1.noeun-lm{400,1200}-{b1,b1lm,post,postlm}.py` (make_cells_landmark.py), EXP 폴더 relabel_half_noeun_lm-v01. noeun_base.stage1 그대로 — val_ratio 0, 평가 없음.
+- H200 안내: scripts/apptainer/H200_LABEL_T12.md.

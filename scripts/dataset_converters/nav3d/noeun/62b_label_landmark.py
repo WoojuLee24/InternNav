@@ -21,6 +21,7 @@ import argparse
 import importlib.util
 import json
 import math
+import threading
 import sys
 from pathlib import Path
 
@@ -56,9 +57,8 @@ def parse():
                     help='품질검사 no_landmark 가 "물건을 말했다" 고 인정하는 단어 목록. mp3d = e2e.LANDMARK_NOUNS 그대로 (집 물건 22 개, 기본) | '
                          '<이름> = landmark_nouns/<이름>.json (예 noeun-v1) | json 파일 경로. mp3d 가 아니면 출력이 <out_root>/nouns-<이름>/ 아래로 간다')
     ap.add_argument('--rooms', default='noeun-v1', help='route.rooms 키: noeun-v1 (62 와 같음, 기본) | noeun-v2 (+ 바깥 street · 층 가장자리, 61b)')
-    ap.add_argument('--stop_cue', default='none', help='route.stop_cue 키: none (기본, b1 · 후 그대로) | noeun-paths-v1 (경로의 랜드마크를 한 줄로, b1 전용)')
+    ap.add_argument('--stop_cue', default='none', help='route.stop_cue 키: none (기본, b1 · 후 그대로) | noeun-paths-v1 (경로의 랜드마크를 한 줄로; 후 는 facts 메모 끝에 한 줄)')
     a = ap.parse_args()
-    assert a.stop_cue == 'none' or set(a.methods.split(',')) == {'b1'}, '--stop_cue 는 b1 전용 (후 = facts/joint 는 stop_cue 자리가 없다)'
     a.datasets, a.splits = DS, 'train'
     a.out_root = a.out_root or str(Path(a.data_root).parent / 'instruction_labels')
     return a
@@ -157,6 +157,55 @@ def paths_stop_cue(sc: dict, src: dict) -> dict:
                                      'side': side, 'bearing_deg': round(bear, 1), 'dist_m': c['dist_m']}]}
 
 
+_CTX = threading.local()                 # 후(joint): 지금 쓰는 경로의 멈출 곳 줄
+
+
+def _facts_memo(g: dict, rc: dict) -> str:
+    """joint.facts_memo 대신: 원래 메모 + 멈출 곳 줄 한 줄 (b1 이 경로 단어 뒤에 붙이는 것과 같은 문장)."""
+    memo = _orig_facts_memo(g, rc)
+    line = getattr(_CTX, 'line', '')
+    return memo + '\n- ' + line if line else memo
+
+
+def _joint_results(client, cfg: dict, its: list) -> dict:
+    """LP.joint_results 대신: stop_cue 가 켜졌으면 경로마다 멈출 곳 줄을 정해 facts 메모에 넣고, inputs.stop_cue 에 기록."""
+    sc = cfg['route'].get('stop_cue')
+    if not sc:
+        return _orig_joint_results(client, cfg, its)
+    out = {}
+    by_t = {}
+    for it in its:
+        by_t.setdefault(it['ep']['trajectory_id'], []).append(it)
+    for sib in by_t.values():
+        cue = paths_stop_cue(sc, sib[0]['src'])
+        _CTX.line = cue['line']
+        try:
+            r = _orig_joint_results(client, cfg, sib)
+        finally:
+            _CTX.line = ''
+        for v in r.values():
+            v['inputs']['stop_cue'] = cue['cands']
+        out.update(r)
+    return out
+
+
+def _load(method: str, sets: list) -> dict:
+    """config.load 대신: route.facts(후) + route.stop_cue 는 config 가 막는다 (facts 경로에 stop_cue 자리가 없어서).
+    62b 는 위 _facts_memo 로 자리를 만들었으니, stop_cue 를 빼고 읽은 뒤 붙인다 — 이름 · gen_hash 에 stop_cue 가 들어간다."""
+    cue = [s for s in sets if s.startswith('route.stop_cue=')]
+    if not cue or not any(s.startswith('route.facts=') for s in sets):
+        return _orig_load(method, sets)
+    key = cue[0].split('=', 1)[1]
+    cfg = _orig_load(method, [s for s in sets if s not in cue])
+    cfg['route']['stop_cue'] = L62.LC._yaml(L62.LC.CONF / 'route.yaml')['stop_cue'][key]
+    assert cfg['route']['stop_cue']['kind'] == 'paths', '후 에는 kind=paths stop_cue 만 (62b 가 만든 자리)'
+    cfg['name'] += f'_stop_cue-{key}'
+    cfg['sets'] = list(sets)
+    return cfg
+
+
+import joint  # noqa: E402  (62 가 잡아 둔 label/ 경로)
+_orig_facts_memo, _orig_joint_results, _orig_load = joint.facts_memo, LP.joint_results, L62.LC.load
 _orig_stop_cue_line = L62.e2e.stop_cue_line
 
 
@@ -193,6 +242,9 @@ def main():
     L62.items = items                    # 62 의 run() 이 이 함수로 입력을 만든다
     L62.NOEUN_SETS = ['frames.rig=60cm_15deg', f'route.rooms={a.rooms}'] + ([f'route.stop_cue={a.stop_cue}'] if a.stop_cue != 'none' else [])
     L62.e2e.stop_cue_line = stop_cue_line
+    joint.facts_memo = _facts_memo          # build_joint_request · joint_results 가 이 이름으로 부른다
+    LP.joint_results = _joint_results       # 62 run() 이 LP.joint_results 로 부른다
+    L62.LC.load = _load
     if a.dry_run:
         L62.rooms.room_sequence = L62.noeun_rooms.room_sequence
         return dry_run(a)
