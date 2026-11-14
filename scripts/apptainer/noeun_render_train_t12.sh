@@ -1,6 +1,6 @@
 #!/bin/bash
 # 노은역 학습용 vln_ce 사진 — 회전 기준 12° 다시 걷기 결과 (2026-11-14). 51b_render_rbq_shard.py 로 ep 범위만 찍는다. [호스트, 6000pro]
-#   (21:10) 뒤쪽까지 합친 sel_train.json 으로 6 GPU 나눔: 6000pro GPU0 0-398 · GPU1 398-757 · A5000 GPU0 757-861 · GPU1 861-963 · GPU2 963-1081 · GPU3 1081-1200 (프레임 수 · A5000 0.3 배)
+#   (21:35) A5000 렌더는 RGB 차이 1.9/255 이상이라 안 쓴다 -> 6000pro 만: GPU0 0-398 → 757-963 · GPU1 398-757 → 963-1200 (이어서 자동)
 #   나머지 1082-1200 은 뒤쪽 걷기를 합친 sel_train.json 으로 찍는다 (WJ=... 로 바꿔서).
 #   bash scripts/apptainer/noeun_render_train_t12.sh <gpu 0|1> <ep_start> <ep_end>
 #   조립: scripts/apptainer/noeun_apptainer.sh habitat python3 scripts/dataset_converters/nav3d/noeun/51b_render_rbq_shard.py --walk_json logs/noeun/paths_landmark_ext/walk_t12/sel_train.json --out_root data/noeun_landmark_v1/vlnce_train_t12 --log_dir logs/noeun/paths_landmark_ext/render_log/vlnce_train_t12 --assemble
