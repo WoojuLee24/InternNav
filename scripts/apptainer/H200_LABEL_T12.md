@@ -10,7 +10,7 @@ H200 에서 **라벨 4 종 → 학습 데이터 8 개 → 학습 셀 8 개** 를
 - **gen_hash** = 라벨 설정 지문 (같으면 설정이 같다).
 
 ## 0. 코드
-`git fetch old && git checkout noeun-landmark-house && git pull`
+GuideDog 저장소(`GuideDog-ETRI/InternNav`) main: `git checkout main && git pull origin main` (커밋 7f5b3e7 이상; 원격 이름이 다르면 그 이름으로)
 
 ## 1. 데이터 받기 · 확인 · 풀기 (한 줄)
 `rclone copy gdrive:InternNav/data/vln_ce_noeun_landmark_t12_train.tar . && rclone copy gdrive:InternNav/data/vln_ce_noeun_landmark_t12_train.tar.sha256 . && sha256sum -c vln_ce_noeun_landmark_t12_train.tar.sha256 && tar xf vln_ce_noeun_landmark_t12_train.tar`
