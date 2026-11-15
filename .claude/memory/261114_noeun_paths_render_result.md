@@ -76,3 +76,11 @@
 - 64b_build_train_landmark.py: `<mini>/vln_ce_noeun-lm{400,1200}-{label}/traj_data/r2r/landmark_s{0,1,2}` (형제별 scene). 시험(11 ep, --test_eps) loader_check PASS x4.
 - 셀 8 개 `relabel_half_noeun/s1.noeun-lm{400,1200}-{b1,b1lm,post,postlm}.py` (make_cells_landmark.py), EXP 폴더 relabel_half_noeun_lm-v01. noeun_base.stage1 그대로 — val_ratio 0, 평가 없음.
 - H200 안내: scripts/apptainer/H200_LABEL_T12.md.
+
+## 2026-11-15 12:56 평가셋 A · B 완성 (6000pro, 커밋 안 함 — 사용자 지시)
+- 평가 A = sel_eval (안 본 랜드마크 80) · 평가 B = sel_eval_seen (본 랜드마크 · 새 출발점 80). 열린 루프 + 닫힌 루프(VLN-PE) 둘 다, 라벨 4 종 모두, 라벨은 GPU0 Gemma (사용자 결정).
+- 코드 (opt-in, 기본 train 은 그대로): 62b `--split train|eval|eval_seen` (sel_<split>.json, 출력 landmark_t12_<split>) · 64b `--split` (평가 = 경로 전부, `vln_ce_noeun-lmeval{A,B}-<label>`, + raw_data/r2r/val_seen/val_seen.json.gz 형제 `--pe_sibs` 기본 0) · 새 `scripts/apptainer/noeun_render_eval_t12.sh` · `noeun_build_eval_t12.sh` (사진→조립→수 검사→라벨→64b→로더 검사).
+- 사진 GPU1: A 9,451 장 37 분 · B 11,578 장 49 분, 수 검사 일치. 라벨 8 (4 종 × A·B) 오류 0 · 빈 문장 0 · gen_hash 학습과 같음. 로더 검사 8 개 PASS.
+- 멈출 곳 이름 문장에 있음 (형제 0): A b1 16 · b1lm 78 · post 16 · postlm 76 / 80, B 12 · 71 · 13 · 73.
+- 위치: /home/dnwn24/workspace/data/noeun_landmark_v1/{vlnce_eval_t12, vlnce_eval_seen_t12, instruction_labels/nouns-noeun-v1/*/landmark_t12_eval*, mini_eval/}. 시험 폴더 *_test · instruction_labels_evaltest · mini_evaltest 남겨 둠.
+- 닫힌 루프 파일은 Isaac 실행 확인 전. 열린 루프: noeun_openloop_pixel.py --data_root <mini_eval/vln_ce_noeun-lmevalA-b1lm> --scenes landmark_s0,landmark_s1,landmark_s2.

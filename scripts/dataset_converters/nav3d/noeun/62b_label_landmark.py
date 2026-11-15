@@ -58,8 +58,10 @@ def parse():
                          '<이름> = landmark_nouns/<이름>.json (예 noeun-v1) | json 파일 경로. mp3d 가 아니면 출력이 <out_root>/nouns-<이름>/ 아래로 간다')
     ap.add_argument('--rooms', default='noeun-v1', help='route.rooms 키: noeun-v1 (62 와 같음, 기본) | noeun-v2 (+ 바깥 street · 층 가장자리, 61b)')
     ap.add_argument('--stop_cue', default='none', help='route.stop_cue 키: none (기본, b1 · 후 그대로) | noeun-paths-v1 (경로의 랜드마크를 한 줄로; 후 는 facts 메모 끝에 한 줄)')
+    ap.add_argument('--split', default='train', choices=['train', 'eval', 'eval_seen'],
+                    help='train (기본, 학습 1,200) | eval (평가 A · 안 본 랜드마크) | eval_seen (평가 B · 본 랜드마크) — noeun_meta/sel_<split>.json 을 읽고 출력 폴더 landmark_t12_<split>')
     a = ap.parse_args()
-    a.datasets, a.splits = DS, 'train'
+    a.datasets, a.splits = DS, a.split
     a.out_root = a.out_root or str(Path(a.data_root).parent / 'instruction_labels')
     return a
 
@@ -85,12 +87,12 @@ def body_yaw(q):
 
 
 def items(a, ds: str, split: str) -> list:
-    assert ds == DS and split == 'train', f'unreachable ds/split={ds}/{split}'
+    assert ds == DS and split in ('train', 'eval', 'eval_seen'), f'unreachable ds/split={ds}/{split}'
     meta = Path(a.data_root) / 'noeun_meta'
-    W = [r for r in json.loads((meta / 'sel_train.json').read_text())['results'] if r['success']]
+    W = [r for r in json.loads((meta / f'sel_{split}.json').read_text())['results'] if r['success']]
     RM = json.loads((meta / 'render_meta.json').read_text())['episodes']
     P = {e['episode_id']: e for e in json.loads((meta / 'paths_meshfloor_straight_v5.json').read_text())['episodes']}
-    assert len(W) == len(RM) and all(r['key'] == m['key'] and len(r['frames']) == m['frames'] for r, m in zip(W, RM)), 'sel_train 과 render_meta 순서가 다르다'
+    assert len(W) == len(RM) and all(r['key'] == m['key'] and len(r['frames']) == m['frames'] for r, m in zip(W, RM)), f'sel_{split} 과 render_meta 순서가 다르다'
     root = Path(a.data_root) / 'traj_data' / 'r2r'
     eps = [int(x) for x in a.ep_list.split(',')] if a.ep_list else list(range(a.limit or len(W)))
     assert a.n_sib <= 10
